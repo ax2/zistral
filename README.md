@@ -24,7 +24,7 @@ is installed.
 Build from source with Rust 1.85+ (a current stable toolchain is recommended):
 
 ```sh
-cargo install --git https://github.com/ax2/zistral --tag v0.1.0 --locked
+cargo install --git https://github.com/ax2/zistral --tag v0.2.0 --locked
 ```
 
 The package is named `zistral`; the installed command is `zi`. It is not yet
@@ -34,6 +34,35 @@ alias), use the full executable path or rename the downloaded executable.
 ## Configure a model
 
 Choose a model available from your provider. No model name is hard-coded.
+
+Run the interactive setup once:
+
+```sh
+zi config
+```
+
+Enter the service URL (normally ending in `/v1`), model name, API protocol,
+and API key. The protocol defaults to `responses` for api.openai.com and `chat`
+for compatible/local services. API key input is hidden. The settings are saved
+locally and used automatically by subsequent commands:
+
+```sh
+cat article.txt | zi 'Summarize in three sentences'
+```
+
+Run `zi config` again to edit settings; Enter keeps each saved value. Enter `-`
+at the API key prompt to remove a saved key, for example when switching to a
+local service. Ctrl+C cancels without replacing the configuration. You can
+choose another file with `zi config --config PATH`. The wizard requires a
+terminal and does not consume piped data. To use the single word `config` as a
+model instruction instead of the setup command, use `zi -- config`.
+
+The key is stored in the local TOML config, not in an encrypted keychain.
+Linux/macOS config files are written with mode `0600`; Windows files use the
+configuration directory's inherited permissions. Keep the file private. Setup
+does not send a test request or validate provider credentials.
+
+Environment variables remain available for temporary overrides:
 
 ```sh
 export ZI_MODEL='your-model-id'
@@ -74,6 +103,7 @@ You can also save `zi --config-example` as:
 Flags override `ZI_*` environment variables, which override the configuration
 file. `--config PATH` / `ZI_CONFIG` selects another file. Keys are read from
 `ZI_API_KEY`, otherwise `OPENAI_API_KEY` (or `api_key_env` in the config).
+If neither environment variable is set, the saved `api_key` is used.
 Do not put keys in source control. Remote endpoints require HTTPS; plain HTTP
 is allowed on localhost/127.0.0.1/::1 only.
 
@@ -133,13 +163,14 @@ zi --help
 ## Scope and privacy
 
 The agent can reason over piped input and call two deterministic, read-only
-tools: `count_input` and `select_input`. It cannot execute shell commands,
+tools: `count_input` and `select_input`. Agent tasks cannot execute shell commands,
 modify files, inspect the filesystem beyond the selected input/config, or
 browse the web. Nothing is persisted as conversation history. Network mode
 sends the instruction and input to your configured provider, whose retention
 policy still applies. Responses requests set `store: false`. API error bodies
 are not echoed because they may contain private input. HTTP redirects are
 rejected rather than forwarding credentials to another endpoint.
+The separate `zi config` setup command writes only its selected configuration file.
 
 ## Development and releases
 
@@ -151,7 +182,8 @@ cargo build --release --locked
 ```
 
 Integration tests use local mock HTTP servers and require no paid API access.
-They verify actual subprocess pipes, tool round trips for both protocols,
+They verify actual subprocess pipes, a real terminal configuration session with
+hidden key entry, saved configuration and environment precedence, tool round trips for both protocols,
 Unicode input, invalid input, JSON validation, errors, and step limits. They
 do not prove any particular provider/model's quality or compatibility.
 

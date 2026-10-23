@@ -3,7 +3,7 @@ mod config;
 mod data;
 
 use anyhow::{Context, Result, bail};
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use std::io::{self, IsTerminal, Read, Write};
 use std::path::PathBuf;
 
@@ -11,10 +11,14 @@ use std::path::PathBuf;
 #[derive(Parser, Debug)]
 #[command(
     name = "zi",
+    bin_name = "zi",
     version,
-    after_help = "Examples:\n  cat data.json | zi 'Join the first item of .abc'\n  cat article.txt | zi 对内容进行字数统计\n  cat article.txt | zi --count\n  cat data.json | zi --select /abc/0 --join ','\n\nConfigure ZI_MODEL and ZI_API_KEY, or use a local endpoint with ZI_BASE_URL.\nUse --config-example to print a configuration template."
+    subcommand_precedence_over_arg = true,
+    after_help = "Examples:\n  zi config\n  cat data.json | zi 'Join the first item of .abc'\n  cat article.txt | zi 对内容进行字数统计\n  cat article.txt | zi --count\n  cat data.json | zi --select /abc/0 --join ','\n\nRun zi config once to save your model service and API key.\nUse --config-example to print a configuration template."
 )]
 pub struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
     /// What to do (multiple unquoted words are joined with spaces)
     #[arg(trailing_var_arg = true)]
     prompt: Vec<String>,
@@ -31,7 +35,7 @@ pub struct Cli {
     #[arg(long, env = "ZI_API", value_parser = ["chat", "responses"])]
     api: Option<String>,
     /// Configuration file (default: platform config directory/zistral/config.toml)
-    #[arg(long, env = "ZI_CONFIG")]
+    #[arg(long, env = "ZI_CONFIG", global = true)]
     config: Option<PathBuf>,
     /// Print a configuration template without reading input or contacting a model
     #[arg(long)]
@@ -65,6 +69,12 @@ pub struct Cli {
     join: Option<String>,
 }
 
+#[derive(Subcommand, Debug)]
+enum Commands {
+    /// Interactively save the service URL, model, protocol, and hidden API key
+    Config,
+}
+
 fn read_input(cli: &Cli) -> Result<String> {
     let mut reader: Box<dyn Read> = match &cli.input {
         Some(path) if path.as_os_str() != "-" => Box::new(
@@ -91,6 +101,20 @@ fn read_input(cli: &Cli) -> Result<String> {
 }
 
 fn run(cli: Cli) -> Result<()> {
+    if cli.command.is_some() {
+        if cli.input.is_some()
+            || cli.count
+            || cli.select.is_some()
+            || cli.config_example
+            || cli.json
+            || cli.no_tools
+            || cli.verbose
+            || !cli.prompt.is_empty()
+        {
+            bail!("zi config only accepts --config PATH; see zi config --help");
+        }
+        return config::configure(&cli);
+    }
     if cli.config_example {
         return write_output(config::EXAMPLE);
     }

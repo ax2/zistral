@@ -16,7 +16,28 @@ git diff | zi "生成一句简洁的提交说明"
 首版提供 Windows x64、Linux x64（glibc 2.35+）、macOS Apple Silicon；其他架构可从源码编译。
 程序未做代码签名。项目名是 `zistral`，命令是 `zi`，尚未发布到 crates.io。
 
-配置你自己的模型服务（模型名称由提供方决定）：
+首次运行配置向导，依次设置模型服务地址、模型名称、接口协议和 API Key：
+
+```sh
+zi config
+```
+
+配置会自动保存，此后无需设置环境变量即可调用：
+
+```sh
+cat 1.txt | zi '统计汉字数量'
+```
+
+再次运行 `zi config` 可修改配置，回车保留原值。Key 输入时隐藏，不会显示已有 Key；
+输入 `-` 可清除已保存的 Key，便于切换到无需认证的本地服务。Ctrl+C 中途取消不会覆盖原文件。
+也支持 `zi config --config PATH`。向导需要交互终端，不接收管道输入。
+OpenAI 服务默认选择 `responses`，其他兼容服务默认 `chat`，可按提供方要求修改。
+若指令恰好只有 `config` 一个词，可用 `zi -- config` 将它作为普通指令。
+
+Key 保存在本地 TOML 文件中，没有使用加密钥匙串；Linux/macOS 文件权限为 `0600`，
+Windows 使用配置目录继承的访问权限。向导只保存配置，不发送模型测试请求。
+
+仍可使用环境变量临时覆盖已保存的配置（模型名称由提供方决定）：
 
 ```sh
 export ZI_MODEL='你的模型名称'
@@ -45,6 +66,7 @@ zi -i .\1.txt '统计汉字数量'
 `%APPDATA%\zistral\config.toml`，或 Linux/macOS 的 `~/.config/zistral/config.toml`。
 支持 `XDG_CONFIG_HOME` 和 `--config`。参数优先于环境变量，环境变量优先于配置文件。
 密钥读取 `ZI_API_KEY`，其次 `OPENAI_API_KEY`，也可在配置中指定 `api_key_env`。
+没有设置密钥环境变量时，自动读取向导保存的 API Key。
 
 ## 不用模型也能精确处理
 
@@ -76,7 +98,7 @@ cat 1.json | zi --select /abc/0 --join ','
 源码构建：
 
 ```sh
-cargo install --git https://github.com/ax2/zistral --tag v0.1.0 --locked
+cargo install --git https://github.com/ax2/zistral --tag v0.2.0 --locked
 ```
 
 更多配置、精确定义、开发与验证范围见 [English README](README.md)。MIT 开源协议。

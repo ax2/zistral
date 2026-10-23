@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.0 — 2026-10-23
+
+- Add `zi config`, an interactive setup wizard for service URL, model, API
+  protocol, and hidden API key entry. Saved settings work without environment variables.
+- Re-run setup to keep or change existing values, or clear a saved key with `-`.
+- Validate inputs, save atomically, preserve the existing file on cancellation,
+  and write private config permissions on Unix.
+- Keep environment variables as overrides and avoid leaking keys in config errors.
+- Add real-terminal configuration tests on Windows, Linux, and macOS.
+
 ## 0.1.0 — 2026-10-23
 
 First release of `zi`, the Zistral command-line agent.

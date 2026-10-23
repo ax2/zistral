@@ -46,6 +46,14 @@ fn invoke(args: &[&str], input: &[u8]) -> Output {
 }
 
 fn mock(responses: Vec<(u16, Value)>) -> (String, thread::JoinHandle<Vec<Value>>) {
+    mock_auth(responses, None)
+}
+
+fn mock_auth(
+    responses: Vec<(u16, Value)>,
+    expected_key: Option<&str>,
+) -> (String, thread::JoinHandle<Vec<Value>>) {
+    let expected_key = expected_key.map(str::to_owned);
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     listener.set_nonblocking(true).unwrap();
     let url = format!("http://{}/v1", listener.local_addr().unwrap());
@@ -69,6 +77,7 @@ fn mock(responses: Vec<(u16, Value)>) -> (String, thread::JoinHandle<Vec<Value>>
                 .unwrap();
             let mut reader = BufReader::new(stream.try_clone().unwrap());
             let mut length = 0;
+            let mut auth = String::new();
             loop {
                 let mut line = String::new();
                 assert!(reader.read_line(&mut line).unwrap() > 0);
@@ -78,6 +87,12 @@ fn mock(responses: Vec<(u16, Value)>) -> (String, thread::JoinHandle<Vec<Value>>
                 if let Some(value) = line.to_lowercase().strip_prefix("content-length:") {
                     length = value.trim().parse::<usize>().unwrap();
                 }
+                if line.to_lowercase().starts_with("authorization:") {
+                    auth = line.split_once(':').unwrap().1.trim().to_owned();
+                }
+            }
+            if let Some(key) = &expected_key {
+                assert_eq!(auth, format!("Bearer {key}"));
             }
             let mut data = vec![0; length];
             reader.read_exact(&mut data).unwrap();
@@ -88,6 +103,70 @@ fn mock(responses: Vec<(u16, Value)>) -> (String, thread::JoinHandle<Vec<Value>>
         requests
     });
     (url, handle)
+}
+
+#[test]
+fn saved_configuration_works_without_environment_variables() {
+    let (url, server) = mock_auth(vec![(200, answer("configured"))], Some("saved-test-key"));
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("zistral/config.toml");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(
+        &path,
+        format!(
+            "base_url = '{url}'\nmodel = 'saved-model'\napi = 'chat'\napi_key = 'saved-test-key'\n"
+        ),
+    )
+    .unwrap();
+    let out = command()
+        .env("APPDATA", dir.path())
+        .env("XDG_CONFIG_HOME", dir.path())
+        .arg("hello")
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(out.stdout, b"configured\n");
+    assert!(!String::from_utf8_lossy(&out.stderr).contains("saved-test-key"));
+    assert_eq!(server.join().unwrap()[0]["model"], "saved-model");
+}
+
+#[test]
+fn environment_key_overrides_saved_key() {
+    let (url, server) = mock_auth(
+        vec![(200, answer("configured"))],
+        Some("environment-test-key"),
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(
+        &path,
+        format!("base_url = '{url}'\nmodel = 'saved-model'\napi_key = 'saved-test-key'\n"),
+    )
+    .unwrap();
+    let out = command()
+        .env("ZI_API_KEY", "environment-test-key")
+        .args(["--config", path.to_str().unwrap(), "hello"])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    server.join().unwrap();
+}
+
+#[test]
+fn config_command_is_explicit_and_does_not_consume_pipeline_data() {
+    let out = invoke(&["config"], b"not-a-secret\n");
+    assert!(!out.status.success());
+    assert!(out.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("interactive terminal"));
+    let out = invoke(&["config", "--help"], b"");
+    assert!(out.status.success());
+    assert!(String::from_utf8_lossy(&out.stdout).contains("zi config"));
 }
 
 fn answer(text: &str) -> Value {
