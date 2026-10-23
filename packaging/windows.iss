@@ -27,7 +27,7 @@ CloseApplications=yes
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
-Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
+Name: "chinesesimplified"; MessagesFile: "ChineseSimplified.isl"
 
 [Files]
 Source: "{#BinaryPath}"; DestDir: "{app}"; Flags: ignoreversion
@@ -36,8 +36,10 @@ Source: "{#RepoRoot}\README.zh-CN.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#RepoRoot}\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#RepoRoot}\packaging\launch.cmd"; DestDir: "{app}"; Flags: ignoreversion
 
+Source: "{#RepoRoot}\packaging\INNO-LICENSE.txt"; DestDir: "{app}"; Flags: ignoreversion
+
 [Icons]
-Name: "{group}\zi"; Filename: "{app}\launch.cmd"; WorkingDir: "{userprofile}"; Comment: "Start zi and connect your model"
+Name: "{group}\zi"; Filename: "{app}\launch.cmd"; WorkingDir: "{%USERPROFILE}"; Comment: "Start zi and connect your model"
 Name: "{group}\Uninstall Zistral"; Filename: "{uninstallexe}"
 
 [Run]

@@ -177,7 +177,7 @@ fn first_launch_imports_then_runs_rich_terminal_tasks() {
     )
     .unwrap();
     let output = terminal(
-        &[],
+        &["--base-url", &url],
         home.path(),
         false,
         &[

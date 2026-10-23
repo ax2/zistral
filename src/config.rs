@@ -182,12 +182,7 @@ fn import_config(
 
 pub fn needs_setup(cli: &Cli) -> bool {
     let path = cli.config.clone().or_else(config_path);
-    !path.is_some_and(|p| p.exists())
-        && cli.model.is_none()
-        && cli.base_url.is_none()
-        && !["ZI_API_KEY", "OPENAI_API_KEY"]
-            .iter()
-            .any(|key| std::env::var(key).is_ok_and(|v| !v.trim().is_empty()))
+    !path.is_some_and(|p| p.exists()) && cli.model.is_none()
 }
 
 pub fn configure(cli: &Cli, manual: bool) -> Result<()> {
