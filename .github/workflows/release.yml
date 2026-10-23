@@ -1,0 +1,101 @@
+name: Release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Version tag to publish (must match Cargo.toml)
+        required: true
+        default: v0.1.0
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: macos-latest
+            target: aarch64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    env:
+      RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      TARGET: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate version
+        shell: python
+        run: |
+          import os, re, tomllib
+          version = tomllib.load(open('Cargo.toml', 'rb'))['package']['version']
+          assert re.fullmatch(r'v\d+\.\d+\.\d+', os.environ['RELEASE_TAG'])
+          assert os.environ['RELEASE_TAG'] == 'v' + version
+      - name: Rust stable
+        run: rustup update stable --no-self-update && rustup default stable
+      - run: rustup target add ${{ matrix.target }}
+      - run: rustup component add rustfmt clippy
+      - run: cargo fmt --check
+      - run: cargo test --locked --target ${{ matrix.target }}
+      - run: cargo clippy --locked --all-targets --target ${{ matrix.target }} -- -D warnings
+      - run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Package and smoke test
+        shell: python
+        run: |
+          import hashlib, json, os, pathlib, shutil, subprocess, tarfile, zipfile
+          target = os.environ['TARGET']
+          tag = os.environ['RELEASE_TAG']
+          name = 'zistral-' + tag + '-' + target
+          binary_name = 'zi.exe' if os.name == 'nt' else 'zi'
+          binary = pathlib.Path('target') / target / 'release' / binary_name
+          assert subprocess.check_output([str(binary), '--version'], text=True).strip() == 'zi ' + tag[1:]
+          count = json.loads(subprocess.check_output([str(binary), '--count'], input='你好'.encode()))
+          assert count['characters'] == 2 and count['cjk_characters'] == 2
+          package = pathlib.Path('dist') / name
+          package.mkdir(parents=True)
+          for source in [binary, pathlib.Path('README.md'), pathlib.Path('README.zh-CN.md'), pathlib.Path('LICENSE')]:
+              shutil.copy2(source, package / source.name)
+          if os.name == 'nt':
+              archive = pathlib.Path('dist') / (name + '.zip')
+              with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as z:
+                  for p in sorted(package.iterdir()): z.write(p, name + '/' + p.name)
+          else:
+              archive = pathlib.Path('dist') / (name + '.tar.gz')
+              with tarfile.open(archive, 'w:gz') as t: t.add(package, arcname=name)
+          print(archive, hashlib.sha256(archive.read_bytes()).hexdigest())
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: |
+            dist/*.zip
+            dist/*.tar.gz
+          if-no-files-found: error
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: artifacts
+          merge-multiple: true
+      - name: Checksums
+        working-directory: artifacts
+        run: sha256sum *.zip *.tar.gz > SHA256SUMS.txt
+      - name: Publish complete release
+        run: |
+          gh release create "$RELEASE_TAG" artifacts/* --target "$GITHUB_SHA" --title "Zistral $RELEASE_TAG" --notes-file CHANGELOG.md --latest
