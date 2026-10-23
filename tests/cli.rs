@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 fn command() -> Command {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_zi"));
     for name in [
+        "ZI_PROFILE",
         "ZI_MODEL",
         "ZI_API_KEY",
         "OPENAI_API_KEY",
@@ -492,4 +493,70 @@ fn incomplete_output_is_not_success() {
     assert!(!out.status.success());
     assert!(out.stdout.is_empty());
     server.join().unwrap();
+}
+
+#[test]
+fn named_profile_selects_its_own_model_key_and_endpoint() {
+    let (url, server) = mock_auth(vec![(200, answer("ok"))], Some("profile-secret"));
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(&path, format!("model='legacy'\napi_key='legacy-secret'\n[profiles.work]\nmodel='profile-model'\nbase_url='{url}'\napi_key='profile-secret'\n")).unwrap();
+    let output = command()
+        .args([
+            "--config",
+            path.to_str().unwrap(),
+            "--profile",
+            "work",
+            "hello",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(server.join().unwrap()[0]["model"], "profile-model");
+    assert_eq!(output.stdout, b"ok\n");
+}
+
+#[test]
+fn doctor_probe_succeeds_for_all_protocols_without_printing_answer() {
+    for (api, response) in [
+        ("chat", answer("hidden-probe-answer")),
+        (
+            "responses",
+            json!({"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"hidden-probe-answer"}]}]}),
+        ),
+        (
+            "anthropic",
+            json!({"stop_reason":"end_turn","content":[{"type":"text","text":"hidden-probe-answer"}]}),
+        ),
+    ] {
+        let (url, server) = mock(vec![(200, response)]);
+        let output = command()
+            .args([
+                "--model",
+                "fixture",
+                "--base-url",
+                &url,
+                "--api",
+                api,
+                "doctor",
+                "--probe",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let text = String::from_utf8(output.stdout).unwrap();
+        assert!(text.contains("Model probe: OK"));
+        assert!(!text.contains("hidden-probe-answer"));
+        let requests = server.join().unwrap();
+        assert_eq!(requests[0]["stream"], false);
+        assert!(requests[0].get("tools").is_none());
+    }
 }

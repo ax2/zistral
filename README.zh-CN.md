@@ -16,7 +16,7 @@ git diff | zi "生成一句简洁的提交说明"
 | 平台 | 安装包 | 安装方法 |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | 双击安装，无需管理员权限，自动添加用户 PATH 和开始菜单入口 |
-| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.4.0-linux-amd64.deb` |
+| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.5.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | 双击安装，命令放到 `/usr/local/bin/zi` |
 
 安装后直接运行 `zi`。Windows 安装结束可立即启动，或在开始菜单打开 zi；
@@ -66,7 +66,7 @@ cat 1.txt | zi '统计汉字数量'
 输入 `-` 可清除已保存的 Key，便于切换到无需认证的本地服务。Ctrl+C 中途取消不会覆盖原文件。
 也支持 `zi config --config PATH`。向导需要交互终端，不接收管道输入。
 OpenAI 服务默认选择 `responses`，其他兼容服务默认 `chat`，可按提供方要求修改。
-若指令恰好只有 `config` 一个词，可用 `zi -- config` 将它作为普通指令。
+`config`、`models`、`use`、`doctor` 是保留命令；例如 `zi -- doctor` 可将该词作为普通指令。
 
 Key 保存在本地 TOML 文件中，没有使用加密钥匙串；Linux/macOS 文件权限为 `0600`，
 Windows 使用配置目录继承的访问权限。向导只保存配置，不发送模型测试请求。
@@ -110,10 +110,52 @@ zi -i .\1.txt '统计汉字数量'
 
 管道或重定向输出自动保持纯文本，`--json` 保持严格 JSON。`--plain` 关闭装饰和进度，
 `NO_COLOR=1` 关闭颜色。进度信息进入标准错误；不会把服务返回的终端控制指令作为终端命令执行。
-当前等待完整模型响应后显示结果，没有逐 token 流式输出。
+普通终端默认流式显示；`--no-stream` 可保留完整回答模式。
 
 模型功能仍需要你可用的服务配置和 API Key；安装包不内置付费密钥。
 已有智能体配置可直接导入，离线 `--count` / `--select` 不需要任何模型配置。
+
+## 多模型保存与切换
+
+每个配置保存独立的服务地址、模型、协议和 Key；导入新模型不会覆盖其他命名配置。
+
+```sh
+zi config --name work      # 导入或手动填写，保存为 work，并设为当前配置
+zi config --name local     # 再保存另一个模型
+zi models                  # 列出已保存模型，* 标记当前配置，不显示 Key
+zi use work                # 切换默认配置
+zi -p local "解释这段代码"   # 仅本次使用 local，不修改默认配置
+zi doctor                  # 本地检查，不发送模型请求
+zi doctor --probe          # 发送一个小请求，验证模型连接和认证
+```
+
+旧版单模型配置继续作为 `default` 使用，可用 `zi use default` 切回。
+再次运行 `zi config --name work` 修改该配置；`zi config` 修改当前选中的配置。
+配置名支持 1–64 个英文字母、数字、下划线和短横线，最多 128 个命名配置。
+优先级：`--profile` > `ZI_PROFILE` > 保存的当前配置；模型、地址、协议和密钥的已有参数/环境变量覆盖规则仍有效。
+在交互界面可用 `/models`、`/use NAME` 和 `/doctor`。
+
+`zi doctor` 显示配置路径、所选配置、模型、协议、服务主机、Key 是否存在及覆盖变量名称。
+`--probe` 才会发送少量内容并可能产生服务商费用；失败时返回非零状态，区分认证、模型/地址、限流和网络错误。
+诊断不会打印 Key、服务端错误正文或探测回答。可用 `zi -p work doctor --probe` 检查指定配置。
+
+## 流式输出
+
+普通终端默认边生成边显示，支持 Chat Completions、Responses 和 Anthropic Messages，以及流式工具调用。
+服务返回普通 JSON 时自动使用完整回答；不支持流式请求的服务可加 `--no-stream`。
+
+```sh
+zi "写一个简短的故事"                  # 终端默认流式
+zi --no-stream "总结今天的计划"       # 等待完整结果
+cat article.txt | zi "总结" > out.txt # 重定向默认完整输出
+cat article.txt | zi --json "提取为 JSON" # 保持完整 JSON 校验
+cat article.txt | zi --stream "总结"  # 显式开启流式，包括重定向场景
+```
+
+流式响应仍有大小和超时限制；中断、截断和服务错误返回失败，不把部分回答当作成功。
+终端或显式 `--stream` 已显示的内容无法收回；默认管道/重定向和 `--json` 保持完整结果输出。
+`--stream` 不能与 `--json` 一起使用。`--plain` 关闭自动流式和界面装饰，仍可显式搭配 `--stream`。
+流式文本逐段显示，完整回答模式保留标题、列表和代码块高亮。
 
 ## 不用模型也能精确处理
 
@@ -145,7 +187,7 @@ cat 1.json | zi --select /abc/0 --join ','
 源码构建：
 
 ```sh
-cargo install --git https://github.com/ax2/zistral --tag v0.4.0 --locked
+cargo install --git https://github.com/ax2/zistral --tag v0.5.0 --locked
 ```
 
 更多配置、精确定义、开发与验证范围见 [English README](README.md)。MIT 开源协议。

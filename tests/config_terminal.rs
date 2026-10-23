@@ -13,6 +13,15 @@ fn configure_from(
     answers: &[(&str, &str)],
     home: Option<&std::path::Path>,
 ) -> String {
+    configure_named(path, answers, home, None)
+}
+
+fn configure_named(
+    path: &std::path::Path,
+    answers: &[(&str, &str)],
+    home: Option<&std::path::Path>,
+    name: Option<&str>,
+) -> String {
     let pair = native_pty_system()
         .openpty(PtySize {
             rows: 30,
@@ -25,6 +34,9 @@ fn configure_from(
         std::env::var_os("ZISTRAL_TEST_BINARY").unwrap_or_else(|| env!("CARGO_BIN_EXE_zi").into());
     let mut cmd = CommandBuilder::new(binary);
     cmd.args(["config", "--config", path.to_str().unwrap()]);
+    if let Some(name) = name {
+        cmd.args(["--name", name]);
+    }
     if let Some(home) = home {
         cmd.env("HOME", home);
         cmd.env("USERPROFILE", home);
@@ -33,6 +45,7 @@ fn configure_from(
         cmd.arg("--manual");
     }
     for name in [
+        "ZI_PROFILE",
         "ZI_MODEL",
         "ZI_API",
         "ZI_BASE_URL",
@@ -225,4 +238,53 @@ fn terminal_setup_hides_key_and_can_keep_existing_values() {
     assert!(!transcript.contains("terminal-test-secret"));
     let updated: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
     assert_eq!(saved, updated);
+}
+
+#[test]
+fn named_imports_preserve_other_models_and_legacy_config() {
+    let home = tempfile::tempdir().unwrap();
+    let path = home.path().join("config.toml");
+    std::fs::write(&path, "model='legacy'\napi_key='legacy-secret'\n").unwrap();
+    source(
+        home.path(),
+        ".workbuddy/models.json",
+        r#"[{"id":"one","url":"http://localhost:1/v1","apiKey":"first-secret"}]"#,
+    );
+    let first = configure_named(
+        &path,
+        &[("Configuration source", "1")],
+        Some(home.path()),
+        Some("work"),
+    );
+    source(
+        home.path(),
+        ".workbuddy/models.json",
+        r#"[{"id":"two","url":"http://localhost:2/v1","apiKey":"second-secret"}]"#,
+    );
+    let second = configure_named(
+        &path,
+        &[("Configuration source", "1")],
+        Some(home.path()),
+        Some("local"),
+    );
+    let edited = configure_named(
+        &path,
+        &[
+            ("Service URL", ""),
+            ("Model name", ""),
+            ("API protocol", ""),
+            ("API Key", ""),
+        ],
+        None,
+        Some("work"),
+    );
+    let saved: toml::Value = toml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    assert_eq!(saved["model"].as_str(), Some("legacy"));
+    assert_eq!(saved["api_key"].as_str(), Some("legacy-secret"));
+    assert_eq!(saved["profiles"]["work"]["model"].as_str(), Some("one"));
+    assert_eq!(saved["profiles"]["local"]["model"].as_str(), Some("two"));
+    assert_eq!(saved["active_profile"].as_str(), Some("work"));
+    for secret in ["legacy-secret", "first-secret", "second-secret"] {
+        assert!(!format!("{first}{second}{edited}").contains(secret));
+    }
 }

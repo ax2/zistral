@@ -1,6 +1,7 @@
 use crate::Cli;
 use anyhow::{Context, Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
@@ -18,7 +19,7 @@ api_key_env = "OPENAI_API_KEY"
 # model = "your-local-model"
 "#;
 
-#[derive(Default, Deserialize, Serialize)]
+#[derive(Clone, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct FileConfig {
     model: Option<String>,
@@ -27,6 +28,141 @@ struct FileConfig {
     api_key_env: Option<String>,
     api_key: Option<String>,
     endpoint: Option<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    profiles: BTreeMap<String, Profile>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    active_profile: Option<String>,
+}
+
+#[derive(Clone, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct Profile {
+    model: Option<String>,
+    base_url: Option<String>,
+    api: Option<String>,
+    api_key_env: Option<String>,
+    api_key: Option<String>,
+    endpoint: Option<String>,
+}
+
+impl From<&FileConfig> for Profile {
+    fn from(f: &FileConfig) -> Self {
+        Self {
+            model: f.model.clone(),
+            base_url: f.base_url.clone(),
+            api: f.api.clone(),
+            api_key_env: f.api_key_env.clone(),
+            api_key: f.api_key.clone(),
+            endpoint: f.endpoint.clone(),
+        }
+    }
+}
+
+impl From<Profile> for FileConfig {
+    fn from(p: Profile) -> Self {
+        Self {
+            model: p.model,
+            base_url: p.base_url,
+            api: p.api,
+            api_key_env: p.api_key_env,
+            api_key: p.api_key,
+            endpoint: p.endpoint,
+            ..Self::default()
+        }
+    }
+}
+
+pub fn path(cli: &Cli) -> Result<PathBuf> {
+    cli.config
+        .clone()
+        .or_else(config_path)
+        .context("cannot locate config directory; use --config PATH")
+}
+
+pub fn validate_name(name: &str) -> Result<()> {
+    if name.is_empty()
+        || name.len() > 64
+        || !name
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'-' | b'_'))
+    {
+        bail!("profile name must be 1-64 ASCII letters, digits, '-' or '_'");
+    }
+    Ok(())
+}
+
+fn selected(document: &FileConfig, name: &str) -> Result<FileConfig> {
+    validate_name(name)?;
+    if name == "default" {
+        return Ok(Profile::from(document).into());
+    }
+    Ok(document
+        .profiles
+        .get(name)
+        .with_context(|| format!("unknown profile {name}; run zi models"))?
+        .clone()
+        .into())
+}
+
+pub fn active_name(cli: &Cli) -> Result<String> {
+    let document = read_config(&path(cli)?, cli.config.is_none())?;
+    Ok(cli
+        .profile
+        .clone()
+        .or(document.active_profile)
+        .unwrap_or_else(|| "default".into()))
+}
+
+pub fn models(cli: &Cli) -> Result<()> {
+    let document = read_config(&path(cli)?, cli.config.is_none())?;
+    let active = cli
+        .profile
+        .as_deref()
+        .or(document.active_profile.as_deref())
+        .unwrap_or("default");
+    let mut profiles = document.profiles.clone();
+    if document.model.is_some() {
+        profiles.insert("default".into(), Profile::from(&document));
+    }
+    if profiles.is_empty() {
+        bail!("no saved models; run zi config --name NAME");
+    }
+    let mut output = io::stdout().lock();
+    for (name, p) in profiles {
+        writeln!(
+            output,
+            "{} {}  {} [{}; Key {}]",
+            if name == active { "*" } else { " " },
+            crate::ui::clean(&name),
+            crate::ui::clean(p.model.as_deref().unwrap_or("(unset)")),
+            crate::ui::clean(p.api.as_deref().unwrap_or("chat")),
+            if nonempty(p.api_key).is_some() || p.api_key_env.is_some() {
+                "saved/reference"
+            } else {
+                "not saved"
+            }
+        )?;
+    }
+    Ok(())
+}
+
+pub fn use_profile(cli: &Cli, name: &str) -> Result<()> {
+    let path = path(cli)?;
+    let mut document = read_config(&path, false)?;
+    let file = selected(&document, name)?;
+    if nonempty(file.model).is_none() {
+        bail!("profile has no model; run zi config --name {name}");
+    }
+    document.active_profile = if name == "default" {
+        None
+    } else {
+        Some(name.into())
+    };
+    save_config(&path, &document)?;
+    eprintln!(
+        "Active profile: {name}. ZI_PROFILE / --profile and other overrides still take precedence."
+    );
+    Ok(())
 }
 
 pub struct Settings {
@@ -177,6 +313,7 @@ fn import_config(
         api_key: key,
         api_key_env: None,
         endpoint: candidate.endpoint,
+        ..FileConfig::default()
     }))
 }
 
@@ -186,6 +323,10 @@ pub fn needs_setup(cli: &Cli) -> bool {
 }
 
 pub fn configure(cli: &Cli, manual: bool) -> Result<()> {
+    configure_named(cli, manual, None)
+}
+
+pub fn configure_named(cli: &Cli, manual: bool, name: Option<&str>) -> Result<()> {
     if !io::stdin().is_terminal() {
         bail!("zi config requires an interactive terminal; run it without piped input");
     }
@@ -194,7 +335,18 @@ pub fn configure(cli: &Cli, manual: bool) -> Result<()> {
         .clone()
         .or_else(config_path)
         .context("cannot locate config directory; use zi config --config PATH")?;
-    let file = read_config(&path, true)?;
+    let mut document = read_config(&path, true)?;
+    let name = name
+        .or(cli.profile.as_deref())
+        .or(document.active_profile.as_deref())
+        .unwrap_or("default")
+        .to_owned();
+    validate_name(&name)?;
+    let file = if name == "default" || document.profiles.contains_key(&name) {
+        selected(&document, &name)?
+    } else {
+        FileConfig::default()
+    };
     if crate::ui::enabled(cli) {
         crate::ui::heading("Model setup · detect → choose → ready");
     }
@@ -226,13 +378,28 @@ pub fn configure(cli: &Cli, manual: bool) -> Result<()> {
         Some(file) => file,
         None => collect_config(cli, file, &mut ask, &mut output)?,
     };
-    save_config(&path, &updated)?;
+    if name == "default" {
+        let profiles = std::mem::take(&mut document.profiles);
+        document = updated.clone();
+        document.profiles = profiles;
+        document.active_profile = None;
+    } else {
+        if document.profiles.len() >= 128 && !document.profiles.contains_key(&name) {
+            bail!("at most 128 profiles are supported");
+        }
+        document
+            .profiles
+            .insert(name.clone(), Profile::from(&updated));
+        document.active_profile = Some(name.clone());
+    }
+    save_config(&path, &document)?;
     writeln!(
         output,
         "Saved {}. You can now run zi with an instruction.",
         path.display()
     )?;
     let overrides: Vec<_> = [
+        "ZI_PROFILE",
         "ZI_MODEL",
         "ZI_BASE_URL",
         "ZI_API",
@@ -384,6 +551,12 @@ impl Settings {
             Some(p) => read_config(&p, cli.config.is_none())?,
             None => FileConfig::default(),
         };
+        let name = cli
+            .profile
+            .as_deref()
+            .or(file.active_profile.as_deref())
+            .unwrap_or("default");
+        let file = selected(&file, name)?;
         let model = nonempty(cli.model.clone().or(file.model))
             .context("run zi config first, or set ZI_MODEL / --model")?;
         let base_url = cli
@@ -404,7 +577,9 @@ impl Settings {
         let api_key = nonempty(std::env::var("ZI_API_KEY").ok())
             .or_else(|| nonempty(std::env::var(&key_env).ok()))
             .or_else(|| nonempty(file.api_key));
-        if url.host_str() == Some("api.openai.com") && api_key.is_none() {
+        if matches!(url.host_str(), Some("api.openai.com" | "api.anthropic.com"))
+            && api_key.is_none()
+        {
             bail!("set ZI_API_KEY or {key_env}; local servers may run without a key");
         }
         let endpoint = if cli.base_url.is_none() && cli.api.is_none() {
@@ -509,6 +684,7 @@ mod tests {
             api_key: Some("test-secret".into()),
             api_key_env: Some("CUSTOM_API_KEY".into()),
             endpoint: None,
+            ..FileConfig::default()
         };
         let (updated, _, prompts) = collect(file, &["", "", "", ""]);
         assert_eq!(updated.model.as_deref(), Some("existing"));

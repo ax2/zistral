@@ -19,7 +19,7 @@ Download a native installer from [Releases](https://github.com/ax2/zistral/relea
 | Platform | Package | Installation |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | Per-user installer; adds PATH and a Start menu launcher; no administrator required |
-| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.4.0-linux-amd64.deb` |
+| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.5.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | Open the package; installs `/usr/local/bin/zi` |
 
 Then type `zi`. On first launch, choose an existing Codex, WorkBuddy or dsh configuration,
@@ -37,7 +37,7 @@ Bare `zi` opens an interactive prompt with a welcome panel, working directory, m
 animated waiting indicator, request progress, tool activity, elapsed time, and provider token counts
 when supplied. Headings, lists and code blocks are highlighted. Use `/help`, `/config`, `/clear`,
 or `/exit`; Ctrl+C exits the program. Each prompt is an independent task with no saved/sent history.
-Responses display after completion; token streaming is not implemented.
+Terminal responses stream by default; use `--no-stream` for complete-answer rendering.
 
 Piped/redirected stdout remains plain result data. `--json` stays strict JSON; `--plain` disables
 decorations and progress, and `NO_COLOR=1` disables color. Progress uses stderr. Terminal control
@@ -50,7 +50,7 @@ Portable archives contain one executable plus documentation. Extract zi (zi.exe 
 Build from source with Rust 1.85+ (a current stable toolchain is recommended):
 
 ```sh
-cargo install --git https://github.com/ax2/zistral --tag v0.4.0 --locked
+cargo install --git https://github.com/ax2/zistral --tag v0.5.0 --locked
 ```
 
 The package is named `zistral`; the installed command is `zi`. It is not yet
@@ -167,6 +167,52 @@ If neither environment variable is set, the saved `api_key` is used.
 Do not put keys in source control. Remote endpoints require HTTPS; plain HTTP
 is allowed on localhost/127.0.0.1/::1 only.
 
+## Named model profiles
+
+```sh
+zi config --name work       # Import/manual setup; save and activate work
+zi config --name local      # Save another provider without overwriting work
+zi models                   # Redacted list; * marks the selected profile
+zi use work                 # Persist the default selection
+zi -p local 'Explain pipes' # One invocation only
+zi doctor                   # Offline configuration diagnostics
+zi doctor --probe           # Small model request to test access (charges may apply)
+```
+
+Each profile has its own model, service, protocol, key/key reference, and optional exact endpoint.
+Legacy settings remain available as `default`; `zi use default` restores them.
+`zi config` edits the selected profile; `--name NAME` creates or edits a named one.
+Names contain 1–64 ASCII letters/digits/underscores/hyphens; at most 128 named profiles.
+Selection precedence: `--profile` > `ZI_PROFILE` > saved active profile. Existing model/service/API/key
+overrides still apply. Interactive shortcuts: `/models`, `/use NAME`, `/doctor`.
+
+Doctor reports the config path, selected profile, model, protocol, service host, key presence and
+override variable names. Only `--probe` sends a model request; it has a short timeout and disables
+tools. Failed configuration/probes exit nonzero, with HTTP/authentication/rate-limit/network guidance.
+Keys, provider error bodies and probe answers are never printed. Use `zi -p work doctor --probe`
+to check one profile without switching the default.
+
+## Streaming
+
+Terminal output streams by default for Chat Completions, Responses and Anthropic Messages,
+including fragmented tool arguments and tool continuations. No new runtime dependencies are added.
+Non-streaming JSON responses are accepted as a fallback; for services rejecting streaming requests,
+use `--no-stream`. Live text is plain; complete-answer mode retains Markdown highlighting.
+
+```sh
+zi 'Write a short story'                    # Terminal: live output
+zi --no-stream 'Write a short story'        # Wait for the whole answer
+cat article.txt | zi 'Summarize' > out.txt  # Redirected: whole result by default
+cat article.txt | zi --json 'Extract JSON' # Validated, complete JSON
+zi --stream 'Write a short story' | cat     # Explicitly opt into streaming pipes
+```
+
+Truncated streams, provider errors and timeouts exit nonzero. Live/explicit-stream output may
+already contain partial text; default pipes/redirection and `--json` keep atomic complete output.
+`--stream` conflicts with `--json`. `--plain` disables automatic streaming/decorations, but can be
+combined with explicit `--stream`. UTF-8, SSE frame/response bounds and terminal-control sanitizing
+also apply across streamed chunks. Each interactive prompt remains an independent task.
+
 ## Exact local operations — no model needed
 
 ```sh
@@ -212,7 +258,7 @@ tools. The model chooses the tool/arguments and formats the final answer;
 * Input is limited to 8 MiB by default (`--max-input`, at most 64 MiB). Responses
   are limited to 16 MiB, requests to 8 turns (`--max-steps`), and each request to
   120 seconds (`--timeout`). The whole input is buffered and sent to the model;
-  this is not a streaming or automatic chunking CLI.
+  input is not automatically chunked. Terminal response streaming is described above.
 
 ```sh
 cat data.json | zi --json 'Convert to a JSON array containing only names' | jq .

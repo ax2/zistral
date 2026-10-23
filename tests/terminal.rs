@@ -27,6 +27,7 @@ fn terminal(
         command.arg("--plain");
     }
     for key in [
+        "ZI_PROFILE",
         "ZI_MODEL",
         "ZI_BASE_URL",
         "ZI_API",
@@ -124,7 +125,7 @@ fn server() -> (String, std::thread::JoinHandle<Vec<Value>>) {
             json!({"choices":[{"finish_reason":"stop","message":{"content":"answer-two"}}]}),
         ];
         let mut requests = Vec::new();
-        for reply in replies {
+        for (number, reply) in replies.into_iter().enumerate() {
             let deadline = Instant::now() + Duration::from_secs(20);
             let mut stream = loop {
                 match listener.accept() {
@@ -158,8 +159,23 @@ fn server() -> (String, std::thread::JoinHandle<Vec<Value>>) {
             reader.read_exact(&mut body).unwrap();
             requests.push(serde_json::from_slice(&body).unwrap());
             std::thread::sleep(Duration::from_millis(150));
-            let body = reply.to_string();
-            write!(stream,"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
+            let (body, content_type) = if number == 2 {
+                let mut events = String::new();
+                for piece in ["answer-", "two", "\x1b]52;c;", "clipboard-marker", "\x07"] {
+                    events.push_str(&format!(
+                        "data: {}\n\n",
+                        json!({"choices":[{"delta":{"content":piece},"finish_reason":null}]})
+                    ));
+                }
+                events.push_str(&format!(
+                    "data: {}\n\ndata: [DONE]\n\n",
+                    json!({"choices":[{"delta":{},"finish_reason":"stop"}]})
+                ));
+                (events, "text/event-stream")
+            } else {
+                (reply.to_string(), "application/json")
+            };
+            write!(stream,"HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
         }
         requests
     });

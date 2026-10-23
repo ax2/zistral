@@ -133,6 +133,7 @@ pub struct Activity {
     start: Instant,
     rich: bool,
     verbose: bool,
+    live: Cell<bool>,
     requests: Cell<u32>,
     tools: Cell<u32>,
     input_tokens: Cell<u64>,
@@ -162,6 +163,7 @@ impl Activity {
         Self {
             bar,
             rich,
+            live: Cell::new(false),
             verbose: cli.verbose,
             start: Instant::now(),
             requests: Cell::new(0),
@@ -173,11 +175,17 @@ impl Activity {
 
     pub fn request(&self, step: u32, max: u32) {
         self.requests.set(step);
-        if self.rich {
+        if self.rich && !self.live.get() {
             self.bar
                 .set_message(format!("Thinking · request {step}/{max}"));
         } else if self.verbose {
             eprintln!("zi: request {step}/{max}");
+        }
+    }
+
+    pub fn streaming(&self) {
+        if !self.live.replace(true) {
+            self.bar.finish_and_clear();
         }
     }
 
@@ -208,7 +216,9 @@ impl Activity {
             "select_input" => "Select JSON",
             _ => "Unknown tool",
         };
-        if self.rich {
+        if self.rich && self.live.get() {
+            eprintln!("\n  {} {label}", style("↳").cyan());
+        } else if self.rich {
             self.bar.println(format!("  {} {label}", style("↳").cyan()));
         } else if self.verbose {
             eprintln!("zi: tool {}", clean(name));
@@ -251,6 +261,81 @@ impl Activity {
 impl Drop for Activity {
     fn drop(&mut self) {
         self.bar.finish_and_clear();
+    }
+}
+
+/// Stateful sanitizing across chunk boundaries; no provider terminal commands.
+pub struct StreamDisplay {
+    pub any: bool,
+    terminal: bool,
+    state: u8,
+    newline: bool,
+}
+
+impl StreamDisplay {
+    pub fn new() -> Self {
+        Self {
+            any: false,
+            terminal: io::stdout().is_terminal(),
+            state: 0,
+            newline: true,
+        }
+    }
+    pub fn push(&mut self, text: &str) -> Result<()> {
+        self.any = true;
+        let mut safe = String::new();
+        for c in text.chars() {
+            if !self.terminal {
+                safe.push(c);
+                continue;
+            }
+            match self.state {
+                0 if c == '\x1b' => self.state = 1,
+                0 if !c.is_control() || matches!(c, '\n' | '\t') => safe.push(c),
+                1 => {
+                    self.state = match c {
+                        '[' => 2,
+                        ']' | 'P' | '^' | '_' => 3,
+                        _ => 0,
+                    }
+                }
+                2 if ('@'..='~').contains(&c) => self.state = 0,
+                3 if c == '\x07' => self.state = 0,
+                3 if c == '\x1b' => self.state = 4,
+                4 => {
+                    self.state = if c == '\\' {
+                        0
+                    } else if c == '\x1b' {
+                        4
+                    } else {
+                        3
+                    }
+                }
+                _ => (),
+            }
+        }
+        if !safe.is_empty() {
+            self.newline = safe.ends_with('\n');
+            let mut stdout = io::stdout().lock();
+            stdout.write_all(safe.as_bytes())?;
+            stdout.flush()?;
+        }
+        Ok(())
+    }
+    pub fn finish(&mut self) -> Result<()> {
+        self.state = 0;
+        if self.any && !self.newline {
+            self.newline = true;
+            let mut stdout = io::stdout().lock();
+            stdout.write_all(b"\n")?;
+            stdout.flush()?;
+        }
+        Ok(())
+    }
+}
+impl Drop for StreamDisplay {
+    fn drop(&mut self) {
+        let _ = self.finish();
     }
 }
 

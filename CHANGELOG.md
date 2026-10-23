@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.5.0 — 2026-10-23
+
+- Save multiple independent model profiles with `zi config --name NAME`; list with
+  `zi models`, switch with `zi use NAME`, or select once using `--profile` / `-p`.
+  Existing single-model settings remain compatible as the `default` profile.
+- Stream terminal responses for Chat Completions, Responses and Anthropic Messages,
+  including tool calls. Add `--stream` and `--no-stream`; keep default piped output
+  and `--json` complete and atomic. Handle truncated streams as failures.
+- Add offline `zi doctor` configuration diagnostics and explicit `--probe` model
+  connectivity/authentication checks without printing keys, error bodies or answers.
+- Add `/models`, `/use NAME`, and `/doctor` interactive shortcuts.
+- Keep the single-binary design and existing runtime dependencies; test profile
+  isolation, streaming flush/tool loops, terminal sanitization, and pipe compatibility.
+- Publish only this version's changes in GitHub Release notes.
+
 ## 0.4.0 — 2026-10-23
 
 - Add a terminal welcome panel, model details, waiting animation, request and tool

@@ -1,7 +1,9 @@
 mod agent;
 mod config;
 mod data;
+mod doctor;
 mod imports;
+mod stream;
 mod ui;
 
 use anyhow::{Context, Result, bail};
@@ -10,7 +12,7 @@ use std::io::{self, BufRead, IsTerminal, Read, Write};
 use std::path::PathBuf;
 
 /// A small, pipe-native agent. stdout is always your result.
-#[derive(Parser, Debug)]
+#[derive(Parser, Clone, Debug)]
 #[command(
     name = "zi",
     bin_name = "zi",
@@ -39,6 +41,15 @@ pub struct Cli {
     /// Configuration file (default: platform config directory/zistral/config.toml)
     #[arg(long, env = "ZI_CONFIG", global = true)]
     config: Option<PathBuf>,
+    /// Select a saved model profile for this invocation
+    #[arg(short = 'p', long, env = "ZI_PROFILE", global = true)]
+    profile: Option<String>,
+    /// Stream text even when stdout is redirected (partial output on errors)
+    #[arg(long, conflicts_with_all = ["no_stream", "json", "count", "select", "config_example"])]
+    stream: bool,
+    /// Wait for the complete answer, including in a terminal
+    #[arg(long)]
+    no_stream: bool,
     /// Print a configuration template without reading input or contacting a model
     #[arg(long)]
     config_example: bool,
@@ -77,15 +88,27 @@ pub struct Cli {
     join: Option<String>,
 }
 
-#[derive(Subcommand, Debug)]
+#[derive(Subcommand, Clone, Debug)]
 enum Commands {
-    /// Interactively save the service URL, model, protocol, and hidden API key
+    /// List saved model profiles without displaying keys
+    Models,
+    /// Choose the default saved model profile
+    Use { name: String },
+    /// Diagnose configuration; --probe sends a small model request
+    Doctor {
+        #[arg(long)]
+        probe: bool,
+    },
+    /// Save or import a model configuration (optionally named)
     Config {
+        /// Save/edit this named profile, preserving all other models
+        #[arg(long)]
+        name: Option<String>,
         /// Skip detection and enter settings manually
         #[arg(long)]
         manual: bool,
         /// List detected model configurations without importing or showing keys
-        #[arg(long, conflicts_with = "manual")]
+        #[arg(long, conflicts_with_all = ["manual", "name"])]
         list: bool,
     },
 }
@@ -120,7 +143,27 @@ fn run(mut cli: Cli) -> Result<()> {
         console::set_colors_enabled(false);
         console::set_colors_enabled_stderr(false);
     }
-    if let Some(Commands::Config { manual, list }) = &cli.command {
+    if let Some(command) = &cli.command {
+        if !matches!(command, Commands::Config { .. }) {
+            if cli.input.is_some()
+                || cli.count
+                || cli.select.is_some()
+                || cli.config_example
+                || cli.json
+                || cli.stream
+                || !cli.prompt.is_empty()
+            {
+                bail!("this command does not accept input data or an instruction");
+            }
+            return match command {
+                Commands::Models => config::models(&cli),
+                Commands::Use { name } => config::use_profile(&cli, name),
+                Commands::Doctor { probe } => doctor::run(&cli, *probe),
+                _ => unreachable!(),
+            };
+        }
+    }
+    if let Some(Commands::Config { manual, list, name }) = &cli.command {
         if cli.input.is_some()
             || cli.count
             || cli.select.is_some()
@@ -128,14 +171,15 @@ fn run(mut cli: Cli) -> Result<()> {
             || cli.json
             || cli.no_tools
             || cli.verbose
+            || cli.stream
             || !cli.prompt.is_empty()
         {
-            bail!("zi config only accepts --config PATH; see zi config --help");
+            bail!("invalid options for zi config; see zi config --help");
         }
         if *list {
             return config::list_imports();
         }
-        return config::configure(&cli, *manual);
+        return config::configure_named(&cli, *manual, name.as_deref());
     }
     if cli.config_example {
         return write_output(config::EXAMPLE);
@@ -159,7 +203,11 @@ fn run(mut cli: Cli) -> Result<()> {
             config::configure(&cli, false)?;
         }
         let settings = config::Settings::load(&cli)?;
-        agent::run(&settings, &cli, &input)?
+        let answer = agent::run(&settings, &cli, &input)?;
+        if answer.streamed {
+            return Ok(());
+        }
+        answer.text
     };
     let output = if cli.json {
         let value: serde_json::Value = serde_json::from_str(&output)
@@ -214,8 +262,29 @@ fn session(cli: &mut Cli) -> Result<()> {
             }
             "/help" => {
                 eprintln!(
-                    "Ask a question, or use /config, /clear, /exit. Each prompt is an independent task; no chat history is sent or saved.\nFor files/pipes: cat file.txt | zi 'summarize' or zi -i file.txt 'summarize'."
+                    "Ask a question, or use /models, /use NAME, /doctor, /config, /clear, /exit. Each prompt is an independent task; no chat history is sent or saved.\nFor files/pipes: cat file.txt | zi 'summarize' or zi -i file.txt 'summarize'."
                 );
+                continue;
+            }
+            "/models" => {
+                config::models(cli)?;
+                continue;
+            }
+            _ if prompt.starts_with("/use ") => {
+                match config::use_profile(cli, prompt[5..].trim()) {
+                    Ok(()) => {
+                        cli.profile = Some(prompt[5..].trim().into());
+                        settings = config::Settings::load(cli)?;
+                        ui::model(&settings, cli);
+                    }
+                    Err(error) => eprintln!("zi: {}", ui::clean(&error.to_string())),
+                }
+                continue;
+            }
+            "/doctor" => {
+                if let Err(error) = doctor::run(cli, false) {
+                    eprintln!("zi: {}", ui::clean(&error.to_string()));
+                }
                 continue;
             }
             "/config" => {
@@ -239,6 +308,10 @@ fn session(cli: &mut Cli) -> Result<()> {
         cli.prompt = vec![prompt.into()];
         match agent::run(&settings, cli, "") {
             Ok(answer) => {
+                if answer.streamed {
+                    continue;
+                }
+                let answer = answer.text;
                 if cli.json {
                     match serde_json::from_str::<serde_json::Value>(&answer) {
                         Ok(value) => emit(&serde_json::to_string(&value)?, cli)?,
