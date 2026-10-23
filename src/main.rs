@@ -2,10 +2,11 @@ mod agent;
 mod config;
 mod data;
 mod imports;
+mod ui;
 
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
-use std::io::{self, IsTerminal, Read, Write};
+use std::io::{self, BufRead, IsTerminal, Read, Write};
 use std::path::PathBuf;
 
 /// A small, pipe-native agent. stdout is always your result.
@@ -47,6 +48,9 @@ pub struct Cli {
     /// Disable built-in agent tools (for text-only models)
     #[arg(long)]
     no_tools: bool,
+    /// Disable terminal decorations and progress (pipe output is always plain)
+    #[arg(long, global = true)]
+    plain: bool,
     /// Print tool activity to stderr
     #[arg(short, long)]
     verbose: bool,
@@ -111,7 +115,11 @@ fn read_input(cli: &Cli) -> Result<String> {
     Ok(text.strip_prefix('\u{feff}').unwrap_or(&text).to_owned())
 }
 
-fn run(cli: Cli) -> Result<()> {
+fn run(mut cli: Cli) -> Result<()> {
+    if std::env::var_os("NO_COLOR").is_some() {
+        console::set_colors_enabled(false);
+        console::set_colors_enabled_stderr(false);
+    }
     if let Some(Commands::Config { manual, list }) = &cli.command {
         if cli.input.is_some()
             || cli.count
@@ -136,6 +144,9 @@ fn run(cli: Cli) -> Result<()> {
         bail!("local --count/--select modes do not accept a prompt");
     }
     if !cli.count && cli.select.is_none() && cli.prompt.is_empty() {
+        if cli.input.is_none() && io::stdin().is_terminal() && io::stdout().is_terminal() {
+            return session(&mut cli);
+        }
         bail!("provide an instruction, or use --count / --select; see zi --help");
     }
     let input = read_input(&cli)?;
@@ -144,6 +155,9 @@ fn run(cli: Cli) -> Result<()> {
     } else if let Some(pointer) = &cli.select {
         data::select(&input, pointer, cli.join.as_deref())?
     } else {
+        if io::stdin().is_terminal() && io::stdout().is_terminal() && config::needs_setup(&cli) {
+            config::configure(&cli, false)?;
+        }
         let settings = config::Settings::load(&cli)?;
         agent::run(&settings, &cli, &input)?
     };
@@ -154,7 +168,91 @@ fn run(cli: Cli) -> Result<()> {
     } else {
         output
     };
-    write_output(&output)
+    emit(&output, &cli)
+}
+
+fn emit(output: &str, cli: &Cli) -> Result<()> {
+    if ui::enabled(cli) && !cli.count && cli.select.is_none() {
+        ui::result(output, cli)
+    } else {
+        write_output(output)
+    }
+}
+
+fn session(cli: &mut Cli) -> Result<()> {
+    ui::welcome(cli);
+    if config::needs_setup(cli) {
+        eprintln!("Let's connect your model. Existing agent settings can be imported.");
+        config::configure(cli, false)?;
+    }
+    let mut settings = config::Settings::load(cli)?;
+    ui::model(&settings, cli);
+    loop {
+        if ui::enabled(cli) {
+            eprint!("\n  {} ", console::style("›").cyan().bold());
+        } else {
+            eprint!("\nzi> ");
+        }
+        io::stderr().flush()?;
+        let mut line = String::new();
+        let read = io::stdin()
+            .lock()
+            .take(cli.max_input + 1)
+            .read_line(&mut line)?;
+        if read == 0 {
+            return Ok(());
+        }
+        if read as u64 > cli.max_input {
+            bail!("instruction exceeds --max-input");
+        }
+        let prompt = line.trim();
+        match prompt {
+            "" => continue,
+            "/exit" | "/quit" => {
+                eprintln!("Goodbye.");
+                return Ok(());
+            }
+            "/help" => {
+                eprintln!(
+                    "Ask a question, or use /config, /clear, /exit. Each prompt is an independent task; no chat history is sent or saved.\nFor files/pipes: cat file.txt | zi 'summarize' or zi -i file.txt 'summarize'."
+                );
+                continue;
+            }
+            "/config" => {
+                config::configure(cli, false)?;
+                settings = config::Settings::load(cli)?;
+                ui::model(&settings, cli);
+                continue;
+            }
+            "/clear" => {
+                console::Term::stderr().clear_screen()?;
+                ui::welcome(cli);
+                ui::model(&settings, cli);
+                continue;
+            }
+            _ if prompt.starts_with('/') => {
+                eprintln!("Unknown command. Use /help.");
+                continue;
+            }
+            _ => (),
+        }
+        cli.prompt = vec![prompt.into()];
+        match agent::run(&settings, cli, "") {
+            Ok(answer) => {
+                if cli.json {
+                    match serde_json::from_str::<serde_json::Value>(&answer) {
+                        Ok(value) => emit(&serde_json::to_string(&value)?, cli)?,
+                        Err(_) => {
+                            eprintln!("zi: output is not valid JSON (nothing written to stdout)")
+                        }
+                    }
+                } else {
+                    emit(&answer, cli)?;
+                }
+            }
+            Err(error) => eprintln!("zi: {}", ui::clean(&format!("{error:#}"))),
+        }
+    }
 }
 
 fn write_output(output: &str) -> Result<()> {
@@ -176,7 +274,7 @@ fn main() {
         {
             return;
         }
-        eprintln!("zi: {error:#}");
+        eprintln!("zi: {}", ui::clean(&format!("{error:#}")));
         std::process::exit(1);
     }
 }

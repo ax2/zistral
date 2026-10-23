@@ -1,4 +1,4 @@
-use crate::{Cli, config::Settings, data};
+use crate::{Cli, config::Settings, data, ui::Activity};
 use anyhow::{Context, Result, bail};
 use reqwest::blocking::Client;
 use serde_json::{Value, json};
@@ -8,6 +8,7 @@ const SYSTEM: &str = "You are zi, a command-line data assistant. Follow the user
 const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
 
 pub fn run(settings: &Settings, cli: &Cli, input: &str) -> Result<String> {
+    let activity = Activity::new(settings, cli, input.len());
     let client = Client::builder()
         .timeout(Duration::from_secs(cli.timeout))
         .connect_timeout(Duration::from_secs(cli.timeout.min(30)))
@@ -65,9 +66,7 @@ pub fn run(settings: &Settings, cli: &Cli, input: &str) -> Result<String> {
         )
     });
     for step in 0..cli.max_steps {
-        if cli.verbose {
-            eprintln!("zi: request {}/{}", step + 1, cli.max_steps);
-        }
+        activity.request(step + 1, cli.max_steps);
         let mut body = json!({"model":settings.model,"stream":false});
         if anthropic {
             body["system"] = json!(system);
@@ -116,14 +115,16 @@ pub fn run(settings: &Settings, cli: &Cli, input: &str) -> Result<String> {
         }
         let result: Value =
             serde_json::from_slice(&bytes).context("API did not return valid JSON")?;
+        activity.usage(&result);
         let answer = if anthropic {
-            handle_anthropic(&result, &mut messages, cli, input)?
+            handle_anthropic(&result, &mut messages, cli, input, &activity)?
         } else if responses {
-            handle_responses(&result, &mut messages, cli, input)?
+            handle_responses(&result, &mut messages, cli, input, &activity)?
         } else {
-            handle_chat(&result, &mut messages, cli, input)?
+            handle_chat(&result, &mut messages, cli, input, &activity)?
         };
         if let Some(answer) = answer {
+            activity.finish();
             return Ok(answer);
         }
     }
@@ -138,6 +139,7 @@ fn handle_anthropic(
     messages: &mut Vec<Value>,
     cli: &Cli,
     input: &str,
+    activity: &Activity,
 ) -> Result<Option<String>> {
     if !matches!(
         result["stop_reason"].as_str(),
@@ -164,7 +166,7 @@ fn handle_anthropic(
                 .get("input")
                 .context("tool call missing input")?
                 .to_string();
-            let result = tool_result(cli, name, &args, input)?;
+            let result = tool_result(cli, name, &args, input, activity)?;
             results.push(json!({"type":"tool_result","tool_use_id":id,"content":result}));
         }
         messages.push(json!({"role":"user","content":results}));
@@ -181,13 +183,17 @@ fn handle_anthropic(
     Ok(Some(text))
 }
 
-fn tool_result(cli: &Cli, name: &str, arguments: &str, input: &str) -> Result<String> {
+fn tool_result(
+    cli: &Cli,
+    name: &str,
+    arguments: &str,
+    input: &str,
+    activity: &Activity,
+) -> Result<String> {
     if cli.no_tools {
         bail!("provider requested a tool even though --no-tools is set");
     }
-    if cli.verbose {
-        eprintln!("zi: tool {name}");
-    }
+    activity.tool(name);
     Ok(match data::execute(name, arguments, input) {
         Ok(value) => value,
         Err(error) => json!({"error":error.to_string()}).to_string(),
@@ -199,6 +205,7 @@ fn handle_chat(
     messages: &mut Vec<Value>,
     cli: &Cli,
     input: &str,
+    activity: &Activity,
 ) -> Result<Option<String>> {
     let choice = result
         .pointer("/choices/0")
@@ -232,7 +239,7 @@ fn handle_chat(
             let args = call["function"]["arguments"]
                 .as_str()
                 .context("tool call missing arguments")?;
-            let content = tool_result(cli, name, args, input)?;
+            let content = tool_result(cli, name, args, input, activity)?;
             messages.push(json!({"role":"tool","tool_call_id":id,"content":content}));
         }
         Ok(None)
@@ -252,6 +259,7 @@ fn handle_responses(
     messages: &mut Vec<Value>,
     cli: &Cli,
     input: &str,
+    activity: &Activity,
 ) -> Result<Option<String>> {
     if result["status"].as_str() != Some("completed") {
         bail!("provider returned an incomplete Responses result");
@@ -282,7 +290,7 @@ fn handle_responses(
                 let args = item["arguments"]
                     .as_str()
                     .context("tool call missing arguments")?;
-                let content = tool_result(cli, name, args, input)?;
+                let content = tool_result(cli, name, args, input, activity)?;
                 messages.push(json!({"type":"function_call_output","call_id":id,"output":content}));
             }
             Some("message") => {

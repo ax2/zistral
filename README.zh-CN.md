@@ -11,12 +11,23 @@ git diff | zi "生成一句简洁的提交说明"
 
 ## 安装与配置
 
-从 [Releases](https://github.com/ax2/zistral/releases) 下载对应平台的压缩包，解压后将
-`zi`（Windows 为 `zi.exe`）放到 PATH 目录。使用 `SHA256SUMS.txt` 校验下载文件。
-首版提供 Windows x64、Linux x64（glibc 2.35+）、macOS Apple Silicon；其他架构可从源码编译。
+从 [Releases](https://github.com/ax2/zistral/releases/latest) 下载原生安装包：
+
+| 平台 | 安装包 | 安装方法 |
+| --- | --- | --- |
+| Windows x64 | `windows-x64-setup.exe` | 双击安装，无需管理员权限，自动添加用户 PATH 和开始菜单入口 |
+| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.4.0-linux-amd64.deb` |
+| macOS Apple Silicon | `macos-arm64.pkg` | 双击安装，命令放到 `/usr/local/bin/zi` |
+
+安装后直接运行 `zi`。Windows 安装结束可立即启动，或在开始菜单打开 zi；
+已经打开的终端需要重开一次以读取新的 PATH。无需安装 Rust、Python、Node.js 或 Visual C++ 运行库。
+升级保留已有模型配置；Windows 卸载只移除自身添加的 PATH 项，保留配置。
+Linux 包需要 glibc 2.35+ 和系统 CA 证书。其他架构可从源码编译。
+同时保留无需安装的便携压缩包；便携版需要自行放到 PATH 目录。所有下载均提供 `SHA256SUMS.txt` 校验。
 程序未做代码签名。项目名是 `zistral`，命令是 `zi`，尚未发布到 crates.io。
 
-首次运行配置向导，自动检测 Codex、WorkBuddy 和 dsh 中已有的模型配置：
+首次直接输入 `zi` 会自动打开配置向导，检测 Codex、WorkBuddy 和 dsh 中已有的模型配置。
+也可随时手动打开：
 
 ```sh
 zi config
@@ -91,6 +102,19 @@ zi -i .\1.txt '统计汉字数量'
 密钥读取 `ZI_API_KEY`，其次 `OPENAI_API_KEY`，也可在配置中指定 `api_key_env`。
 没有设置密钥环境变量时，自动读取向导保存的 API Key。
 
+## 终端体验
+
+直接输入 `zi` 进入交互界面：欢迎面板、当前目录、模型与协议、等待动画、请求进度、工具调用、耗时和服务返回的 token 用量。
+结果会突出显示标题、列表和代码块，支持中文和终端自动换行。输入 `/help`、`/config`、`/clear`、`/exit` 管理交互。
+每次提问是独立任务，不保存或发送上一轮对话；Ctrl+C 结束程序。配置好后也可直接用 `zi '问题'`。
+
+管道或重定向输出自动保持纯文本，`--json` 保持严格 JSON。`--plain` 关闭装饰和进度，
+`NO_COLOR=1` 关闭颜色。进度信息进入标准错误；不会把服务返回的终端控制指令作为终端命令执行。
+当前等待完整模型响应后显示结果，没有逐 token 流式输出。
+
+模型功能仍需要你可用的服务配置和 API Key；安装包不内置付费密钥。
+已有智能体配置可直接导入，离线 `--count` / `--select` 不需要任何模型配置。
+
 ## 不用模型也能精确处理
 
 ```sh
@@ -121,7 +145,7 @@ cat 1.json | zi --select /abc/0 --join ','
 源码构建：
 
 ```sh
-cargo install --git https://github.com/ax2/zistral --tag v0.3.0 --locked
+cargo install --git https://github.com/ax2/zistral --tag v0.4.0 --locked
 ```
 
 更多配置、精确定义、开发与验证范围见 [English README](README.md)。MIT 开源协议。

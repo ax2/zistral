@@ -12,19 +12,45 @@ git diff | zi "Write a concise commit message"
 cat notes.txt | zi "Summarize in three sentences" > summary.txt
 ```
 
-## Install
+## Install and start
 
-Download the archive for your platform from **Releases**, extract `zi` (`zi.exe`
-on Windows), and put it in a directory on your `PATH`. Verify the archive using
-the accompanying `SHA256SUMS.txt`. The first release provides Windows x64,
-Linux x64 (Ubuntu 22.04/glibc 2.35 or newer), and macOS Apple Silicon binaries. macOS Intel users can build from
-source. Binaries are unsigned; no installer, background service, or auto-update
-is installed.
+Download a native installer from [Releases](https://github.com/ax2/zistral/releases/latest):
+
+| Platform | Package | Installation |
+| --- | --- | --- |
+| Windows x64 | `windows-x64-setup.exe` | Per-user installer; adds PATH and a Start menu launcher; no administrator required |
+| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.4.0-linux-amd64.deb` |
+| macOS Apple Silicon | `macos-arm64.pkg` | Open the package; installs `/usr/local/bin/zi` |
+
+Then type `zi`. On first launch, choose an existing Codex, WorkBuddy or dsh configuration,
+or enter your service and API key. No Rust, Python, Node.js or VC++ redistributable is needed.
+Windows setup can launch zi immediately; reopen existing terminals to refresh PATH.
+Upgrades retain your model settings. Uninstalling on Windows retains configuration and removes
+only the PATH entry owned by the installer. Linux requires glibc 2.35+ and system CA certificates.
+Installers are unsigned. Portable archives and SHA256 checksums are also available.
+A working provider/API key is required for model tasks; no paid credentials are bundled.
+Offline operations work immediately without setup.
+
+## Terminal experience
+
+Bare `zi` opens an interactive prompt with a welcome panel, working directory, model/protocol,
+animated waiting indicator, request progress, tool activity, elapsed time, and provider token counts
+when supplied. Headings, lists and code blocks are highlighted. Use `/help`, `/config`, `/clear`,
+or `/exit`; Ctrl+C exits the program. Each prompt is an independent task with no saved/sent history.
+Responses display after completion; token streaming is not implemented.
+
+Piped/redirected stdout remains plain result data. `--json` stays strict JSON; `--plain` disables
+decorations and progress, and `NO_COLOR=1` disables color. Progress uses stderr. Terminal control
+sequences in model output are removed when rendering rich terminal output.
+
+## Portable archives and source builds
+
+Portable archives contain one executable plus documentation. Extract zi (zi.exe on Windows) to a directory on PATH. No background service or automatic updater is installed.
 
 Build from source with Rust 1.85+ (a current stable toolchain is recommended):
 
 ```sh
-cargo install --git https://github.com/ax2/zistral --tag v0.3.0 --locked
+cargo install --git https://github.com/ax2/zistral --tag v0.4.0 --locked
 ```
 
 The package is named `zistral`; the installed command is `zi`. It is not yet

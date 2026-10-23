@@ -180,6 +180,16 @@ fn import_config(
     }))
 }
 
+pub fn needs_setup(cli: &Cli) -> bool {
+    let path = cli.config.clone().or_else(config_path);
+    !path.is_some_and(|p| p.exists())
+        && cli.model.is_none()
+        && cli.base_url.is_none()
+        && !["ZI_API_KEY", "OPENAI_API_KEY"]
+            .iter()
+            .any(|key| std::env::var(key).is_ok_and(|v| !v.trim().is_empty()))
+}
+
 pub fn configure(cli: &Cli, manual: bool) -> Result<()> {
     if !io::stdin().is_terminal() {
         bail!("zi config requires an interactive terminal; run it without piped input");
@@ -190,6 +200,9 @@ pub fn configure(cli: &Cli, manual: bool) -> Result<()> {
         .or_else(config_path)
         .context("cannot locate config directory; use zi config --config PATH")?;
     let file = read_config(&path, true)?;
+    if crate::ui::enabled(cli) {
+        crate::ui::heading("Model setup · detect → choose → ready");
+    }
     let mut output = io::stderr().lock();
     writeln!(
         output,

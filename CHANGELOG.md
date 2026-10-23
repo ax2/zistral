@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.0 — 2026-10-23
+
+- Add a terminal welcome panel, model details, waiting animation, request and tool
+  activity, elapsed time, token usage, and highlighted headings/lists/code blocks.
+- Start an interactive prompt with bare `zi`; support `/help`, `/config`, `/clear`
+  and `/exit`. Each prompt starts an independent task with no saved history.
+- Automatically open model import/setup on the first interactive launch.
+- Preserve plain pipe/redirection output; add `--plain`, respect `NO_COLOR`, and
+  remove provider-supplied terminal control sequences from rich rendered results.
+- Ship Windows per-user setup (.exe), Debian/Ubuntu (.deb) and macOS ARM64 (.pkg)
+  installers alongside portable archives. No language runtimes are required.
+- Automatically register the Windows command and Start menu launcher, preserve
+  configuration on upgrade/uninstall, and test native installation on all platforms.
+- Add real-terminal first-run, tool/progress, token, independent-task and plain-mode tests.
+
 ## 0.3.0 — 2026-10-23
 
 - Automatically discover and import Codex, WorkBuddy/CodeBuddy, and dsh model
