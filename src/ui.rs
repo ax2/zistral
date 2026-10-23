@@ -63,7 +63,12 @@ pub fn welcome(cli: &Cli) {
             style("│").cyan(),
             style(concat!("◆ zi · Zistral ", env!("CARGO_PKG_VERSION"))).bold()
         );
-        if let Ok(cwd) = std::env::current_dir() {
+        if let Ok(cwd) = cli
+            .cwd
+            .as_ref()
+            .map(std::fs::canonicalize)
+            .unwrap_or_else(std::env::current_dir)
+        {
             let path = clean(&cwd.display().to_string());
             eprintln!(
                 "  {} {}",
@@ -214,6 +219,18 @@ impl Activity {
         let label = match name {
             "count_input" => "Count input",
             "select_input" => "Select JSON",
+            "project_info" => "Project instructions",
+            "list_files" => "List files",
+            "read_file" => "Read file",
+            "search_files" => "Search project",
+            "write_file" => "Write file",
+            "edit_file" => "Edit file",
+            "delete_file" => "Delete file",
+            "undo_edit" => "Undo file edit",
+            "run_command" => "Run command",
+            "git_status" => "Git status",
+            "git_diff" => "Git diff",
+            "update_plan" => "Task plan",
             _ => "Unknown tool",
         };
         if self.rich && self.live.get() {
@@ -222,6 +239,19 @@ impl Activity {
             self.bar.println(format!("  {} {label}", style("↳").cyan()));
         } else if self.verbose {
             eprintln!("zi: tool {}", clean(name));
+        }
+    }
+
+    pub fn detail(&self, detail: &str) {
+        let safe = clean(detail).replace(['\n', '\r'], " ");
+        let safe = console::truncate_str(&safe, 160, "…");
+        if self.rich && self.live.get() {
+            eprintln!("  {}", console::style(safe).dim());
+        } else if self.rich {
+            self.bar
+                .println(format!("    {}", console::style(safe).dim()));
+        } else if self.verbose {
+            eprintln!("zi: {safe}");
         }
     }
 

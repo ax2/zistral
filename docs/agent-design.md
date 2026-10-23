@@ -1,0 +1,70 @@
+# Agent architecture, references and limits
+
+Zistral implements its own bounded model → tools → observations → model loop in Rust.
+It does not bundle Codex, WorkBuddy, dsh, a separate agent runtime, or model weights.
+Provider/model reasoning is remote (or from a separately installed compatible local model).
+The installed executable includes the loop, file/search/edit/planning/process tools and TLS.
+
+## References
+
+The implementation uses the public model function-calling protocols. Project tools follow
+common coding-agent patterns: explicit working directory, tool schemas, bounded observations,
+read before edit, task planning and execution feedback. The design was checked against:
+
+- [OpenAI function calling](https://developers.openai.com/api/docs/guides/function-calling).
+- [Codex shell tool schemas](https://github.com/openai/codex/blob/main/codex-rs/core/src/tools/handlers/shell_spec.rs): working directory, command timeouts and output budgets.
+- [Codex execution server](https://github.com/openai/codex/blob/main/codex-rs/exec-server/README.md): command lifecycle and structured exit/output metadata.
+- [Microsoft Job Objects](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects): Windows process-tree cleanup; Unix uses process groups.
+- [ignore WalkBuilder](https://docs.rs/ignore/latest/ignore/struct.WalkBuilder.html): native gitignore-aware file discovery.
+
+These are design/protocol references, not a claim that zi reuses the Codex framework or
+provides all its features. The project/process implementation is original Zistral code;
+normal Cargo dependencies and their licenses remain in Cargo.lock.
+
+## Task execution
+
+`agent.rs` manages protocol histories, tool dispatch, streaming, turn budgets and final output.
+`project.rs` owns each task's root, permissions, scoped instructions, read revisions, edit
+preimages and plan. `process.rs` runs noninteractive commands with separate bounded streams,
+exit status and timeout cleanup. Tool errors return to the model so it can adjust and retry.
+Pending plan steps prompt continuation; exhausted budgets and incomplete API replies fail.
+
+The full project mode has 14 tools. Data mode exposes only count/select; read-only mode
+excludes file mutation and arbitrary shell execution, including enforcement if a provider
+requests tools that were not advertised. `--no-tools` disables project capabilities too.
+
+## Verified requirements
+
+Automated local-provider fixtures drive the actual zi subprocess through all three protocols
+(Chat Completions, Responses and Anthropic Messages). For each, zi inspects a real tiny Rust
+project, runs cargo test and receives a failure, edits the source, creates a file, reruns the
+tests successfully, completes its plan and emits only the final answer on redirected stdout.
+This is a real filesystem/build-tool workflow with simulated model decisions, not a benchmark
+of live-model coding quality. Other tests cover stale edits, undo, instruction scope,
+ignore/path/symlink checks, permissions, process-tree timeouts, Unicode, streaming and pipes.
+CI and release jobs run on Windows, Linux and macOS; installation is also tested natively.
+
+This covers the main requirements for lightweight CLI project reading, source modification,
+command execution and bounded multi-step tasks. A compatible tool-capable model and the
+project's build/test programs are still required; successful completion depends on model
+quality, permissions, provider compatibility and the task's scope.
+
+## Deliberate boundaries
+
+- No OS sandbox, per-command approval policy, persistent conversation/resume, background
+  execution server, interactive PTY command sessions, MCP/plugin ecosystem or autonomous browser.
+- Shell runs with the current OS account and can access outside the project. File path/secret
+  checks constrain only native tools; they are not an adversarial security boundary. Avoid
+  untrusted tasks/projects and review changes with version control.
+- File tools handle UTF-8 regular files up to 2 MiB and exact text replacements. They are not
+  a binary editor or a general patch engine. Search is literal and bounded, not semantic indexing.
+- Git is optional; inspection disables hooks/fsmonitor/external diff/textconv. Arbitrary
+  commands can invoke other programs, so Git and build tools are not bundled.
+- Undo is in-memory, last-in-first-out and conflict-checked for file-tool changes only, up to
+  32 MiB of preimages. No persistent recovery, command rollback, or whole-task transaction.
+- AGENTS.md is scoped from the selected root down to the accessed path; ancestor files above
+  that explicit root are not loaded. Guidance is supplied to the model, not formally enforced.
+- Default limits: 32 project turns (8 data turns), 120 seconds per model request, 60 seconds
+  per command, 64 KiB per command stream/read/search output. Use CLI options for turn/time budgets.
+
+These limits keep zi compact and useful for ordinary coding tasks without claiming Codex parity.

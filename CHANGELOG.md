@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.6.0 — 2026-10-23
+
+- Add explicit project mode with `--agent` or `-C/--cwd DIR`: inspect projects,
+  plan multi-step work, edit files, execute builds/tests, fix failures and verify again.
+- Expand to 14 built-in tools with gitignore-aware listing/literal search, paginated
+  reads, exact edits, file creation/deletion, in-task undo, Git inspection and plans.
+- Apply scoped AGENTS.md before edits; require reading existing files, reject stale
+  changes and escaping paths, preserve CRLF/executable permissions and write atomically.
+- Add `--read-only`, `--no-exec`, bounded command output and configurable command
+  timeouts with descendant cleanup. Shell commands use the user's OS permissions;
+  project mode is not an OS sandbox.
+- Keep data-only defaults, clean pipelines, three model protocols and single-binary
+  installers. Project tasks default to 32 model requests; data tasks retain 8.
+- Test real Rust project failure → edit → passing tests across all three protocols,
+  permission enforcement, instructions, edit conflicts/undo, and process timeouts.
+- Document the self-implemented agent architecture, public Codex references and limits.
+
 ## 0.5.0 — 2026-10-23
 
 - Save multiple independent model profiles with `zi config --name NAME`; list with

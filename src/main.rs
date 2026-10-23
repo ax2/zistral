@@ -3,6 +3,8 @@ mod config;
 mod data;
 mod doctor;
 mod imports;
+mod process;
+mod project;
 mod stream;
 mod ui;
 
@@ -65,9 +67,24 @@ pub struct Cli {
     /// Print tool activity to stderr
     #[arg(short, long)]
     verbose: bool,
-    /// Maximum model requests, including the final answer
-    #[arg(long, default_value_t = 8, value_parser = clap::value_parser!(u32).range(1..=64))]
-    max_steps: u32,
+    /// Enable project file, planning, Git and shell tools in the current directory
+    #[arg(long)]
+    agent: bool,
+    /// Select a project directory and enable project tools
+    #[arg(short = 'C', long)]
+    cwd: Option<PathBuf>,
+    /// Enable project inspection but disable file changes and shell commands
+    #[arg(long)]
+    read_only: bool,
+    /// Enable project tools but disable arbitrary shell commands
+    #[arg(long)]
+    no_exec: bool,
+    /// Maximum duration of each project command (seconds)
+    #[arg(long, default_value_t = 60, value_parser = clap::value_parser!(u64).range(1..=3600))]
+    command_timeout: u64,
+    /// Maximum model requests (default: 32 in project mode, 8 in data mode)
+    #[arg(long, value_parser = clap::value_parser!(u32).range(1..=128))]
+    max_steps: Option<u32>,
     /// Timeout per HTTP request in seconds
     #[arg(long, default_value_t = 120, value_parser = clap::value_parser!(u64).range(1..=3600))]
     timeout: u64,
@@ -139,6 +156,9 @@ fn read_input(cli: &Cli) -> Result<String> {
 }
 
 fn run(mut cli: Cli) -> Result<()> {
+    if project::enabled(&cli) {
+        process::install_interrupt_handler()?;
+    }
     if std::env::var_os("NO_COLOR").is_some() {
         console::set_colors_enabled(false);
         console::set_colors_enabled_stderr(false);

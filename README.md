@@ -19,7 +19,7 @@ Download a native installer from [Releases](https://github.com/ax2/zistral/relea
 | Platform | Package | Installation |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | Per-user installer; adds PATH and a Start menu launcher; no administrator required |
-| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.5.0-linux-amd64.deb` |
+| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.6.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | Open the package; installs `/usr/local/bin/zi` |
 
 Then type `zi`. On first launch, choose an existing Codex, WorkBuddy or dsh configuration,
@@ -50,7 +50,7 @@ Portable archives contain one executable plus documentation. Extract zi (zi.exe 
 Build from source with Rust 1.85+ (a current stable toolchain is recommended):
 
 ```sh
-cargo install --git https://github.com/ax2/zistral --tag v0.5.0 --locked
+cargo install --git https://github.com/ax2/zistral --tag v0.6.0 --locked
 ```
 
 The package is named `zistral`; the installed command is `zi`. It is not yet
@@ -213,6 +213,54 @@ already contain partial text; default pipes/redirection and `--json` keep atomic
 combined with explicit `--stream`. UTF-8, SSE frame/response bounds and terminal-control sanitizing
 also apply across streamed chunks. Each interactive prompt remains an independent task.
 
+## Work on a project
+
+```sh
+zi -C ./my-project 'Fix the failing tests and run verification'
+zi --agent 'Inspect this project and implement the requested change'
+zi -C . --read-only 'Review this project and explain the main risks'
+zi -C . --no-exec 'Update the documentation without running commands'
+zi -C . --command-timeout 300 'Run the build and fix errors'
+git diff | zi -C . 'Review these changes against the project source'
+```
+
+`--agent` enables project tools in the current directory; `-C` / `--cwd DIR` selects a
+project and enables them. Bare `zi -C DIR` opens the interactive prompt in project mode.
+Use a model that supports tool calls. Each task can inspect, plan, edit, run commands,
+read failures, fix them and verify again; default budget is 32 model requests.
+`--max-steps` allows 1–128. Each interactive prompt starts a fresh task.
+
+| Tools | Capabilities |
+| --- | --- |
+| `project_info`, `list_files`, `search_files`, `read_file` | Project context, scoped AGENTS.md, gitignore-aware file listing, literal search and paginated UTF-8 reads |
+| `write_file`, `edit_file`, `delete_file`, `undo_edit` | Create/replace, exact text replacement, single-file deletion and conflict-checked undo within the current task |
+| `git_status`, `git_diff` | Bounded read-only Git inspection; Git is optional |
+| `run_command`, `update_plan` | Noninteractive builds/tests, exit status/output/timeout, and step tracking |
+| `count_input`, `select_input` | Existing deterministic pipe operations |
+
+Existing files must be read before changing them; stale revisions are refused. File edits
+preserve executable permissions and CRLF replacements, write atomically, and keep up to 32 MiB
+of undo preimages in memory. Root/nested `AGENTS.md` instructions are supplied before edits.
+Text files are limited to 2 MiB; each read/search/command stream returns at most 64 KiB.
+Commands use PowerShell on Windows and `/bin/sh` on Unix, with no interactive stdin;
+default timeout is 60 seconds, configurable up to 3600. Background descendants are terminated
+when a command finishes or times out. Build tools needed by your project must be installed
+separately; zi itself still needs no language runtime.
+
+**Project mode authorizes local changes and commands without per-tool confirmation.**
+Use it for trusted tasks/projects. `--read-only` permits inspection and fixed Git reads only;
+`--no-exec` allows file edits but disables arbitrary shell commands. Native file tools restrict
+paths to the project, reject escaping symlinks and common credential/metadata paths, and skip
+ignored/cache files during discovery. These checks are **not an OS sandbox**: enabled shell
+commands run with your account's permissions and can access outside the selected directory.
+Keep a Git commit/backup for valuable work. Undo does not cover commands and is lost on exit.
+
+Default pipes remain data-only unless project mode is explicitly enabled. In project mode,
+stdout still contains the final result; command/tool details go to the model and activity goes
+to stderr. `--json` and default redirected output validate/buffer the answer, but file changes
+happen immediately and are not rolled back on model/network failures. See
+[agent design and references](docs/agent-design.md) for architecture, validation and limits.
+
 ## Exact local operations — no model needed
 
 ```sh
@@ -256,7 +304,8 @@ tools. The model chooses the tool/arguments and formats the final answer;
   must itself contain JSON when combined with `--json`.
 * Options go **before** the instruction. All remaining words become the prompt.
 * Input is limited to 8 MiB by default (`--max-input`, at most 64 MiB). Responses
-  are limited to 16 MiB, requests to 8 turns (`--max-steps`), and each request to
+  are limited to 16 MiB; tasks default to 8 data turns or 32 project turns
+  (`--max-steps`, maximum 128), and each request to
   120 seconds (`--timeout`). The whole input is buffered and sent to the model;
   input is not automatically chunked. Terminal response streaming is described above.
 
@@ -268,12 +317,12 @@ zi --help
 
 ## Scope and privacy
 
-The agent can reason over piped input and call two deterministic, read-only
-tools: `count_input` and `select_input`. Agent tasks cannot execute shell commands,
-modify files, inspect the filesystem beyond the selected input/config, or
-browse the web. Nothing is persisted as conversation history. Network mode
-sends the instruction and input to your configured provider, whose retention
-policy still applies. Responses requests set `store: false`. API error bodies
+Default data mode uses only `count_input` and `select_input`. Explicit project mode adds
+local inspection, file changes and commands as described above. There is no built-in web
+browser, persistent conversation history, background agent service or OS sandbox. Network
+mode sends the instruction, input and any inspected project/tool content to the configured
+provider, whose retention policy still applies. Common sensitive file names are blocked by
+native file tools, but arbitrary shell commands are not confined to those checks. Responses requests set `store: false`. API error bodies
 are not echoed because they may contain private input. HTTP redirects are
 rejected rather than forwarding credentials to another endpoint.
 The separate `zi config` setup command writes only its selected configuration file.
@@ -288,7 +337,9 @@ cargo build --release --locked
 ```
 
 Integration tests use local mock HTTP servers and require no paid API access.
-They verify actual subprocess pipes, real terminal configuration/import sessions with
+They verify a real Rust project through failing tests, source edits and passing tests for
++all three protocols, permission enforcement, stale edits/undo, process-tree timeouts,
++actual subprocess pipes, real terminal configuration/import sessions with
 hidden key entry, source preservation, missing keys, saved configuration and
 environment precedence, tool round trips for all three protocols,
 Unicode input, invalid input, JSON validation, errors, and step limits. They

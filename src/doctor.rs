@@ -49,7 +49,7 @@ pub fn run(cli: &Cli, probe: bool) -> Result<()> {
         test.stream = false;
         test.plain = true;
         test.verbose = false;
-        test.max_steps = 1;
+        test.max_steps = Some(1);
         test.max_output_tokens = 16;
         test.timeout = cli.timeout.min(15);
         output.flush()?;
