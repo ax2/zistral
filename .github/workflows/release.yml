@@ -37,6 +37,10 @@ jobs:
           if requested: assert requested == tag
           if os.environ['GITHUB_REF_TYPE'] == 'tag': assert os.environ['GITHUB_REF_NAME'] == tag
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f: f.write('tag=' + tag + '\n')
+      - name: Validate current version release notes
+        run: |
+          python scripts/test_release_notes.py
+          python scripts/release_notes.py "${{ steps.version.outputs.tag }}" > /dev/null
       - name: Skip versions already released
         id: check
         env:
@@ -136,6 +140,8 @@ jobs:
       - name: Checksums
         working-directory: artifacts
         run: sha256sum *.zip *.tar.gz *.exe *.deb *.pkg > SHA256SUMS.txt
+      - name: Generate current version release notes
+        run: python scripts/release_notes.py "$RELEASE_TAG" > release-notes.md
       - name: Publish complete release
         run: |
-          gh release create "$RELEASE_TAG" artifacts/* --target "$GITHUB_SHA" --title "Zistral $RELEASE_TAG" --notes-file CHANGELOG.md --latest
+          gh release create "$RELEASE_TAG" artifacts/* --target "$GITHUB_SHA" --title "Zistral $RELEASE_TAG" --notes-file release-notes.md --latest
