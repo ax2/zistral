@@ -1,6 +1,7 @@
 name: Release
 on:
   push:
+    branches: [main]
     tags: ['v*']
   workflow_dispatch:
     inputs:
@@ -11,15 +12,53 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  group: zistral-release
   cancel-in-progress: false
 jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      needed: ${{ steps.check.outputs.needed }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      REQUESTED_TAG: ${{ github.event.inputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve version
+        id: version
+        shell: python
+        run: |
+          import os, re, tomllib
+          tag = 'v' + tomllib.load(open('Cargo.toml', 'rb'))['package']['version']
+          assert re.fullmatch(r'v\d+\.\d+\.\d+', tag)
+          requested = os.environ.get('REQUESTED_TAG')
+          if requested: assert requested == tag
+          if os.environ['GITHUB_REF_TYPE'] == 'tag': assert os.environ['GITHUB_REF_NAME'] == tag
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f: f.write('tag=' + tag + '\n')
+      - name: Skip versions already released
+        id: check
+        env:
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          gh api "repos/$GH_REPO/releases" --paginate --jq '.[].tag_name' > released.txt
+          if grep -Fxq "$RELEASE_TAG" released.txt; then
+            echo 'needed=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'needed=true' >> "$GITHUB_OUTPUT"
+            if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null; then
+              test "$(gh api "repos/$GH_REPO/commits/$RELEASE_TAG" --jq .sha)" = "$GITHUB_SHA"
+            fi
+          fi
   build:
+    needs: prepare
+    if: needs.prepare.outputs.needed == 'true'
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
           - os: windows-latest
             target: x86_64-pc-windows-msvc
@@ -27,7 +66,7 @@ jobs:
             target: aarch64-apple-darwin
     runs-on: ${{ matrix.os }}
     env:
-      RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
       TARGET: ${{ matrix.target }}
     steps:
       - uses: actions/checkout@v4
@@ -78,13 +117,13 @@ jobs:
             dist/*.tar.gz
           if-no-files-found: error
   publish:
-    needs: build
+    needs: [prepare, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     env:
       GH_TOKEN: ${{ github.token }}
-      RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
       GH_REPO: ${{ github.repository }}
     steps:
       - uses: actions/checkout@v4

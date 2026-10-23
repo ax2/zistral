@@ -1,0 +1,3 @@
+# Keep the Windows download standalone: no Visual C++ redistributable installer.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

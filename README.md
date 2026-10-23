@@ -17,7 +17,7 @@ cat notes.txt | zi "Summarize in three sentences" > summary.txt
 Download the archive for your platform from **Releases**, extract `zi` (`zi.exe`
 on Windows), and put it in a directory on your `PATH`. Verify the archive using
 the accompanying `SHA256SUMS.txt`. The first release provides Windows x64,
-Linux x64, and macOS Apple Silicon binaries. macOS Intel users can build from
+Linux x64 (Ubuntu 22.04/glibc 2.35 or newer), and macOS Apple Silicon binaries. macOS Intel users can build from
 source. Binaries are unsigned; no installer, background service, or auto-update
 is installed.
 
@@ -155,7 +155,9 @@ They verify actual subprocess pipes, tool round trips for both protocols,
 Unicode input, invalid input, JSON validation, errors, and step limits. They
 do not prove any particular provider/model's quality or compatibility.
 
-CI runs tests on Windows, Linux, and macOS. Releases build all three platforms,
+CI runs tests on Windows, Linux, and macOS. A new package version on `main`
+automatically starts a release; already published versions are skipped.
+Releases build all three platforms,
 test the binaries, attach archives and SHA-256 checksums, and publish only when
 every build succeeds. See [CONTRIBUTING.md](CONTRIBUTING.md).
 

@@ -13,7 +13,7 @@ git diff | zi "生成一句简洁的提交说明"
 
 从 [Releases](https://github.com/ax2/zistral/releases) 下载对应平台的压缩包，解压后将
 `zi`（Windows 为 `zi.exe`）放到 PATH 目录。使用 `SHA256SUMS.txt` 校验下载文件。
-首版提供 Windows x64、Linux x64、macOS Apple Silicon；其他架构可从源码编译。
+首版提供 Windows x64、Linux x64（glibc 2.35+）、macOS Apple Silicon；其他架构可从源码编译。
 程序未做代码签名。项目名是 `zistral`，命令是 `zi`，尚未发布到 crates.io。
 
 配置你自己的模型服务（模型名称由提供方决定）：
