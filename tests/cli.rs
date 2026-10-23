@@ -53,7 +53,18 @@ fn mock_auth(
     responses: Vec<(u16, Value)>,
     expected_key: Option<&str>,
 ) -> (String, thread::JoinHandle<Vec<Value>>) {
-    let expected_key = expected_key.map(str::to_owned);
+    mock_header(
+        responses,
+        expected_key.map(|key| ("authorization".into(), format!("Bearer {key}"))),
+        None,
+    )
+}
+
+fn mock_header(
+    responses: Vec<(u16, Value)>,
+    expected_header: Option<(String, String)>,
+    expected_path: Option<String>,
+) -> (String, thread::JoinHandle<Vec<Value>>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     listener.set_nonblocking(true).unwrap();
     let url = format!("http://{}/v1", listener.local_addr().unwrap());
@@ -78,21 +89,38 @@ fn mock_auth(
             let mut reader = BufReader::new(stream.try_clone().unwrap());
             let mut length = 0;
             let mut auth = String::new();
+            let mut version = String::new();
+            let mut first_line = true;
             loop {
                 let mut line = String::new();
                 assert!(reader.read_line(&mut line).unwrap() > 0);
+                if first_line {
+                    if let Some(path) = &expected_path {
+                        assert_eq!(line.split_whitespace().nth(1), Some(path.as_str()));
+                    }
+                    first_line = false;
+                }
                 if line == "\r\n" {
                     break;
                 }
                 if let Some(value) = line.to_lowercase().strip_prefix("content-length:") {
                     length = value.trim().parse::<usize>().unwrap();
                 }
-                if line.to_lowercase().starts_with("authorization:") {
+                if expected_header
+                    .as_ref()
+                    .is_some_and(|(name, _)| line.to_lowercase().starts_with(&format!("{name}:")))
+                {
                     auth = line.split_once(':').unwrap().1.trim().to_owned();
                 }
+                if line.to_lowercase().starts_with("anthropic-version:") {
+                    version = line.split_once(':').unwrap().1.trim().to_owned();
+                }
             }
-            if let Some(key) = &expected_key {
-                assert_eq!(auth, format!("Bearer {key}"));
+            if let Some((name, expected)) = &expected_header {
+                assert_eq!(&auth, expected);
+                if name == "x-api-key" {
+                    assert_eq!(version, "2023-06-01");
+                }
             }
             let mut data = vec![0; length];
             reader.read_exact(&mut data).unwrap();
@@ -103,6 +131,109 @@ fn mock_auth(
         requests
     });
     (url, handle)
+}
+
+#[test]
+fn anthropic_tool_roundtrip_with_saved_configuration() {
+    let (url, server) = mock_header(
+        vec![
+            (
+                200,
+                json!({"stop_reason":"tool_use","content":[{"type":"tool_use","id":"c1","name":"count_input","input":{}}]}),
+            ),
+            (
+                200,
+                json!({"stop_reason":"end_turn","content":[{"type":"text","text":"2"}]}),
+            ),
+        ],
+        Some(("x-api-key".into(), "anthropic-test-key".into())),
+        Some("/plan/anthropic/v1/messages".into()),
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let config = dir.path().join("config.toml");
+    let base = url.strip_suffix("/v1").unwrap();
+    std::fs::write(&config, format!("base_url='{base}/plan/anthropic'\napi='anthropic'\nmodel='my-model'\napi_key='anthropic-test-key'\n")).unwrap();
+    let out = invoke(
+        &["--config", config.to_str().unwrap(), "count"],
+        "你好".as_bytes(),
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(out.stdout, b"2\n");
+    let requests = server.join().unwrap();
+    assert!(requests[0]["system"].is_string());
+    assert_eq!(requests[0]["max_tokens"], 4096);
+    assert!(requests[0]["tools"][0]["input_schema"].is_object());
+    let tool: Value = serde_json::from_str(
+        requests[1]["messages"][3]["content"][0]["content"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(tool["characters"], 2);
+}
+
+#[test]
+fn custom_endpoint_is_exact_and_cli_base_override_clears_it() {
+    let (url, server) = mock_header(
+        vec![(200, answer("exact"))],
+        None,
+        Some("/v1/custom/infer".into()),
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let config = dir.path().join("config.toml");
+    std::fs::write(
+        &config,
+        format!("base_url='{url}'\nendpoint='{url}/custom/infer'\napi='chat'\nmodel='test'\n"),
+    )
+    .unwrap();
+    let out = invoke(&["--config", config.to_str().unwrap(), "hello"], b"");
+    assert!(out.status.success());
+    assert_eq!(out.stdout, b"exact\n");
+    server.join().unwrap();
+    let (other, server) = mock_header(
+        vec![(200, answer("override"))],
+        None,
+        Some("/v1/chat/completions".into()),
+    );
+    let out = invoke(
+        &[
+            "--config",
+            config.to_str().unwrap(),
+            "--base-url",
+            &other,
+            "hello",
+        ],
+        b"",
+    );
+    assert!(out.status.success());
+    server.join().unwrap();
+}
+
+#[test]
+fn anthropic_truncation_never_emits_partial_output() {
+    let (url, server) = mock(vec![(
+        200,
+        json!({"stop_reason":"max_tokens","content":[{"type":"text","text":"partial"}]}),
+    )]);
+    let out = invoke(
+        &[
+            "--base-url",
+            &url,
+            "--api",
+            "anthropic",
+            "--model",
+            "test",
+            "hello",
+        ],
+        b"",
+    );
+    assert!(!out.status.success());
+    assert!(out.stdout.is_empty());
+    server.join().unwrap();
 }
 
 #[test]

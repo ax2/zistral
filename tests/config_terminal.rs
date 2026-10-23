@@ -5,6 +5,14 @@ use std::time::{Duration, Instant};
 
 // Exercise the real terminal, including Windows ConPTY and hidden password entry.
 fn configure(path: &std::path::Path, answers: &[(&str, &str)]) -> String {
+    configure_from(path, answers, None)
+}
+
+fn configure_from(
+    path: &std::path::Path,
+    answers: &[(&str, &str)],
+    home: Option<&std::path::Path>,
+) -> String {
     let pair = native_pty_system()
         .openpty(PtySize {
             rows: 30,
@@ -13,8 +21,17 @@ fn configure(path: &std::path::Path, answers: &[(&str, &str)]) -> String {
             pixel_height: 0,
         })
         .unwrap();
-    let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_zi"));
+    let binary =
+        std::env::var_os("ZISTRAL_TEST_BINARY").unwrap_or_else(|| env!("CARGO_BIN_EXE_zi").into());
+    let mut cmd = CommandBuilder::new(binary);
     cmd.args(["config", "--config", path.to_str().unwrap()]);
+    if let Some(home) = home {
+        cmd.env("HOME", home);
+        cmd.env("USERPROFILE", home);
+        cmd.env("CODEX_HOME", home.join(".codex"));
+    } else {
+        cmd.arg("--manual");
+    }
     for name in [
         "ZI_MODEL",
         "ZI_API",
@@ -94,6 +111,86 @@ fn configure(path: &std::path::Path, answers: &[(&str, &str)]) -> String {
         transcript.push_str(&String::from_utf8_lossy(&bytes));
     }
     transcript
+}
+
+fn source(home: &std::path::Path, path: &str, contents: &str) {
+    let path = home.join(path);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, contents).unwrap();
+}
+
+#[test]
+fn detected_workbuddy_import_skips_key_prompt_and_preserves_source() {
+    let home = tempfile::tempdir().unwrap();
+    let contents = r#"[{"id":"imported-model","url":"https://example.com/v1/chat/completions","apiKey":"import-test-secret"}]"#;
+    source(home.path(), ".workbuddy/models.json", contents);
+    let path = home.path().join("zi/config.toml");
+    let transcript = configure_from(&path, &[("Configuration source", "1")], Some(home.path()));
+    assert!(transcript.contains("WorkBuddy"));
+    assert!(!transcript.contains("import-test-secret"));
+    assert!(!transcript.contains("API Key ["));
+    let saved: toml::Value = toml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    assert_eq!(saved["api_key"].as_str(), Some("import-test-secret"));
+    assert_eq!(saved["base_url"].as_str(), Some("https://example.com/v1"));
+    assert_eq!(
+        std::fs::read_to_string(home.path().join(".workbuddy/models.json")).unwrap(),
+        contents
+    );
+}
+
+#[test]
+fn detected_codex_without_key_prompts_only_for_key() {
+    let home = tempfile::tempdir().unwrap();
+    source(
+        home.path(),
+        ".codex/config.toml",
+        "model='imported-model'\nmodel_provider='custom'\n[model_providers.custom]\nbase_url='https://example.com/v1'\nwire_api='responses'\n",
+    );
+    source(
+        home.path(),
+        ".codex/auth.json",
+        r#"{"auth_mode":"chatgpt","tokens":{"access_token":"not-an-api-key"}}"#,
+    );
+    let path = home.path().join("zi/config.toml");
+    let transcript = configure_from(
+        &path,
+        &[
+            ("Configuration source", "1"),
+            ("API Key", "supplied-test-secret"),
+        ],
+        Some(home.path()),
+    );
+    assert!(transcript.contains("account sign-in"));
+    assert!(!transcript.contains("not-an-api-key"));
+    assert!(!transcript.contains("supplied-test-secret"));
+    assert!(!transcript.contains("Service URL ["));
+    let saved: toml::Value = toml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    assert_eq!(saved["api"].as_str(), Some("responses"));
+    assert_eq!(saved["api_key"].as_str(), Some("supplied-test-secret"));
+}
+
+#[test]
+fn detected_dsh_resolves_provider_credential_reference() {
+    let home = tempfile::tempdir().unwrap();
+    source(
+        home.path(),
+        ".dsh/profiles/desktop/cordis.patch.yml",
+        "- name: '@deepseek-ai/dsh-llm-pi-ai'\n  config:\n    providers:\n      custom:\n        baseURL: https://example.com/anthropic\n        api: anthropic-messages\n        apiKeyEnv: ZISTRAL_TERMINAL_TEST_KEY\n        models: [{id: dsh-model}]\n",
+    );
+    let credentials = "refs:\n  ZISTRAL_TERMINAL_TEST_KEY: dsh-test-secret\n";
+    source(home.path(), ".dsh/.credentials.yaml", credentials);
+    let path = home.path().join("zi/config.toml");
+    let transcript = configure_from(&path, &[("Configuration source", "1")], Some(home.path()));
+    assert!(!transcript.contains("API Key ["));
+    assert!(!transcript.contains("dsh-test-secret"));
+    let saved: toml::Value = toml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    assert_eq!(saved["model"].as_str(), Some("dsh-model"));
+    assert_eq!(saved["api"].as_str(), Some("anthropic"));
+    assert_eq!(saved["api_key"].as_str(), Some("dsh-test-secret"));
+    assert_eq!(
+        std::fs::read_to_string(home.path().join(".dsh/.credentials.yaml")).unwrap(),
+        credentials
+    );
 }
 
 #[test]

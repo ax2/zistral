@@ -29,6 +29,7 @@ pub fn run(settings: &Settings, cli: &Cli, input: &str) -> Result<String> {
     }
     messages.push(json!({"role":"user","content":prompt}));
     let responses = settings.api == "responses";
+    let anthropic = settings.api == "anthropic";
     let mut tools = data::tool_definitions();
     if responses {
         tools = tools
@@ -42,21 +43,37 @@ pub fn run(settings: &Settings, cli: &Cli, input: &str) -> Result<String> {
             })
             .collect();
     }
-    let endpoint = format!(
-        "{}/{}",
-        settings.base_url,
-        if responses {
-            "responses"
-        } else {
-            "chat/completions"
-        }
-    );
+    if anthropic {
+        tools = tools.into_iter().map(|t| json!({"name":t["function"]["name"],"description":t["function"]["description"],"input_schema":t["function"]["parameters"]})).collect();
+        messages.remove(0);
+    }
+    let endpoint = settings.endpoint.clone().unwrap_or_else(|| {
+        format!(
+            "{}/{}",
+            settings.base_url,
+            if anthropic {
+                if settings.base_url.ends_with("/v1") {
+                    "messages"
+                } else {
+                    "v1/messages"
+                }
+            } else if responses {
+                "responses"
+            } else {
+                "chat/completions"
+            }
+        )
+    });
     for step in 0..cli.max_steps {
         if cli.verbose {
             eprintln!("zi: request {}/{}", step + 1, cli.max_steps);
         }
         let mut body = json!({"model":settings.model,"stream":false});
-        if responses {
+        if anthropic {
+            body["system"] = json!(system);
+            body["messages"] = json!(messages);
+            body["max_tokens"] = json!(cli.max_output_tokens);
+        } else if responses {
             body["input"] = json!(messages);
             body["store"] = json!(false);
         } else {
@@ -67,7 +84,14 @@ pub fn run(settings: &Settings, cli: &Cli, input: &str) -> Result<String> {
         }
         let mut request = client.post(&endpoint).json(&body);
         if let Some(key) = &settings.api_key {
-            request = request.bearer_auth(key);
+            request = if anthropic {
+                request.header("x-api-key", key)
+            } else {
+                request.bearer_auth(key)
+            };
+        }
+        if anthropic {
+            request = request.header("anthropic-version", "2023-06-01");
         }
         let response = request.send().context("API request failed")?;
         let status = response.status();
@@ -92,7 +116,9 @@ pub fn run(settings: &Settings, cli: &Cli, input: &str) -> Result<String> {
         }
         let result: Value =
             serde_json::from_slice(&bytes).context("API did not return valid JSON")?;
-        let answer = if responses {
+        let answer = if anthropic {
+            handle_anthropic(&result, &mut messages, cli, input)?
+        } else if responses {
             handle_responses(&result, &mut messages, cli, input)?
         } else {
             handle_chat(&result, &mut messages, cli, input)?
@@ -105,6 +131,54 @@ pub fn run(settings: &Settings, cli: &Cli, input: &str) -> Result<String> {
         "agent reached --max-steps {}; no final answer produced",
         cli.max_steps
     )
+}
+
+fn handle_anthropic(
+    result: &Value,
+    messages: &mut Vec<Value>,
+    cli: &Cli,
+    input: &str,
+) -> Result<Option<String>> {
+    if !matches!(
+        result["stop_reason"].as_str(),
+        Some("end_turn" | "tool_use" | "stop_sequence")
+    ) {
+        bail!(
+            "provider returned an incomplete or declined Anthropic answer; nothing written to stdout"
+        );
+    }
+    let content = result["content"]
+        .as_array()
+        .context("Anthropic result has no content")?;
+    let calls: Vec<_> = content.iter().filter(|c| c["type"] == "tool_use").collect();
+    if calls.len() > 32 {
+        bail!("provider requested more than 32 tools in one turn");
+    }
+    if !calls.is_empty() {
+        messages.push(json!({"role":"assistant","content":content}));
+        let mut results = Vec::new();
+        for call in calls {
+            let id = call["id"].as_str().context("tool call missing id")?;
+            let name = call["name"].as_str().context("tool call missing name")?;
+            let args = call
+                .get("input")
+                .context("tool call missing input")?
+                .to_string();
+            let result = tool_result(cli, name, &args, input)?;
+            results.push(json!({"type":"tool_result","tool_use_id":id,"content":result}));
+        }
+        messages.push(json!({"role":"user","content":results}));
+        return Ok(None);
+    }
+    let text: String = content
+        .iter()
+        .filter(|v| v["type"] == "text")
+        .filter_map(|v| v["text"].as_str())
+        .collect();
+    if text.is_empty() {
+        bail!("provider returned neither text nor tool calls");
+    }
+    Ok(Some(text))
 }
 
 fn tool_result(cli: &Cli, name: &str, arguments: &str, input: &str) -> Result<String> {

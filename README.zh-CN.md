@@ -16,11 +16,34 @@ git diff | zi "生成一句简洁的提交说明"
 首版提供 Windows x64、Linux x64（glibc 2.35+）、macOS Apple Silicon；其他架构可从源码编译。
 程序未做代码签名。项目名是 `zistral`，命令是 `zi`，尚未发布到 crates.io。
 
-首次运行配置向导，依次设置模型服务地址、模型名称、接口协议和 API Key：
+首次运行配置向导，自动检测 Codex、WorkBuddy 和 dsh 中已有的模型配置：
 
 ```sh
 zi config
 ```
+
+选择检测到的模型后，自动导入服务地址、模型名称、接口协议和 API Key；找到 Key 时无需重复输入，
+缺少 Key 时再隐藏提示填写。选择 `0` 可手动配置。来源智能体的文件保持原样。
+
+```sh
+zi config --list     # 只预览模型列表，显示 Key 是否存在，不显示 Key
+zi config --manual   # 跳过检测，手动配置或修改现有设置
+```
+
+支持的配置来源：
+
+- Codex：`$CODEX_HOME/config.toml` 或 `~/.codex/config.toml`，包括自定义 provider、命名 profile、环境变量和 `auth.json` 中的普通 API Key。
+- WorkBuddy：`~/.workbuddy/models.json`，兼容 `~/.codebuddy/models.json`。完整请求地址和自定义路径会正确处理。
+- dsh：`~/.dsh/profiles/*/cordis.yml` 与 `cordis.patch.yml`，合并模型 provider 配置，解析对应环境变量或 `.dsh/.credentials.yaml` 中的 API Key 引用。
+
+Codex 的 ChatGPT 账号登录与订阅凭据不会被当作 API Key 导入；没有普通 API Key 时需要补填。
+也不会导入 dsh 的浏览器会话或账号访问令牌，不执行任何来源的认证命令或插件。
+需要额外认证请求头、查询参数、命令认证或不支持协议的配置会说明原因并跳过。
+单个来源格式错误不会阻止其他来源和手动配置。配置文件上限 2 MiB，最多列出 512 个候选项。
+
+支持 `chat`、`responses` 和 `anthropic` 三种协议，其中 `anthropic` 适配 dsh 的 Anthropic Messages 服务。
+Anthropic 地址末尾没有 `/v1` 时会使用 `/v1/messages`，已有 `/v1` 时使用 `/messages`。
+`--max-output-tokens` 可调整 Anthropic 输出上限，默认 4096。
 
 配置会自动保存，此后无需设置环境变量即可调用：
 
@@ -28,7 +51,7 @@ zi config
 cat 1.txt | zi '统计汉字数量'
 ```
 
-再次运行 `zi config` 可修改配置，回车保留原值。Key 输入时隐藏，不会显示已有 Key；
+运行 `zi config --manual` 可修改现有配置，回车保留原值。Key 输入时隐藏，不会显示已有 Key；
 输入 `-` 可清除已保存的 Key，便于切换到无需认证的本地服务。Ctrl+C 中途取消不会覆盖原文件。
 也支持 `zi config --config PATH`。向导需要交互终端，不接收管道输入。
 OpenAI 服务默认选择 `responses`，其他兼容服务默认 `chat`，可按提供方要求修改。
@@ -98,7 +121,7 @@ cat 1.json | zi --select /abc/0 --join ','
 源码构建：
 
 ```sh
-cargo install --git https://github.com/ax2/zistral --tag v0.2.0 --locked
+cargo install --git https://github.com/ax2/zistral --tag v0.3.0 --locked
 ```
 
 更多配置、精确定义、开发与验证范围见 [English README](README.md)。MIT 开源协议。

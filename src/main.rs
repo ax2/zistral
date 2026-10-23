@@ -1,6 +1,7 @@
 mod agent;
 mod config;
 mod data;
+mod imports;
 
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
@@ -32,7 +33,7 @@ pub struct Cli {
     #[arg(long, env = "ZI_BASE_URL")]
     base_url: Option<String>,
     /// Wire protocol: chat or responses
-    #[arg(long, env = "ZI_API", value_parser = ["chat", "responses"])]
+    #[arg(long, env = "ZI_API", value_parser = ["chat", "responses", "anthropic"])]
     api: Option<String>,
     /// Configuration file (default: platform config directory/zistral/config.toml)
     #[arg(long, env = "ZI_CONFIG", global = true)]
@@ -55,6 +56,9 @@ pub struct Cli {
     /// Timeout per HTTP request in seconds
     #[arg(long, default_value_t = 120, value_parser = clap::value_parser!(u64).range(1..=3600))]
     timeout: u64,
+    /// Maximum output tokens for the Anthropic Messages API
+    #[arg(long, default_value_t = 4096, value_parser = clap::value_parser!(u32).range(1..=65536))]
+    max_output_tokens: u32,
     /// Maximum input size in bytes
     #[arg(long, default_value_t = 8_388_608, value_parser = clap::value_parser!(u64).range(1..=67_108_864))]
     max_input: u64,
@@ -72,7 +76,14 @@ pub struct Cli {
 #[derive(Subcommand, Debug)]
 enum Commands {
     /// Interactively save the service URL, model, protocol, and hidden API key
-    Config,
+    Config {
+        /// Skip detection and enter settings manually
+        #[arg(long)]
+        manual: bool,
+        /// List detected model configurations without importing or showing keys
+        #[arg(long, conflicts_with = "manual")]
+        list: bool,
+    },
 }
 
 fn read_input(cli: &Cli) -> Result<String> {
@@ -101,7 +112,7 @@ fn read_input(cli: &Cli) -> Result<String> {
 }
 
 fn run(cli: Cli) -> Result<()> {
-    if cli.command.is_some() {
+    if let Some(Commands::Config { manual, list }) = &cli.command {
         if cli.input.is_some()
             || cli.count
             || cli.select.is_some()
@@ -113,7 +124,10 @@ fn run(cli: Cli) -> Result<()> {
         {
             bail!("zi config only accepts --config PATH; see zi config --help");
         }
-        return config::configure(&cli);
+        if *list {
+            return config::list_imports();
+        }
+        return config::configure(&cli, *manual);
     }
     if cli.config_example {
         return write_output(config::EXAMPLE);

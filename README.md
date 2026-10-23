@@ -24,7 +24,7 @@ is installed.
 Build from source with Rust 1.85+ (a current stable toolchain is recommended):
 
 ```sh
-cargo install --git https://github.com/ax2/zistral --tag v0.2.0 --locked
+cargo install --git https://github.com/ax2/zistral --tag v0.3.0 --locked
 ```
 
 The package is named `zistral`; the installed command is `zi`. It is not yet
@@ -41,7 +41,13 @@ Run the interactive setup once:
 zi config
 ```
 
-Enter the service URL (normally ending in `/v1`), model name, API protocol,
+The wizard detects existing **Codex**, **WorkBuddy/CodeBuddy**, and **dsh** model
+configurations. Select a detected model to import its service URL, model,
+protocol, and API key. If a key is available, no re-entry is needed; otherwise
+the wizard asks for a hidden key. Select `0` to enter settings manually or keep
+editing the current settings. Nothing is changed in the source agents.
+
+For manual setup, enter the service URL (normally ending in `/v1`), model name, API protocol,
 and API key. The protocol defaults to `responses` for api.openai.com and `chat`
 for compatible/local services. API key input is hidden. The settings are saved
 locally and used automatically by subsequent commands:
@@ -50,12 +56,40 @@ locally and used automatically by subsequent commands:
 cat article.txt | zi 'Summarize in three sentences'
 ```
 
-Run `zi config` again to edit settings; Enter keeps each saved value. Enter `-`
+Run `zi config --manual` to edit saved settings; Enter keeps each saved value. Enter `-`
 at the API key prompt to remove a saved key, for example when switching to a
 local service. Ctrl+C cancels without replacing the configuration. You can
 choose another file with `zi config --config PATH`. The wizard requires a
 terminal and does not consume piped data. To use the single word `config` as a
 model instruction instead of the setup command, use `zi -- config`.
+
+Preview discovery without a terminal or saving anything:
+
+```sh
+zi config --list
+```
+
+| Source | Imported configuration |
+| --- | --- |
+| Codex | `$CODEX_HOME/config.toml` or `~/.codex/config.toml`, including named profiles, provider URL, wire API, environment API key, or API key in `auth.json` |
+| WorkBuddy | `~/.workbuddy/models.json`, with `~/.codebuddy/models.json` as an additional source; complete `/chat/completions` URLs are normalized |
+| dsh | `~/.dsh/profiles/*/cordis.yml` and `cordis.patch.yml`; model-provider overrides are merged, with keys resolved from the named environment variable or `.dsh/.credentials.yaml` refs |
+
+Codex ChatGPT account/subscription tokens are **not API keys** and are not
+imported. A provider using command authentication, extra headers/query parameters,
+or an unsupported protocol is skipped with an explanation. The importer never
+runs credential commands or plugins. dsh account/browser tokens are not imported;
+only provider API-key references are resolved. Invalid sources do not block
+other sources or manual setup. At most 512 candidates are listed, and each
+configuration file is limited to 2 MiB. Source schema changes may require a
+future adapter update.
+
+Supported protocols are `chat`, `responses`, and `anthropic` (Anthropic Messages,
+including dsh's `anthropic-messages` providers). Anthropic roots without `/v1`
+use `/v1/messages`; roots already ending in `/v1` use `/messages`.
+`--max-output-tokens` sets the Anthropic output limit (default 4096). WorkBuddy
+custom-protocol URLs are preserved as an exact `endpoint` in the saved config;
+overriding `--base-url` or `--api` discards that exact endpoint for the request.
 
 The key is stored in the local TOML config, not in an encrypted keychain.
 Linux/macOS config files are written with mode `0600`; Windows files use the
@@ -182,8 +216,9 @@ cargo build --release --locked
 ```
 
 Integration tests use local mock HTTP servers and require no paid API access.
-They verify actual subprocess pipes, a real terminal configuration session with
-hidden key entry, saved configuration and environment precedence, tool round trips for both protocols,
+They verify actual subprocess pipes, real terminal configuration/import sessions with
+hidden key entry, source preservation, missing keys, saved configuration and
+environment precedence, tool round trips for all three protocols,
 Unicode input, invalid input, JSON validation, errors, and step limits. They
 do not prove any particular provider/model's quality or compatibility.
 

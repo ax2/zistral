@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.0 — 2026-10-23
+
+- Automatically discover and import Codex, WorkBuddy/CodeBuddy, and dsh model
+  settings from `zi config`; ask for a hidden key only when no API key is found.
+- Add `zi config --list` for redacted discovery and `--manual` for direct editing.
+- Resolve Codex profiles, WorkBuddy full/custom URLs, dsh profile patches and
+  provider credential references while leaving all source files untouched.
+- Identify account/subscription authentication without copying its login tokens
+  or executing credential commands. Malformed/unsupported sources are explained.
+- Add Anthropic Messages support for imported dsh providers, including tool
+  round trips, exact endpoints, and explicit truncated-answer errors.
+- Test each import path in real terminals and all three API protocols with mocks.
+
 ## 0.2.0 — 2026-10-23
 
 - Add `zi config`, an interactive setup wizard for service URL, model, API

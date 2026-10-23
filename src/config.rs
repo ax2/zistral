@@ -26,6 +26,7 @@ struct FileConfig {
     api: Option<String>,
     api_key_env: Option<String>,
     api_key: Option<String>,
+    endpoint: Option<String>,
 }
 
 pub struct Settings {
@@ -33,6 +34,7 @@ pub struct Settings {
     pub base_url: String,
     pub api: String,
     pub api_key: Option<String>,
+    pub endpoint: Option<String>,
 }
 
 fn config_path() -> Option<PathBuf> {
@@ -64,7 +66,7 @@ fn read_config(path: &Path, allow_missing: bool) -> Result<FileConfig> {
     }
 }
 
-fn validate_url(base_url: &str) -> Result<reqwest::Url> {
+pub(crate) fn validate_url(base_url: &str) -> Result<reqwest::Url> {
     let url = reqwest::Url::parse(base_url).map_err(|_| anyhow!("invalid API base URL"))?;
     if !matches!(url.scheme(), "http" | "https")
         || url.host_str().is_none()
@@ -83,7 +85,102 @@ fn validate_url(base_url: &str) -> Result<reqwest::Url> {
     Ok(url)
 }
 
-pub fn configure(cli: &Cli) -> Result<()> {
+pub fn list_imports() -> Result<()> {
+    let found = crate::imports::discover();
+    print_imports(&found, &mut io::stdout().lock())
+}
+
+fn print_imports(found: &crate::imports::Discovery, output: &mut impl Write) -> Result<()> {
+    for note in &found.notes {
+        writeln!(output, "{note}")?;
+    }
+    if found.candidates.is_empty() {
+        writeln!(
+            output,
+            "No compatible model configurations found. Manual setup is available."
+        )?;
+    }
+    for (i, candidate) in found.candidates.iter().enumerate() {
+        writeln!(
+            output,
+            "{}. {}: {} [{}; Key {}]",
+            i + 1,
+            crate::imports::display(&candidate.source),
+            crate::imports::display(&candidate.model),
+            candidate.api,
+            if candidate.api_key.is_some() {
+                "found"
+            } else {
+                "missing"
+            }
+        )?;
+    }
+    Ok(())
+}
+
+fn import_config(
+    found: crate::imports::Discovery,
+    ask: &mut impl FnMut(&str, bool) -> Result<String>,
+    output: &mut impl Write,
+) -> Result<Option<FileConfig>> {
+    print_imports(&found, output)?;
+    if found.candidates.is_empty() {
+        return Ok(None);
+    }
+    writeln!(output, "0. Manual setup / keep saved settings")?;
+    let index = loop {
+        let answer = ask("Configuration source [0]", false)?;
+        if answer.trim().is_empty() || answer.trim() == "0" {
+            return Ok(None);
+        }
+        if let Ok(index) = answer.trim().parse::<usize>() {
+            if index > 0 && index <= found.candidates.len() {
+                break index - 1;
+            }
+        }
+        writeln!(
+            output,
+            "Choose a number from 0 to {}.",
+            found.candidates.len()
+        )?;
+    };
+    let candidate = found
+        .candidates
+        .into_iter()
+        .nth(index)
+        .expect("validated selection");
+    let mut key = candidate.api_key;
+    while key.is_none() {
+        let answer = ask("API Key [hidden; Enter for no key]", true)?;
+        key = nonempty(Some(answer.trim().to_owned()));
+        if key.is_some()
+            || !matches!(
+                validate_url(&candidate.base_url)?.host_str(),
+                Some("api.openai.com" | "api.anthropic.com")
+            )
+        {
+            break;
+        }
+        writeln!(output, "API Key is required for this service.")?;
+    }
+    writeln!(
+        output,
+        "Imported {}: {} ({}).",
+        crate::imports::display(&candidate.source),
+        crate::imports::display(&candidate.model),
+        candidate.api
+    )?;
+    Ok(Some(FileConfig {
+        model: Some(candidate.model),
+        base_url: Some(candidate.base_url),
+        api: Some(candidate.api),
+        api_key: key,
+        api_key_env: None,
+        endpoint: candidate.endpoint,
+    }))
+}
+
+pub fn configure(cli: &Cli, manual: bool) -> Result<()> {
     if !io::stdin().is_terminal() {
         bail!("zi config requires an interactive terminal; run it without piped input");
     }
@@ -112,7 +209,15 @@ pub fn configure(cli: &Cli) -> Result<()> {
             Ok(line.trim_end_matches(['\r', '\n']).into())
         }
     };
-    let updated = collect_config(cli, file, &mut ask, &mut output)?;
+    let imported = if manual {
+        None
+    } else {
+        import_config(crate::imports::discover(), &mut ask, &mut output)?
+    };
+    let updated = match imported {
+        Some(file) => file,
+        None => collect_config(cli, file, &mut ask, &mut output)?,
+    };
     save_config(&path, &updated)?;
     writeln!(
         output,
@@ -190,7 +295,7 @@ fn collect_config(
     )?;
     let openai = validate_url(&base_url)?.host_str() == Some("api.openai.com");
     let api = ask_value(
-        "API protocol (chat/responses)",
+        "API protocol (chat/responses/anthropic)",
         cli.api
             .as_deref()
             .or(file.api.as_deref())
@@ -198,8 +303,8 @@ fn collect_config(
         ask,
         output,
         |v| {
-            if !matches!(v, "chat" | "responses") {
-                bail!("choose chat or responses");
+            if !matches!(v, "chat" | "responses" | "anthropic") {
+                bail!("choose chat or responses or anthropic");
             }
             Ok(())
         },
@@ -222,6 +327,11 @@ fn collect_config(
         }
         file.api_key = key;
         break;
+    }
+    if file.base_url.as_deref() != Some(base_url.trim_end_matches('/'))
+        || file.api.as_deref() != Some(api.as_str())
+    {
+        file.endpoint = None;
     }
     file.base_url = Some(base_url.trim_end_matches('/').into());
     file.model = Some(model);
@@ -279,8 +389,8 @@ impl Settings {
             .clone()
             .or(file.api)
             .unwrap_or_else(|| "chat".into());
-        if !matches!(api.as_str(), "chat" | "responses") {
-            bail!("api must be chat or responses");
+        if !matches!(api.as_str(), "chat" | "responses" | "anthropic") {
+            bail!("api must be chat or responses or anthropic");
         }
         let key_env = file.api_key_env.unwrap_or_else(|| "OPENAI_API_KEY".into());
         let api_key = nonempty(std::env::var("ZI_API_KEY").ok())
@@ -289,11 +399,23 @@ impl Settings {
         if url.host_str() == Some("api.openai.com") && api_key.is_none() {
             bail!("set ZI_API_KEY or {key_env}; local servers may run without a key");
         }
+        let endpoint = if cli.base_url.is_none() && cli.api.is_none() {
+            file.endpoint
+        } else {
+            None
+        };
+        if let Some(endpoint) = &endpoint {
+            let exact = validate_url(endpoint)?;
+            if url.origin() != exact.origin() {
+                bail!("configured endpoint must have the same origin as base_url");
+            }
+        }
         Ok(Self {
             model,
             base_url: base_url.trim_end_matches('/').into(),
             api,
             api_key,
+            endpoint,
         })
     }
 }
@@ -378,6 +500,7 @@ mod tests {
             api: Some("chat".into()),
             api_key: Some("test-secret".into()),
             api_key_env: Some("CUSTOM_API_KEY".into()),
+            endpoint: None,
         };
         let (updated, _, prompts) = collect(file, &["", "", "", ""]);
         assert_eq!(updated.model.as_deref(), Some("existing"));
