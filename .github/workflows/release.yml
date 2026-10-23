@@ -13,7 +13,7 @@ permissions:
   contents: read
 concurrency:
   group: zistral-release
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   prepare:
     runs-on: ubuntu-latest
@@ -121,8 +121,16 @@ jobs:
             dist/*.deb
             dist/*.pkg
           if-no-files-found: error
+  msrv:
+    needs: prepare
+    if: needs.prepare.outputs.needed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install 1.85.0 --profile minimal
+      - run: cargo +1.85.0 check --locked
   publish:
-    needs: [prepare, build]
+    needs: [prepare, build, msrv]
     runs-on: ubuntu-latest
     permissions:
       contents: write
