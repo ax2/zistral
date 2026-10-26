@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.8.1 — 2026-10-26
+
+- Display the native `transform_input` tool as "Transform input" in rich terminal
+  activity instead of the misleading "Unknown tool" fallback.
+- Add a real-terminal regression that reads a fixture file, completes the two-request
+  native transformation loop and verifies the tool label and final output. Confirm the
+  regression fails against the published v0.8.0 executable before applying the fix.
+- Keep offline computation, model protocols, permissions, pipeline output and runtime
+  dependencies unchanged; publish complete installers for Windows, Linux and macOS.
+
 ## 0.8.0 — 2026-10-26
 
 - Add offline `zi data` operations: trim Unicode whitespace per line, keep first

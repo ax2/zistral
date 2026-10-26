@@ -219,6 +219,7 @@ impl Activity {
         let label = match name {
             "count_input" => "Count input",
             "select_input" => "Select JSON",
+            "transform_input" => "Transform input",
             "project_info" => "Project instructions",
             "list_files" => "List files",
             "read_file" => "Read file",

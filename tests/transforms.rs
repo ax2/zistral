@@ -297,3 +297,96 @@ fn tool_argument_and_output_limits_return_errors_to_model_without_partial_output
         task.join().unwrap();
     }
 }
+
+#[test]
+fn rich_terminal_names_native_transform_correctly() {
+    use portable_pty::{CommandBuilder, PtySize, native_pty_system};
+    use std::sync::mpsc;
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("lines.txt");
+    std::fs::write(&source, "b\na\nb\n").unwrap();
+    let (url, server) = model("chat", json!({"operation":"dedupe"}), json!("b\na\n"));
+    let pair = native_pty_system()
+        .openpty(PtySize {
+            rows: 30,
+            cols: 100,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .unwrap();
+    let binary =
+        std::env::var_os("ZISTRAL_TEST_BINARY").unwrap_or_else(|| env!("CARGO_BIN_EXE_zi").into());
+    let mut cmd = CommandBuilder::new(binary);
+    cmd.args([
+        "--base-url",
+        &url,
+        "--model",
+        "fixture",
+        "-i",
+        source.to_str().unwrap(),
+        "--no-stream",
+        "dedupe",
+    ]);
+    cmd.cwd(root.path());
+    for (name, _) in std::env::vars() {
+        if name.starts_with("ZI_")
+            || matches!(
+                name.to_uppercase().as_str(),
+                "OPENAI_API_KEY"
+                    | "ANTHROPIC_API_KEY"
+                    | "NO_COLOR"
+                    | "HTTP_PROXY"
+                    | "HTTPS_PROXY"
+                    | "ALL_PROXY"
+            )
+        {
+            cmd.env_remove(name);
+        }
+    }
+    cmd.env("APPDATA", root.path().join("config"));
+    cmd.env("XDG_CONFIG_HOME", root.path().join("config"));
+    cmd.env("TERM", "xterm-256color");
+    cmd.env("NO_PROXY", "*");
+    let mut child = pair.slave.spawn_command(cmd).unwrap();
+    drop(pair.slave);
+    let mut reader = pair.master.try_clone_reader().unwrap();
+    let mut writer = pair.master.take_writer().unwrap();
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut b = [0; 4096];
+        while let Ok(n) = reader.read(&mut b) {
+            if n == 0 || tx.send(b[..n].to_vec()).is_err() {
+                break;
+            }
+        }
+    });
+    let mut transcript = String::new();
+    let mut queries = 0;
+    let end = Instant::now() + Duration::from_secs(20);
+    loop {
+        if let Ok(bytes) = rx.recv_timeout(Duration::from_millis(50)) {
+            transcript.push_str(&String::from_utf8_lossy(&bytes));
+            let count = transcript.matches("\x1b[6n").count();
+            for _ in queries..count {
+                writer.write_all(b"\x1b[1;1R").unwrap();
+            }
+            writer.flush().unwrap();
+            queries = count;
+        }
+        if let Some(status) = child.try_wait().unwrap() {
+            assert!(status.success(), "{transcript}");
+            while let Ok(bytes) = rx.recv_timeout(Duration::from_millis(100)) {
+                transcript.push_str(&String::from_utf8_lossy(&bytes));
+            }
+            break;
+        }
+        if Instant::now() > end {
+            child.kill().ok();
+            panic!("terminal timed out: {transcript}");
+        }
+    }
+    server.join().unwrap();
+    assert!(transcript.contains("Transform input"), "{transcript}");
+    assert!(!transcript.contains("Unknown tool"), "{transcript}");
+    assert!(transcript.contains("verified"), "{transcript}");
+}
