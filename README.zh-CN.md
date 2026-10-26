@@ -17,7 +17,7 @@ git diff | zi "生成一句简洁的提交说明"
 | 平台 | 安装包 | 安装方法 |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | 双击安装，无需管理员权限，自动添加用户 PATH 和开始菜单入口 |
-| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.16.2-linux-amd64.deb` |
+| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.17.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | 双击安装，命令放到 `/usr/local/bin/zi` |
 
 安装后直接运行 `zi`。Windows 安装结束可立即启动，或在开始菜单打开 zi；
@@ -404,3 +404,7 @@ zi data --recipe records.toml -i response.json -o records.jsonl
 
 维护者：[发版流程](docs/releasing.md)。普通 main 提交只运行 CI，正式发布由显式发版分支、
 版本标签或版本一致的手动入口触发。
+
+模型回合先校验再执行工具：未完成的 Chat 回答会失败，工具批次后面的关联信息出错，
+不会先执行前面的有效调用。正常工具参数错误仍反馈给模型修正。
+见[响应校验与流式边界](docs/provider-turns.md)。

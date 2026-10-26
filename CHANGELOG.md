@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.17.0 — 2026-10-26
+
+- Validate supported provider turns before dispatching tools. Reject missing/unknown Chat
+  finish reasons and Chat/Anthropic stop states that contradict their tool-call phase;
+  do not save incomplete Chat text as a successful result.
+- Preflight the whole batch of up to 32 calls across Chat, Responses and Anthropic: required
+  nonblank unique per-turn IDs, names and argument-field shapes. Check refusal/text errors
+  before executing a valid prefix, preserving files when later protocol metadata is malformed.
+- Keep absent streamed Chat arguments absent until a real fragment arrives; reject malformed
+  stream field types. Preserve normal native tool-error recovery, correctly correlated
+  32-call results, per-turn ID reuse and explicit streaming's partial-text behavior.
+  No new dependencies, tool names, permissions, retry policy or persistent memory.
+
 ## 0.16.2 — 2026-10-26
 
 - Separate regular commits from publication: main pushes run CI without starting Release.

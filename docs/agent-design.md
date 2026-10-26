@@ -132,3 +132,17 @@ uses the existing lexical JSON traversal, but returns quoted JSON strings for co
 select_input and CLI --select retain decoded display/join behavior. Pointer syntax/limits
 are validated before input, and the complete source JSON is validated before selection.
 Main-loop, original-input-per-call and project permission rules remain unchanged.
+
+## Provider-turn preflight (v0.17.0)
+
+`agent.rs` checks terminal status/refusal/text shapes, then prepares the entire supported
+tool batch before history updates or tool dispatch. IDs must be nonblank and unique in
+one turn; names/argument field shapes must be present. Chat and Anthropic completion phases
+must agree with whether calls exist. Native argument/schema failures still return model
+observations; this is protocol validation, not a transaction or rollback of valid tools.
+`stream.rs` retains missing Chat arguments as null until a real string fragment arrives,
+so assembly cannot turn an absent field into apparently supplied empty arguments. Explicit
+empty strings remain tool arguments and can return normal recoverable JSON/schema errors.
+Known malformed text/metadata fields fail before tools, including a later Responses refusal.
+Explicit streaming can already have displayed text; it does not commit tool side effects
+before a completed, validated turn. See [provider-turn contract](provider-turns.md).

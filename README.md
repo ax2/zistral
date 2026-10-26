@@ -20,7 +20,7 @@ Download a native installer from [Releases](https://github.com/ax2/zistral/relea
 | Platform | Package | Installation |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | Per-user installer; adds PATH and a Start menu launcher; no administrator required |
-| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.16.2-linux-amd64.deb` |
+| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.17.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | Open the package; installs `/usr/local/bin/zi` |
 
 Then type `zi`. On first launch, choose an existing Codex, WorkBuddy or dsh configuration,
@@ -569,3 +569,7 @@ See [nested JSON recipes](docs/json-selection-recipes.md).
 
 Maintainers: [release workflow](docs/releasing.md). Main commits run CI; publication starts
 only from an explicit release branch/tag or a matching manual dispatch.
+
+Provider turns are checked before tools run: incomplete Chat replies fail, and malformed
+call metadata in a later batch member cannot execute earlier tools. Normal native argument
+errors still return observations for model recovery. [Protocol and streaming limits](docs/provider-turns.md).

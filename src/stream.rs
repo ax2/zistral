@@ -97,9 +97,16 @@ impl<'a> State<'a> {
                     bail!("provider declined the request");
                 }
                 let message = &mut self.result["choices"][0]["message"];
-                if let Some(s) = delta["content"].as_str() {
+                if let Some(value) = delta.get("content").filter(|v| !v.is_null()) {
+                    let s = value.as_str().context("invalid streamed Chat text")?;
                     append(message, "content", s);
                     text(s)?;
+                }
+                if delta
+                    .get("tool_calls")
+                    .is_some_and(|calls| !calls.is_null() && !calls.is_array())
+                {
+                    bail!("streamed tool_calls must be an array");
                 }
                 if let Some(calls) = delta["tool_calls"].as_array() {
                     for call in calls {
@@ -111,15 +118,26 @@ impl<'a> State<'a> {
                         }
                         let calls = message["tool_calls"].as_array_mut().expect("tool array");
                         while calls.len() <= i as usize {
-                            calls.push(json!({"id":"","type":"function","function":{"name":"","arguments":""}}));
+                            calls.push(json!({"id":"","type":"function","function":{"name":"","arguments":null}}));
                         }
                         let target = &mut calls[i as usize];
-                        if let Some(s) = call["id"].as_str() {
-                            append(target, "id", s);
+                        if let Some(value) = call.get("id").filter(|v| !v.is_null()) {
+                            append(
+                                target,
+                                "id",
+                                value.as_str().context("invalid streamed tool id")?,
+                            );
                         }
                         for key in ["name", "arguments"] {
-                            if let Some(s) = call["function"][key].as_str() {
-                                append(&mut target["function"], key, s);
+                            if let Some(value) = call["function"].get(key).filter(|v| !v.is_null())
+                            {
+                                append(
+                                    &mut target["function"],
+                                    key,
+                                    value
+                                        .as_str()
+                                        .context("invalid streamed tool function field")?,
+                                );
                             }
                         }
                     }

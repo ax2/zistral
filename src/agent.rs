@@ -3,6 +3,8 @@ use anyhow::{Context, Result, bail};
 use reqwest::blocking::Client;
 use serde_json::{Value, json};
 use std::{
+    borrow::Cow,
+    collections::HashSet,
     io::{self, IsTerminal, Read},
     time::Duration,
 };
@@ -13,6 +15,63 @@ const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
 pub struct Answer {
     pub text: String,
     pub streamed: bool,
+}
+
+struct ToolCall<'a> {
+    id: &'a str,
+    name: &'a str,
+    arguments: Cow<'a, str>,
+}
+
+// Validate the whole protocol batch before history updates or tool side effects.
+// Native argument/schema errors still return observations for model recovery.
+fn prepare_calls<'a>(
+    calls: impl Iterator<Item = &'a Value>,
+    api: &str,
+) -> Result<Vec<ToolCall<'a>>> {
+    let mut prepared = Vec::new();
+    let mut ids = HashSet::new();
+    for call in calls {
+        if prepared.len() == 32 {
+            bail!("provider requested more than 32 tools in one turn");
+        }
+        let id = call[if api == "responses" { "call_id" } else { "id" }]
+            .as_str()
+            .filter(|id| !id.trim().is_empty())
+            .context("tool call missing or invalid id")?;
+        if !ids.insert(id) {
+            bail!("provider returned duplicate tool call ids in one turn");
+        }
+        let function = if api == "chat" {
+            &call["function"]
+        } else {
+            call
+        };
+        let name = function["name"]
+            .as_str()
+            .filter(|name| !name.trim().is_empty())
+            .context("tool call missing or invalid name")?;
+        let arguments = if api == "anthropic" {
+            Cow::Owned(
+                call.get("input")
+                    .filter(|input| input.is_object())
+                    .context("tool call missing or invalid input object")?
+                    .to_string(),
+            )
+        } else {
+            Cow::Borrowed(
+                function["arguments"]
+                    .as_str()
+                    .context("tool call missing or invalid arguments")?,
+            )
+        };
+        prepared.push(ToolCall {
+            id,
+            name,
+            arguments,
+        });
+    }
+    Ok(prepared)
 }
 
 pub fn run(settings: &Settings, cli: &Cli, input: &str) -> Result<Answer> {
@@ -231,22 +290,24 @@ fn handle_anthropic(
     let content = result["content"]
         .as_array()
         .context("Anthropic result has no content")?;
-    let calls: Vec<_> = content.iter().filter(|c| c["type"] == "tool_use").collect();
-    if calls.len() > 32 {
-        bail!("provider requested more than 32 tools in one turn");
+    for block in content {
+        if block["type"] == "text" && !block["text"].is_string() {
+            bail!("provider returned invalid Anthropic text");
+        }
+    }
+    let calls = prepare_calls(
+        content.iter().filter(|c| c["type"] == "tool_use"),
+        "anthropic",
+    )?;
+    if (result["stop_reason"] == "tool_use") == calls.is_empty() {
+        bail!("Anthropic stop reason does not match its tool calls");
     }
     if !calls.is_empty() {
         messages.push(json!({"role":"assistant","content":content}));
         let mut results = Vec::new();
         for call in calls {
-            let id = call["id"].as_str().context("tool call missing id")?;
-            let name = call["name"].as_str().context("tool call missing name")?;
-            let args = call
-                .get("input")
-                .context("tool call missing input")?
-                .to_string();
-            let result = tool_result(cli, name, &args, input, activity, session)?;
-            results.push(json!({"type":"tool_result","tool_use_id":id,"content":result}));
+            let result = tool_result(cli, call.name, &call.arguments, input, activity, session)?;
+            results.push(json!({"type":"tool_result","tool_use_id":call.id,"content":result}));
         }
         messages.push(json!({"role":"user","content":results}));
         return Ok(None);
@@ -312,11 +373,11 @@ fn handle_chat(
     let choice = result
         .pointer("/choices/0")
         .context("API response has no choices")?;
-    if matches!(
+    if !matches!(
         choice["finish_reason"].as_str(),
-        Some("length" | "content_filter")
+        Some("stop" | "tool_calls")
     ) {
-        bail!("provider returned an incomplete or filtered answer");
+        bail!("provider returned an incomplete, filtered or unsupported Chat finish reason");
     }
     let message = choice
         .get("message")
@@ -324,25 +385,26 @@ fn handle_chat(
     if message.get("refusal").is_some_and(|v| !v.is_null()) {
         bail!("provider declined the request");
     }
-    if let Some(calls) = message
-        .get("tool_calls")
-        .and_then(Value::as_array)
-        .filter(|c| !c.is_empty())
+    if message
+        .get("content")
+        .is_some_and(|content| !content.is_null() && !content.is_string())
     {
-        if calls.len() > 32 {
-            bail!("provider requested more than 32 tools in one turn");
-        }
-        messages.push(json!({"role":"assistant","content":message.get("content").cloned().unwrap_or(Value::Null),"tool_calls":calls}));
+        bail!("provider returned invalid Chat text");
+    }
+    let raw_calls = match message.get("tool_calls") {
+        None | Some(Value::Null) => &[][..],
+        Some(Value::Array(calls)) => calls.as_slice(),
+        _ => bail!("provider returned invalid Chat tool_calls; expected an array"),
+    };
+    let calls = prepare_calls(raw_calls.iter(), "chat")?;
+    if (choice["finish_reason"] == "tool_calls") == calls.is_empty() {
+        bail!("Chat finish reason does not match its tool calls");
+    }
+    if !calls.is_empty() {
+        messages.push(json!({"role":"assistant","content":message.get("content").cloned().unwrap_or(Value::Null),"tool_calls":raw_calls}));
         for call in calls {
-            let id = call["id"].as_str().context("tool call missing id")?;
-            let name = call["function"]["name"]
-                .as_str()
-                .context("tool call missing name")?;
-            let args = call["function"]["arguments"]
-                .as_str()
-                .context("tool call missing arguments")?;
-            let content = tool_result(cli, name, args, input, activity, session)?;
-            messages.push(json!({"role":"tool","tool_call_id":id,"content":content}));
+            let content = tool_result(cli, call.name, &call.arguments, input, activity, session)?;
+            messages.push(json!({"role":"tool","tool_call_id":call.id,"content":content}));
         }
         Ok(None)
     } else {
@@ -370,48 +432,35 @@ fn handle_responses(
     let output = result["output"]
         .as_array()
         .context("Responses result has no output")?;
-    if output
-        .iter()
-        .filter(|v| v["type"] == "function_call")
-        .count()
-        > 32
-    {
-        bail!("provider requested more than 32 tools in one turn");
-    }
     let mut text = String::new();
-    let mut called = false;
-    // Preserve reasoning and all function-call items for stateless continuation.
-    messages.extend(output.iter().cloned());
+    // Refusal/text checks also precede all calls, even if a refusal follows a call item.
     for item in output {
-        match item["type"].as_str() {
-            Some("function_call") => {
-                called = true;
-                let id = item["call_id"]
-                    .as_str()
-                    .context("tool call missing call_id")?;
-                let name = item["name"].as_str().context("tool call missing name")?;
-                let args = item["arguments"]
-                    .as_str()
-                    .context("tool call missing arguments")?;
-                let content = tool_result(cli, name, args, input, activity, session)?;
-                messages.push(json!({"type":"function_call_output","call_id":id,"output":content}));
-            }
-            Some("message") => {
-                if let Some(parts) = item["content"].as_array() {
-                    for part in parts {
-                        if part["type"] == "refusal" {
-                            bail!("provider declined the request");
-                        }
-                        if part["type"] == "output_text" {
-                            text.push_str(part["text"].as_str().context("invalid output_text")?);
-                        }
-                    }
+        if item["type"] == "message" {
+            let parts = item["content"]
+                .as_array()
+                .context("provider returned invalid Responses message content")?;
+            for part in parts {
+                if part["type"] == "refusal" {
+                    bail!("provider declined the request");
+                }
+                if part["type"] == "output_text" {
+                    text.push_str(part["text"].as_str().context("invalid output_text")?);
                 }
             }
-            _ => (),
         }
     }
-    if called {
+    let calls = prepare_calls(
+        output.iter().filter(|v| v["type"] == "function_call"),
+        "responses",
+    )?;
+    // Retain complete output (including reasoning/final text) for plan continuations.
+    messages.extend(output.iter().cloned());
+    if !calls.is_empty() {
+        for call in calls {
+            let content = tool_result(cli, call.name, &call.arguments, input, activity, session)?;
+            messages
+                .push(json!({"type":"function_call_output","call_id":call.id,"output":content}));
+        }
         Ok(None)
     } else if text.is_empty() {
         bail!("provider returned neither text nor tool calls")
