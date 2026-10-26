@@ -33,7 +33,10 @@ fn run(root: &Path, args: &[&str], data: &[u8]) -> Output {
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
-    child.stdin.take().unwrap().write_all(data).unwrap();
+    if let Err(error) = child.stdin.take().unwrap().write_all(data) {
+        // Invalid definitions may be rejected before the child consumes any stdin.
+        assert_eq!(error.kind(), std::io::ErrorKind::BrokenPipe);
+    }
     child.wait_with_output().unwrap()
 }
 fn model(api: &str, text: &str) -> (String, std::thread::JoinHandle<Value>) {
