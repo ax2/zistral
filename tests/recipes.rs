@@ -335,6 +335,38 @@ fn escaped_pointer_plan_growth_is_rejected_before_data_or_output_preparation() {
         );
     }
     assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 2);
+    let short = format!(
+        "version=1\n{}",
+        step.replace(&"\t".repeat(2047), &"\t".repeat(800))
+            .repeat(16)
+    );
+    std::fs::write(root.path().join("large.toml"), short).unwrap();
+    let out = invoke(
+        root.path(),
+        &[
+            "data",
+            "--show-plan",
+            "--recipe",
+            "large.toml",
+            "-o",
+            "small.toml",
+        ],
+        b"not data",
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let normalized = std::fs::read(root.path().join("small.toml")).unwrap();
+    assert!(normalized.len() < 65536);
+    let again = invoke(
+        root.path(),
+        &["data", "--show-plan", "--recipe", "small.toml"],
+        b"not data",
+    );
+    assert!(again.status.success());
+    assert_eq!(again.stdout, normalized);
 }
 
 #[test]

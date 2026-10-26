@@ -84,6 +84,6 @@ envelope (including escaping). Selection from an expanded intermediate may use t
 16 MiB allowance. Pointer validation does not turn these bounds into a process memory cap.
 No new dependencies, tool names, permissions, runtime, network calls or memory files.
 
-The normalized TOML definition must also fit 64 KiB, checked before input/output for both
+Since v0.16.1, the normalized TOML definition must also fit 64 KiB, checked before input/output for both
 execution and preview. Pointer escaping can expand a short literal source; such plans fail
 early rather than exporting a recipe that the same program cannot read back.

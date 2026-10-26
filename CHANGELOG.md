@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.16.1 — 2026-10-26
+
+- Reject native data plans whose normalized TOML exceeds the 64 KiB recipe read limit.
+  Pointer escaping can expand a smaller source file; check the exported definition before
+  input or output access so a successful export remains readable by the same program.
+- Apply the same check to execution and `--show-plan`, preserving existing files on failure.
+  Verify oversized escaping and a smaller escaped plan that exports and reads back unchanged.
+  Ordinary recipes, model tools, dependencies, permissions and the Agent loop are unchanged.
+
 ## 0.16.0 — 2026-10-26
 
 - Add `json-select` to native data pipelines and saved recipes, so nested API-response
@@ -8,7 +17,6 @@
 - Preserve JSON values when composing: string quotes/escapes, numeric tokens, key order
   and repeated keys inside selected values. Keep existing `--select` display/join behavior.
   Validate pointer syntax/limits before IO; reject missing paths and ambiguous referenced keys.
-  Keep normalized exported recipes within the same 64 KiB read limit, including escapes.
 - Extend existing `transform_input` single/ordered steps with the same pointer validation.
   Keep original-input isolation, bounded intermediates/final results and file preservation
   on failure. No new dependencies, tool names, project permissions or Agent-loop changes.
