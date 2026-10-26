@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.9.0 — 2026-10-26
+
+- Add `-o/--output FILE` for complete model results, offline data operations,
+  count/select and configuration examples; keep stdout empty when saving a file.
+  `--output -` retains normal stdout and streaming behavior.
+- Default to no overwrite; require explicit `--force` for an existing regular file.
+  Stage the complete UTF-8 result beside its destination, flush and publish it only
+  after successful processing/JSON validation. Support reading and replacing the
+  same input file without truncating it before the task succeeds.
+- Check destinations before model requests; refuse observed target changes, links,
+  directories, read-only files, Windows devices/alternate streams and files above
+  64 MiB. Keep temporary files private on Unix and preserve basic replacement modes.
+- Disable automatic token streaming for file output, reject explicit `--stream`,
+  and distinguish "Response ready" from the final "Saved" terminal status.
+- Verify all three protocols, real-terminal saves, stdout/streaming compatibility,
+  concurrent changes, failed requests/JSON, cleanup and platform-specific file rules.
+  No new model tools or runtime dependencies; document metadata and concurrency limits.
+
 ## 0.8.1 — 2026-10-26
 
 - Display the native `transform_input` tool as "Transform input" in rich terminal

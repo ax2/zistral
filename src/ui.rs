@@ -138,6 +138,7 @@ pub struct Activity {
     start: Instant,
     rich: bool,
     verbose: bool,
+    finish_label: &'static str,
     live: Cell<bool>,
     requests: Cell<u32>,
     tools: Cell<u32>,
@@ -170,6 +171,11 @@ impl Activity {
             rich,
             live: Cell::new(false),
             verbose: cli.verbose,
+            finish_label: if cli.output.is_some() {
+                "Response ready"
+            } else {
+                "Done"
+            },
             start: Instant::now(),
             requests: Cell::new(0),
             tools: Cell::new(0),
@@ -277,7 +283,8 @@ impl Activity {
                 "  {} {}",
                 style("✓").green(),
                 style(format!(
-                    "Done · {:.1}s · {} requests · {} tools{tokens}",
+                    "{} · {:.1}s · {} requests · {} tools{tokens}",
+                    self.finish_label,
                     self.start.elapsed().as_secs_f64(),
                     self.requests.get(),
                     self.tools.get()

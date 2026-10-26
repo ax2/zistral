@@ -102,6 +102,8 @@ fn stream_flushes_before_completion_and_no_json_stream_combination() {
     });
     let mut child = command()
         .args([
+            "--output",
+            "-",
             "--stream",
             "--base-url",
             &url,

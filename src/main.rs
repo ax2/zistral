@@ -3,6 +3,7 @@ mod config;
 mod data;
 mod doctor;
 mod imports;
+mod output;
 mod presets;
 mod process;
 mod project;
@@ -15,7 +16,7 @@ use clap::{Parser, Subcommand};
 use std::io::{self, BufRead, IsTerminal, Read, Write};
 use std::path::PathBuf;
 
-/// A small, pipe-native agent. stdout is always your result.
+/// A small, pipe-native agent. Results go to stdout or an explicit output file.
 #[derive(Parser, Clone, Debug)]
 #[command(
     name = "zi",
@@ -33,6 +34,12 @@ pub struct Cli {
     /// Read UTF-8 data from a file instead of stdin; '-' means stdin
     #[arg(short = 'i', long, global = true)]
     input: Option<PathBuf>,
+    /// Save the complete result to a file; '-' keeps stdout. Default: never overwrite
+    #[arg(short = 'o', long, global = true)]
+    output: Option<PathBuf>,
+    /// Replace an existing regular output file after a successful task
+    #[arg(long, global = true, requires = "output")]
+    force: bool,
     /// Use a builtin or user-defined task preset (zi presets lists names)
     #[arg(short = 's', long)]
     preset: Option<String>,
@@ -192,6 +199,27 @@ fn read_input(cli: &Cli) -> Result<String> {
 }
 
 fn run(mut cli: Cli) -> Result<()> {
+    if cli.output.is_some()
+        && cli
+            .command
+            .as_ref()
+            .is_some_and(|c| !matches!(c, Commands::Data { .. }))
+    {
+        bail!("--output is available for data/model tasks, not management commands");
+    }
+    if cli.output.as_ref().is_some_and(|p| p.as_os_str() == "-") {
+        if cli.force {
+            bail!("--force requires a real output file, not stdout '-'");
+        }
+        cli.output = None;
+    }
+    if cli.output.is_some() && cli.stream {
+        bail!("--stream cannot be combined with file output; use stdout for live output");
+    }
+    if std::env::var_os("NO_COLOR").is_some() {
+        console::set_colors_enabled(false);
+        console::set_colors_enabled_stderr(false);
+    }
     if let Some(Commands::Data { operation, reverse }) = &cli.command {
         if cli.preset.is_some()
             || !cli.vars.is_empty()
@@ -205,8 +233,17 @@ fn run(mut cli: Cli) -> Result<()> {
         {
             bail!("zi data accepts input and local operation options only; see zi data --help");
         }
+        let target = prepare_output(&cli)?;
         let input = read_input(&cli)?;
         let output = transforms::run(&input, *operation, *reverse, transforms::CLI_OUTPUT)?;
+        if let Some(target) = target {
+            return save_output(
+                &output,
+                target,
+                &cli,
+                !output.is_empty() && !output.ends_with('\n'),
+            );
+        }
         return if output.is_empty() {
             Ok(())
         } else {
@@ -215,10 +252,6 @@ fn run(mut cli: Cli) -> Result<()> {
     }
     if project::enabled(&cli) {
         process::install_interrupt_handler()?;
-    }
-    if std::env::var_os("NO_COLOR").is_some() {
-        console::set_colors_enabled(false);
-        console::set_colors_enabled_stderr(false);
     }
     if cli.command.is_some() && cli.preset.is_some() {
         bail!("--preset is for model tasks; use zi presets to manage presets");
@@ -290,17 +323,29 @@ fn run(mut cli: Cli) -> Result<()> {
     }
     presets::apply(&mut cli)?;
     if cli.config_example {
+        if let Some(target) = prepare_output(&cli)? {
+            return save_output(
+                config::EXAMPLE,
+                target,
+                &cli,
+                !config::EXAMPLE.ends_with('\n'),
+            );
+        }
         return write_output(config::EXAMPLE);
     }
     if (cli.count || cli.select.is_some()) && !cli.prompt.is_empty() {
         bail!("local --count/--select modes do not accept a prompt");
     }
     if !cli.count && cli.select.is_none() && cli.prompt.is_empty() {
+        if cli.output.is_some() {
+            bail!("provide an instruction for file output; interactive sessions use stdout");
+        }
         if cli.input.is_none() && io::stdin().is_terminal() && io::stdout().is_terminal() {
             return session(&mut cli);
         }
         bail!("provide an instruction, or use --count / --select; see zi --help");
     }
+    let target = prepare_output(&cli)?;
     let input = read_input(&cli)?;
     let output = if cli.count {
         serde_json::to_string(&data::counts(&input))?
@@ -318,13 +363,47 @@ fn run(mut cli: Cli) -> Result<()> {
         answer.text
     };
     let output = if cli.json {
-        let value: serde_json::Value = serde_json::from_str(&output)
-            .context("output is not valid JSON (nothing written to stdout)")?;
+        let value: serde_json::Value =
+            serde_json::from_str(&output).context(if cli.output.is_some() {
+                "output is not valid JSON (nothing published)"
+            } else {
+                "output is not valid JSON (nothing written to stdout)"
+            })?;
         serde_json::to_string(&value)?
     } else {
         output
     };
+    if let Some(target) = target {
+        return save_output(&output, target, &cli, !output.ends_with('\n'));
+    }
     emit(&output, &cli)
+}
+
+fn prepare_output(cli: &Cli) -> Result<Option<output::Prepared>> {
+    cli.output
+        .as_ref()
+        .map(|p| output::Prepared::new(p, cli.force))
+        .transpose()
+}
+
+fn save_output(
+    text: &str,
+    target: output::Prepared,
+    cli: &Cli,
+    append_newline: bool,
+) -> Result<()> {
+    let bytes = target.save(text, append_newline)?;
+    if ui::enabled(cli) || cli.verbose {
+        if let Some(path) = &cli.output {
+            eprintln!(
+                "  {} {} ({} bytes)",
+                console::style("Saved").green().bold(),
+                ui::clean(&path.display().to_string()),
+                bytes
+            );
+        }
+    }
+    Ok(())
 }
 
 fn emit(output: &str, cli: &Cli) -> Result<()> {

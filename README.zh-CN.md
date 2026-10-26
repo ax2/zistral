@@ -17,7 +17,7 @@ git diff | zi "生成一句简洁的提交说明"
 | 平台 | 安装包 | 安装方法 |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | 双击安装，无需管理员权限，自动添加用户 PATH 和开始菜单入口 |
-| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.8.1-linux-amd64.deb` |
+| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.9.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | 双击安装，命令放到 `/usr/local/bin/zi` |
 
 安装后直接运行 `zi`。Windows 安装结束可立即启动，或在开始菜单打开 zi；
@@ -158,6 +158,36 @@ cat article.txt | zi --stream "总结"  # 显式开启流式，包括重定向�
 `--stream` 不能与 `--json` 一起使用。`--plain` 关闭自动流式和界面装饰，仍可显式搭配 `--stream`。
 流式文本逐段显示，完整回答模式保留标题、列表和代码块高亮。
 
+## 完整结果保存到文件
+
+```sh
+cat notes.txt | zi -s summarize -o summary.md
+cat ticket.txt | zi -s extract -o ticket.json "姓名、优先级"
+zi data json-format -i data.json -o data.pretty.json
+zi data trim -i notes.txt -o notes.txt --force
+zi --count -i notes.txt -o counts.json
+zi --config-example -o example.toml
+```
+
+`-o/--output FILE` 保存完整 UTF-8 结果，stdout 不输出内容。适用于单次模型任务、离线 data、
+计数/选择及配置示例；管理命令和无指令的交互会话拒绝文件目标。`--output -` 保留正常标准输出
+与流式行为；`--force` 只能搭配真实文件路径。
+
+默认不覆盖已有文件，只有显式 `--force` 才允许替换已有普通文件。父目录必须已存在；读取输入
+或联系模型前先检查目标，并在同目录准备临时文件。完整结果写入并同步后才发布；请求失败、
+JSON 校验失败或数据处理错误时不替换目标。可用 `--force` 将同一文件作为输入和输出。
+这项保护不适用于 shell 的 `>` 重定向，请勿用 shell 将输出重定向到输入文件。
+
+保存文件时关闭终端自动流式输出，显式 `--stream` 会报错。界面先显示 Response ready，发布后
+才显示 Saved；不把保存的正文再打印出来。管道中保持安静，除非指定 `--verbose`。
+JSON 校验和换行规则沿用 stdout，空的本地行处理结果保存为零字节。已有目标及新结果最多 64 MiB。
+
+末端链接、目录、只读文件及 Windows 设备名/数据流名称会被拒绝，发布前复核观察到的内容与
+元数据变化。这不是独占锁或跨进程 CAS，最终检查后仍可能存在竞争；其他程序也在写入时请选择
+独立目标。Unix 暂存文件为私有权限，替换保留基本 rwx，不保留 owner、ACL、扩展属性或硬链接
+身份。崩溃可能留下临时文件，不承诺断电持久性。项目 Agent 已执行的修改和命令不会因结果保存
+失败而回滚。文件路径与旧内容不发送给模型，`--output` 也不会授予模型文件工具。
+
 ## 离线文本与 JSON 处理
 
 ```sh
@@ -293,6 +323,7 @@ cat 1.json | zi --select /abc/0 --join ','
 
 - 标准输入与文件均为 UTF-8，支持移除开头的 UTF-8 BOM。
 - 标准输出只有最终结果；错误和 `--verbose` 过程信息进入标准错误。
+  指定 `--output FILE` 时结果改为保存到文件，标准输出为空。
 - `--json` 验证模型输出，只有完整合法 JSON 才输出。
 - 参数放在指令前，例如 `zi --json '提取为 JSON'`。
 - 数据模式默认最多 8 次模型请求，项目模式默认 32 次，每次 120 秒；`--max-steps`、`--timeout` 可调整。
@@ -304,7 +335,7 @@ cat 1.json | zi --select /abc/0 --join ','
 源码构建：
 
 ```sh
-cargo install --git https://github.com/ax2/zistral --tag v0.8.1 --locked
+cargo install --git https://github.com/ax2/zistral --tag v0.9.0 --locked
 ```
 
 更多配置、精确定义、开发与验证范围见 [English README](README.md)。MIT 开源协议。

@@ -45,6 +45,13 @@ CLI pipes compose multiple transformations. Sessions, permissions and memory are
 
 ## Verified requirements
 
+`--output` is caller-controlled result delivery in `output.rs`, not an agent tool. A
+same-directory temporary result is prepared before requests; file mode suppresses token
+streaming and validates JSON before publication. Default no-clobber and explicit replacement
+check observed revisions; neither is an OS sandbox, exclusive lock or full agent transaction.
+Project edits/commands are not rolled back on a delivery error. The destination's old bytes
+and path never enter model context. Stdout delivery remains the default.
+
 Automated local-provider fixtures drive the actual zi subprocess through all three protocols
 (Chat Completions, Responses and Anthropic Messages). For each, zi inspects a real tiny Rust
 project, runs cargo test and receives a failure, edits the source, creates a file, reruns the

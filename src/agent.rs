@@ -16,8 +16,10 @@ pub struct Answer {
 }
 
 pub fn run(settings: &Settings, cli: &Cli, input: &str) -> Result<Answer> {
-    let streaming =
-        !cli.no_stream && !cli.json && (cli.stream || (!cli.plain && io::stdout().is_terminal()));
+    let streaming = cli.output.is_none()
+        && !cli.no_stream
+        && !cli.json
+        && (cli.stream || (!cli.plain && io::stdout().is_terminal()));
     let mut display = crate::ui::StreamDisplay::new();
     let activity = Activity::new(settings, cli, input.len());
     let client = Client::builder()

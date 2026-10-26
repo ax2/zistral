@@ -20,7 +20,7 @@ Download a native installer from [Releases](https://github.com/ax2/zistral/relea
 | Platform | Package | Installation |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | Per-user installer; adds PATH and a Start menu launcher; no administrator required |
-| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.8.1-linux-amd64.deb` |
+| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.9.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | Open the package; installs `/usr/local/bin/zi` |
 
 Then type `zi`. On first launch, choose an existing Codex, WorkBuddy or dsh configuration,
@@ -51,7 +51,7 @@ Portable archives contain one executable plus documentation. Extract zi (zi.exe 
 Build from source with Rust 1.85+ (a current stable toolchain is recommended):
 
 ```sh
-cargo install --git https://github.com/ax2/zistral --tag v0.8.1 --locked
+cargo install --git https://github.com/ax2/zistral --tag v0.9.0 --locked
 ```
 
 The package is named `zistral`; the installed command is `zi`. It is not yet
@@ -213,6 +213,47 @@ already contain partial text; default pipes/redirection and `--json` keep atomic
 `--stream` conflicts with `--json`. `--plain` disables automatic streaming/decorations, but can be
 combined with explicit `--stream`. UTF-8, SSE frame/response bounds and terminal-control sanitizing
 also apply across streamed chunks. Each interactive prompt remains an independent task.
+
+## Save complete results without truncating a file first
+
+```sh
+cat notes.txt | zi -s summarize -o summary.md
+cat ticket.txt | zi -s extract -o ticket.json "name and priority"
+zi data json-format -i data.json -o data.pretty.json
+zi data trim -i notes.txt -o notes.txt --force
+zi --count -i notes.txt -o counts.json
+zi --config-example -o example.toml
+```
+
+`-o/--output FILE` saves the complete UTF-8 result and emits no stdout. It applies to
+one-shot model tasks, local data/count/select and configuration examples. Management
+commands and bare interactive sessions reject a file destination. `--output -` keeps
+normal stdout behavior, including explicit streaming; `--force` requires a real file.
+
+The default never replaces an existing file. `--force` authorizes replacing an existing
+regular file after a successful task. The parent directory must already exist. Destination
+checks and a same-directory temporary file are prepared before reading input or calling
+a model. The program writes and flushes the complete result, then publishes it; failed
+requests, invalid JSON and failed processing preserve the destination. Reading and saving
+the same file is supported with `--force`. This protection does not apply to shell `>`
+redirection; do not redirect into the input file using the shell.
+
+File output disables automatic terminal token streaming and rejects explicit `--stream`.
+The terminal reports `Response ready`, followed by `Saved` only after publication; saved
+content is not displayed. Pipelines stay quiet unless `--verbose` is requested. JSON
+validation and newline rules match stdout; an empty local line transformation saves zero
+bytes. Existing destinations and complete result files are limited to 64 MiB.
+
+The writer rejects links, nonregular/read-only targets and Windows device/alternate-stream
+names, and compares observed content/metadata again before publication. This is not an
+exclusive lock or cross-process compare-and-swap: another writer can still race the final
+check. Use a separate destination when other programs are writing to the same file.
+Temporary files are private on Unix; replacement preserves basic rwx permissions, not
+ownership, ACLs, extended attributes or hard-link identity. A process crash can leave a
+temporary file; no guarantee of power-loss durability is made. Project-agent edits and
+commands remain independent side effects; saving an answer does not roll them back.
+Only the caller-selected destination is used; its old content and path are not sent to
+the model, and no filesystem tools are enabled by `--output`.
 
 ## Offline text and JSON transformations
 
@@ -389,6 +430,7 @@ tools. The model chooses the tool/arguments and formats the final answer;
 * UTF-8 stdin or `--input FILE`; `--input -` explicitly reads stdin.
 * Interactive terminal input is not waited on unless `--input -` is given.
 * Only the final result goes to stdout; a missing final newline is appended.
+  An explicit `--output FILE` saves it instead and leaves stdout empty.
 * Errors and `--verbose` tool progress go to stderr. No spinner or banner.
 * Exit `0`: success (including a downstream closed pipe). Exit `1`: runtime
   failure. Exit `2`: invalid command-line syntax.
