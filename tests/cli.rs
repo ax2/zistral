@@ -6,7 +6,9 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 fn command() -> Command {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_zi"));
+    let binary =
+        std::env::var_os("ZISTRAL_TEST_BINARY").unwrap_or_else(|| env!("CARGO_BIN_EXE_zi").into());
+    let mut cmd = Command::new(binary);
     for name in [
         "ZI_PROFILE",
         "ZI_MODEL",
@@ -15,6 +17,7 @@ fn command() -> Command {
         "ZI_BASE_URL",
         "ZI_API",
         "ZI_CONFIG",
+        "ZI_PRESETS",
         "HTTP_PROXY",
         "HTTPS_PROXY",
         "ALL_PROXY",

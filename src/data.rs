@@ -47,10 +47,14 @@ pub fn tool_definitions() -> Vec<Value> {
     vec![
         json!({"type":"function","function":{"name":"count_input","description":"Count original input exactly. words means whitespace-delimited tokens; characters means Unicode scalars including whitespace; cjk_characters counts Han ideographs; graphemes counts visible clusters. Always use this for counting, never estimate.","parameters":{"type":"object","properties":{},"additionalProperties":false}}}),
         json!({"type":"function","function":{"name":"select_input","description":"Select from original JSON input using RFC 6901 pointer (e.g. /abc/0). Optional separator joins the selected array. No need to copy the original input into arguments.","parameters":{"type":"object","properties":{"pointer":{"type":"string"},"separator":{"type":"string"}},"required":["pointer"],"additionalProperties":false}}}),
+        json!({"type":"function","function":{"name":"transform_input","description":"Transform original input exactly: trim Unicode whitespace per line, dedupe exact lines (keep first), sort lines by case-sensitive Unicode order, json-format, json-minify, or json-keys (root keys in source order). JSON formatting preserves original number/string tokens, key order and duplicate keys. Line output uses LF. No filesystem or shell. Do not copy input into arguments. Returns JSON with output; max 8 MiB input, 100000 lines/keys, 128 JSON containers, 64 KiB result. reverse only applies to sort.","parameters":{"type":"object","properties":{"operation":{"type":"string","enum":["trim","dedupe","sort","json-format","json-minify","json-keys"]},"reverse":{"type":"boolean"}},"required":["operation"],"additionalProperties":false}}}),
     ]
 }
 
 pub fn execute(name: &str, arguments: &str, input: &str) -> Result<String> {
+    if name == "transform_input" {
+        return crate::transforms::execute(arguments, input);
+    }
     let args: Value =
         serde_json::from_str(arguments).context("tool arguments must be valid JSON")?;
     let object = args

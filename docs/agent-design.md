@@ -29,9 +29,19 @@ preimages and plan. `process.rs` runs noninteractive commands with separate boun
 exit status and timeout cleanup. Tool errors return to the model so it can adjust and retry.
 Pending plan steps prompt continuation; exhausted budgets and incomplete API replies fail.
 
-The full project mode has 14 tools. Data mode exposes only count/select; read-only mode
+The full project mode has 15 tools. Data mode exposes count/select/transform; read-only mode
 excludes file mutation and arbitrary shell execution, including enforcement if a provider
 requests tools that were not advertised. `--no-tools` disables project capabilities too.
+
+`transforms.rs` implements six deterministic operations on explicit input, shared by the
+offline `zi data` command and the `transform_input` tool. They do not access a model,
+filesystem or shell. JSON syntax is checked with serde's IgnoredAny; a lexical formatter
+changes only insignificant whitespace, preserving number/string tokens, key order and
+repeated keys. Root-key enumeration skips values without numeric conversion. Input is
+bounded to 8 MiB, 100000 lines/keys and 128 containers. Local output is buffered up to
+16 MiB; tool results up to 64 KiB (including their JSON envelope) fail rather than truncate.
+Each tool invocation transforms the original input, not a previous tool's result; explicit
+CLI pipes compose multiple transformations. Sessions, permissions and memory are unchanged.
 
 ## Verified requirements
 

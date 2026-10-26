@@ -7,6 +7,7 @@ mod presets;
 mod process;
 mod project;
 mod stream;
+mod transforms;
 mod ui;
 
 use anyhow::{Context, Result, bail};
@@ -30,7 +31,7 @@ pub struct Cli {
     #[arg(trailing_var_arg = true)]
     prompt: Vec<String>,
     /// Read UTF-8 data from a file instead of stdin; '-' means stdin
-    #[arg(short = 'i', long)]
+    #[arg(short = 'i', long, global = true)]
     input: Option<PathBuf>,
     /// Use a builtin or user-defined task preset (zi presets lists names)
     #[arg(short = 's', long)]
@@ -102,7 +103,7 @@ pub struct Cli {
     #[arg(long, default_value_t = 4096, value_parser = clap::value_parser!(u32).range(1..=65536))]
     max_output_tokens: u32,
     /// Maximum input size in bytes
-    #[arg(long, default_value_t = 8_388_608, value_parser = clap::value_parser!(u64).range(1..=67_108_864))]
+    #[arg(long, global = true, default_value_t = 8_388_608, value_parser = clap::value_parser!(u64).range(1..=67_108_864))]
     max_input: u64,
     /// Count text locally, without a model or API key
     #[arg(long, conflicts_with = "select")]
@@ -117,6 +118,14 @@ pub struct Cli {
 
 #[derive(Subcommand, Clone, Debug)]
 enum Commands {
+    /// Transform explicit input locally, without a model or configuration
+    Data {
+        #[arg(value_enum)]
+        operation: transforms::Operation,
+        /// Reverse line order; only valid with sort
+        #[arg(long)]
+        reverse: bool,
+    },
     /// List, inspect, render or initialize reusable task presets (offline)
     Presets {
         #[command(subcommand)]
@@ -183,6 +192,27 @@ fn read_input(cli: &Cli) -> Result<String> {
 }
 
 fn run(mut cli: Cli) -> Result<()> {
+    if let Some(Commands::Data { operation, reverse }) = &cli.command {
+        if cli.preset.is_some()
+            || !cli.vars.is_empty()
+            || cli.count
+            || cli.select.is_some()
+            || cli.json
+            || cli.stream
+            || cli.config_example
+            || !cli.prompt.is_empty()
+            || project::enabled(&cli)
+        {
+            bail!("zi data accepts input and local operation options only; see zi data --help");
+        }
+        let input = read_input(&cli)?;
+        let output = transforms::run(&input, *operation, *reverse, transforms::CLI_OUTPUT)?;
+        return if output.is_empty() {
+            Ok(())
+        } else {
+            write_output(&output)
+        };
+    }
     if project::enabled(&cli) {
         process::install_interrupt_handler()?;
     }

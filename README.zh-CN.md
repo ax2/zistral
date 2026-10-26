@@ -17,7 +17,7 @@ git diff | zi "生成一句简洁的提交说明"
 | 平台 | 安装包 | 安装方法 |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | 双击安装，无需管理员权限，自动添加用户 PATH 和开始菜单入口 |
-| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.7.0-linux-amd64.deb` |
+| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.8.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | 双击安装，命令放到 `/usr/local/bin/zi` |
 
 安装后直接运行 `zi`。Windows 安装结束可立即启动，或在开始菜单打开 zi；
@@ -67,7 +67,7 @@ cat 1.txt | zi '统计汉字数量'
 输入 `-` 可清除已保存的 Key，便于切换到无需认证的本地服务。Ctrl+C 中途取消不会覆盖原文件。
 也支持 `zi config --config PATH`。向导需要交互终端，不接收管道输入。
 OpenAI 服务默认选择 `responses`，其他兼容服务默认 `chat`，可按提供方要求修改。
-`config`、`models`、`use`、`doctor`、`presets` 是保留命令；例如 `zi -- doctor` 可将该词作为普通指令。
+`config`、`models`、`use`、`doctor`、`presets`、`data` 是保留命令；例如 `zi -- doctor` 可将该词作为普通指令。
 
 Key 保存在本地 TOML 文件中，没有使用加密钥匙串；Linux/macOS 文件权限为 `0600`，
 Windows 使用配置目录继承的访问权限。向导只保存配置，不发送模型测试请求。
@@ -158,6 +158,35 @@ cat article.txt | zi --stream "总结"  # 显式开启流式，包括重定向�
 `--stream` 不能与 `--json` 一起使用。`--plain` 关闭自动流式和界面装饰，仍可显式搭配 `--stream`。
 流式文本逐段显示，完整回答模式保留标题、列表和代码块高亮。
 
+## 离线文本与 JSON 处理
+
+```sh
+cat lines.txt | zi data trim | zi data dedupe | zi data sort
+cat lines.txt | zi data sort --reverse
+zi data json-format -i payload.json
+cat payload.json | zi data json-minify
+cat payload.json | zi data json-keys
+```
+
+这些命令不加载模型配置、不需要 Key，也不启用项目工具。`trim` 按行去除 Unicode 首尾空白，
+保留空行；`dedupe` 保留完全相同行的第一次出现，不自动去空白或忽略大小写；`sort` 按区分
+大小写的 Unicode 顺序排序，保留重复行，`--reverse` 倒序。不是数字、自然、拼音或区域排序。
+LF/CRLF 输入统一输出 LF 结尾的行；空输入输出零字节，一个空行仍是一个空行。
+
+JSON 格式化和压缩仅改变字符串外的无意义空白，保留数字/字符串原文、键顺序及重复键，
+不会把超大整数或高精度小数转换为浮点数。它不做规范 JSON 归一化或重复键校验。
+`json-keys` 要求根值是对象，按原顺序返回键名 JSON 数组，重复键保留，转义键名会解码。
+嵌套值只跳过，不进行数值转换；JSON 命令输出以 LF 结尾。
+
+输入最多 8 MiB，即使提高 `--max-input` 也不超过该上限；最多 100000 行/根键、128 层容器。
+本地结果先完整缓冲，最多 16 MiB，包含格式化缩进；错误返回非零退出码，stdout 不写半段结果。
+`-i/--input FILE` 可放在 `data` 前后，`-` 读取 stdin，不覆盖输入文件。
+Windows PowerShell 可用 `Get-Content -Raw` 读取 UTF-8 文件。
+
+Agent 可通过 `transform_input` 使用同一计算核心，不获得文件或命令权限，工具结果含 JSON 包装
+最多 64 KiB，超限返回错误而非截断。每次调用都处理原始输入，多个转换用显式命令管道串联。
+`data` 为保留命令；要把它作为普通指令开头，可用 `zi -- data ...`。
+
 ## 场景命令与自定义提示词
 
 ```sh
@@ -223,8 +252,8 @@ git diff | zi -C . "结合项目源码审查这些改动"
 执行测试、分析失败、修复和再次验证。默认最多 32 次模型请求，`--max-steps` 可设 1–128。
 交互界面的每次提问仍是独立任务，不保存上一项任务的上下文。
 
-共内置 14 个工具：项目环境与分层 `AGENTS.md`、文件列表、文本搜索、分页读取、创建/替换、
-精确修改、单文件删除、任务内撤销、Git 状态与差异、命令执行、步骤计划，以及原有计数和 JSON 提取。
+共内置 15 个工具：项目环境与分层 `AGENTS.md`、文件列表、文本搜索、分页读取、创建/替换、
+精确修改、单文件删除、任务内撤销、Git 状态与差异、命令执行、步骤计划，以及计数、JSON 提取与文本/JSON 转换。
 列表和搜索遵循 `.gitignore`，跳过常见缓存目录，不依赖外部 ripgrep；Git 查看工具需要已安装 Git。
 
 修改已有文件前必须先读取，文件被外部改动时会拒绝覆盖；支持 CRLF、可执行权限保留、原子写入，
@@ -275,7 +304,7 @@ cat 1.json | zi --select /abc/0 --join ','
 源码构建：
 
 ```sh
-cargo install --git https://github.com/ax2/zistral --tag v0.7.0 --locked
+cargo install --git https://github.com/ax2/zistral --tag v0.8.0 --locked
 ```
 
 更多配置、精确定义、开发与验证范围见 [English README](README.md)。MIT 开源协议。

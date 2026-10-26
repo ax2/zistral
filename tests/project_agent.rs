@@ -174,7 +174,7 @@ fn real_rust_project_failure_edit_retest_loop_all_protocols() {
                     assert!(system.contains("KEEP"));
                     assert!(system.contains("Project environment"));
                     let tools = r["tools"].as_array().unwrap();
-                    assert_eq!(tools.len(), 14);
+                    assert_eq!(tools.len(), 15);
                 } else {
                     let previous = last_tool(api, &r);
                     assert!(

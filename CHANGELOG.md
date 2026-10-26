@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.8.0 — 2026-10-26
+
+- Add offline `zi data` operations: trim Unicode whitespace per line, keep first
+  occurrences of exact lines, sort lines, pretty-print/minify JSON and list root keys.
+  Support pipe chaining, `-i/--input`, stdin `-`, BOM handling and clean empty output.
+- Preserve original JSON number/string tokens, key order and repeated keys during
+  formatting; validate syntax without converting numeric values or building a JSON tree.
+- Expose the same pure computation as `transform_input` in all three model protocols,
+  without project permissions, shell access or additional runtime dependencies.
+- Bound transformations to 8 MiB input, 100000 lines/root keys and 128 JSON containers.
+  Buffer local output up to 16 MiB and model-tool results up to 64 KiB; fail without
+  emitting truncated results. Document LF, case-sensitive ordering and duplicate semantics.
+- Test real pipelines, Unicode/CRLF, numeric precision, escaped strings, duplicate keys,
+  indentation growth, malformed input, strict tool arguments and protocol roundtrips.
+- Allow the original CLI compatibility suite to target the official installed executable
+  during release verification, alongside the newer protocol and terminal suites.
+
 ## 0.7.0 — 2026-10-26
 
 - Add seven reusable task presets: summarize, translate, extract, explain, review,

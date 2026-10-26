@@ -117,7 +117,7 @@ impl Session {
     }
 
     pub fn execute(&mut self, name: &str, arguments: &str, input: &str) -> Result<String> {
-        if matches!(name, "count_input" | "select_input") {
+        if matches!(name, "count_input" | "select_input" | "transform_input") {
             return data::execute(name, arguments, input);
         }
         let p = self
@@ -886,7 +886,7 @@ mod tests {
                 .is_err()
         );
         let mut s = Session::new(&Cli::parse_from(["zi"])).unwrap();
-        assert_eq!(s.definitions().len(), 2);
+        assert_eq!(s.definitions().len(), 3);
         assert!(
             s.execute("write_file", r#"{"path":"a","content":"bad"}"#, "")
                 .is_err()

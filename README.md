@@ -20,7 +20,7 @@ Download a native installer from [Releases](https://github.com/ax2/zistral/relea
 | Platform | Package | Installation |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | Per-user installer; adds PATH and a Start menu launcher; no administrator required |
-| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.7.0-linux-amd64.deb` |
+| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.8.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | Open the package; installs `/usr/local/bin/zi` |
 
 Then type `zi`. On first launch, choose an existing Codex, WorkBuddy or dsh configuration,
@@ -51,7 +51,7 @@ Portable archives contain one executable plus documentation. Extract zi (zi.exe 
 Build from source with Rust 1.85+ (a current stable toolchain is recommended):
 
 ```sh
-cargo install --git https://github.com/ax2/zistral --tag v0.7.0 --locked
+cargo install --git https://github.com/ax2/zistral --tag v0.8.0 --locked
 ```
 
 The package is named `zistral`; the installed command is `zi`. It is not yet
@@ -214,6 +214,40 @@ already contain partial text; default pipes/redirection and `--json` keep atomic
 combined with explicit `--stream`. UTF-8, SSE frame/response bounds and terminal-control sanitizing
 also apply across streamed chunks. Each interactive prompt remains an independent task.
 
+## Offline text and JSON transformations
+
+```sh
+cat lines.txt | zi data trim | zi data dedupe | zi data sort
+cat lines.txt | zi data sort --reverse
+zi data json-format -i payload.json
+cat payload.json | zi data json-minify
+cat payload.json | zi data json-keys
+```
+
+These commands do not load model configuration, require a key, call a model or enable
+project tools. `trim` removes Unicode whitespace from each line and retains blank lines.
+`dedupe` keeps the first exact occurrence, without trimming or case folding. `sort` uses
+case-sensitive Unicode order, retains duplicates, and accepts `--reverse`; it is not a
+numeric, locale or natural sort. LF/CRLF input lines become LF-terminated output records.
+Empty input produces zero bytes; a blank line remains one blank line.
+
+JSON formatting/minification changes only insignificant whitespace: number/string tokens,
+key order and duplicate keys are retained, including integers beyond machine precision.
+This is not canonical JSON or duplicate-key validation. `json-keys` requires a root object
+and returns a JSON array in source order, including repeated keys; escaped key names are
+decoded. Nested values are skipped without numeric conversion. JSON CLI output ends in LF.
+
+Input is capped at 8 MiB even with a larger `--max-input`; line operations/root key lists
+support at most 100000 records/keys and JSON at most 128 nested containers. Local output
+is buffered up to 16 MiB, including indentation growth. Errors exit nonzero with no output.
+`-i/--input FILE` works before or after `data`; `-` reads stdin. The original file is never
+overwritten. Windows PowerShell users can use `Get-Content -Raw` for UTF-8 input.
+
+The same core is available to the model as `transform_input` on the original input, with
+a 64 KiB JSON tool-result limit. It returns an error rather than a truncated result.
+Each call starts from the original input; use explicit CLI pipes for composed transforms.
+`data` is a reserved command; `zi -- data ...` treats it as a literal model instruction.
+
 ## Reusable task presets
 
 ```sh
@@ -295,7 +329,7 @@ read failures, fix them and verify again; default budget is 32 model requests.
 | `write_file`, `edit_file`, `delete_file`, `undo_edit` | Create/replace, exact text replacement, single-file deletion and conflict-checked undo within the current task |
 | `git_status`, `git_diff` | Bounded read-only Git inspection; Git is optional |
 | `run_command`, `update_plan` | Noninteractive builds/tests, exit status/output/timeout, and step tracking |
-| `count_input`, `select_input` | Existing deterministic pipe operations |
+| `count_input`, `select_input`, `transform_input` | Deterministic counting, JSON selection and bounded text/JSON transformations |
 
 Existing files must be read before changing them; stale revisions are refused. File edits
 preserve executable permissions and CRLF replacements, write atomically, and keep up to 32 MiB

@@ -165,7 +165,7 @@ fn builtin_translation_preserves_input_and_permissions_all_protocols() {
         assert_eq!(out.stdout, b"Bonjour\n");
         assert!(out.stderr.is_empty());
         let req = task.join().unwrap();
-        assert_eq!(req["tools"].as_array().unwrap().len(), 2);
+        assert_eq!(req["tools"].as_array().unwrap().len(), 3);
         let key = if api == "responses" {
             "input"
         } else {
