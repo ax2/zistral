@@ -29,6 +29,13 @@ preimages and plan. `process.rs` runs noninteractive commands with separate boun
 exit status and timeout cleanup. Tool errors return to the model so it can adjust and retry.
 Pending plan steps prompt continuation; exhausted budgets and incomplete API replies fail.
 
+Opt-in `--retries` adds a bounded status-only inner request loop, without changing protocol
+history/tool dispatch. It reuses the same body for 429/500/502/503/504/529 before accepting
+successful headers. Retry-After seconds/dates have a 30s cap; invalid/long hints stop.
+Transport/accepted-body/stream errors never replay. `--max-steps` counts logical turns,
+while terminal `requests` counts actual HTTP attempts. Tools execute only after successful
+response parsing and are not rerun by an HTTP retry. See [retry contract](retries.md).
+
 The full project mode has 15 tools. Data mode exposes count/select/transform; read-only mode
 excludes file mutation and arbitrary shell execution, including enforcement if a provider
 requests tools that were not advertised. `--no-tools` disables project capabilities too.

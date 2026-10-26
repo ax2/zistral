@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.12.0 — 2026-10-26
+
+- Add explicit `--retries 0..3` per model turn, defaulting to zero. Retry only HTTP
+  429/500/502/503/504/529 before accepting a successful response; preserve the same
+  request body and do not spend another logical `--max-steps` turn.
+- Honor integer-seconds and HTTP-date `Retry-After` values with a 30-second wait cap;
+  reject invalid/duplicate/longer hints without retrying early. Without a hint, use
+  bounded 250/500/1000 ms backoff. Use the small compiled-in httpdate parser.
+- Never replay transport failures, timeouts, accepted-response parsing/stream errors,
+  or local tool execution. Keep offline/management commands outside retry mode and
+  diagnostics single-request. Preserve complete file output on exhausted failures.
+- Show retry status/count/wait in rich terminals or verbose stderr, report exhausted
+  attempts, and count actual HTTP requests in terminal summaries separately from turns.
+- Test all three protocols, exact request reuse, budgets, wait timing, stream failure,
+  redaction, file preservation, real-terminal output and one-time project commands.
+
 ## 0.11.0 — 2026-10-26
 
 - Add offline `zi data jsonl-to-array` and `array-to-jsonl` for structured logs and

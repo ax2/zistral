@@ -20,7 +20,7 @@ Download a native installer from [Releases](https://github.com/ax2/zistral/relea
 | Platform | Package | Installation |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | Per-user installer; adds PATH and a Start menu launcher; no administrator required |
-| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.11.0-linux-amd64.deb` |
+| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.12.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | Open the package; installs `/usr/local/bin/zi` |
 
 Then type `zi`. On first launch, choose an existing Codex, WorkBuddy or dsh configuration,
@@ -194,6 +194,12 @@ Keys, provider error bodies and probe answers are never printed. Use `zi -p work
 to check one profile without switching the default.
 
 ## Streaming
+
+Transient model HTTP errors can be retried explicitly with `--retries 1` (0–3, default 0).
+Only 429/500/502/503/504/529 are eligible before successful response headers. Retry-After
+seconds/dates are honored up to 30s; invalid or longer hints stop. Connection, timeout,
+accepted-body and stream errors never replay. Retries can incur additional provider work
+or charges; `--max-steps` still counts logical turns. [Details and examples](docs/retries.md).
 
 Terminal output streams by default for Chat Completions, Responses and Anthropic Messages,
 including fragmented tool arguments and tool continuations. No new runtime dependencies are added.

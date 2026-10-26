@@ -185,12 +185,30 @@ impl Activity {
     }
 
     pub fn request(&self, step: u32, max: u32) {
-        self.requests.set(step);
         if self.rich && !self.live.get() {
             self.bar
-                .set_message(format!("Thinking · request {step}/{max}"));
+                .set_message(format!("Thinking · turn {step}/{max}"));
         } else if self.verbose {
-            eprintln!("zi: request {step}/{max}");
+            eprintln!("zi: turn {step}/{max}");
+        }
+    }
+
+    pub fn attempt(&self) {
+        self.requests.set(self.requests.get() + 1);
+    }
+
+    pub fn retry(&self, status: u16, count: u32, max: u32, delay: Duration) {
+        let message = format!(
+            "Retry {count}/{max} · HTTP {status} · {:.2}s",
+            delay.as_secs_f64()
+        );
+        if self.rich && !self.live.get() {
+            self.bar
+                .println(format!("  {} {message}", style("↻").yellow()));
+            self.bar
+                .set_message(format!("Waiting to retry · {:.2}s", delay.as_secs_f64()));
+        } else if self.rich || self.verbose {
+            eprintln!("zi: {message}");
         }
     }
 

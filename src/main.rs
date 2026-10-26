@@ -8,6 +8,7 @@ mod presets;
 mod process;
 mod project;
 mod recipes;
+mod retry;
 mod stream;
 mod transforms;
 mod ui;
@@ -101,12 +102,15 @@ pub struct Cli {
     /// Maximum duration of each project command (seconds)
     #[arg(long, default_value_t = 60, value_parser = clap::value_parser!(u64).range(1..=3600))]
     command_timeout: u64,
-    /// Maximum model requests (default: 32 in project mode, 8 in data mode)
+    /// Maximum model turns, excluding transient retries (default: project 32, data 8)
     #[arg(long, value_parser = clap::value_parser!(u32).range(1..=128))]
     max_steps: Option<u32>,
     /// Timeout per HTTP request in seconds
     #[arg(long, default_value_t = 120, value_parser = clap::value_parser!(u64).range(1..=3600))]
     timeout: u64,
+    /// Extra attempts per model turn for transient HTTP errors (0-3; default: no retry)
+    #[arg(long, default_value_t = 0, value_parser = clap::value_parser!(u32).range(0..=3))]
+    retries: u32,
     /// Maximum output tokens for the Anthropic Messages API
     #[arg(long, default_value_t = 4096, value_parser = clap::value_parser!(u32).range(1..=65536))]
     max_output_tokens: u32,
@@ -209,6 +213,11 @@ fn read_input(cli: &Cli) -> Result<String> {
 }
 
 fn run(mut cli: Cli) -> Result<()> {
+    if cli.retries > 0
+        && (cli.command.is_some() || cli.count || cli.select.is_some() || cli.config_example)
+    {
+        bail!("--retries is for model tasks only; diagnostics and offline commands do not retry");
+    }
     if cli.output.is_some()
         && cli
             .command

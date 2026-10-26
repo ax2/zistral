@@ -17,7 +17,7 @@ git diff | zi "生成一句简洁的提交说明"
 | 平台 | 安装包 | 安装方法 |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | 双击安装，无需管理员权限，自动添加用户 PATH 和开始菜单入口 |
-| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.11.0-linux-amd64.deb` |
+| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.12.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | 双击安装，命令放到 `/usr/local/bin/zi` |
 
 安装后直接运行 `zi`。Windows 安装结束可立即启动，或在开始菜单打开 zi；
@@ -141,6 +141,11 @@ zi doctor --probe          # 发送一个小请求，验证模型连接和认证
 诊断不会打印 Key、服务端错误正文或探测回答。可用 `zi -p work doctor --probe` 检查指定配置。
 
 ## 流式输出
+
+临时模型 HTTP 错误可用 `--retries 1` 显式重试，范围 0–3，默认 0。仅在成功响应头之前重试
+429/500/502/503/504/529；遵守最多 30 秒的 Retry-After 秒数/日期提示，非法或过长提示直接停止。
+连接失败、超时、成功响应正文/流错误不重放。重试可能增加服务端处理与费用，`--max-steps`
+仍按模型逻辑轮次计数。[完整规则与示例](docs/retries.md)。
 
 普通终端默认边生成边显示，支持 Chat Completions、Responses 和 Anthropic Messages，以及流式工具调用。
 服务返回普通 JSON 时自动使用完整回答；不支持流式请求的服务可加 `--no-stream`。

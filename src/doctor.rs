@@ -50,6 +50,7 @@ pub fn run(cli: &Cli, probe: bool) -> Result<()> {
         test.plain = true;
         test.verbose = false;
         test.max_steps = Some(1);
+        test.retries = 0;
         test.max_output_tokens = 16;
         test.timeout = cli.timeout.min(15);
         output.flush()?;

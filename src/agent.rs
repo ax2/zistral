@@ -84,7 +84,6 @@ pub fn run(settings: &Settings, cli: &Cli, input: &str) -> Result<Answer> {
         )
     });
     for step in 0..max_steps {
-        activity.request(step + 1, max_steps);
         let mut body = json!({"model":settings.model,"stream":streaming});
         if anthropic {
             body["system"] = json!(system);
@@ -99,20 +98,39 @@ pub fn run(settings: &Settings, cli: &Cli, input: &str) -> Result<Answer> {
         if !cli.no_tools {
             body["tools"] = json!(tools);
         }
-        let mut request = client.post(&endpoint).json(&body);
-        if let Some(key) = &settings.api_key {
-            request = if anthropic {
-                request.header("x-api-key", key)
-            } else {
-                request.bearer_auth(key)
-            };
-        }
-        if anthropic {
-            request = request.header("anthropic-version", "2023-06-01");
-        }
-        let response = request.send().context("API request failed")?;
-        let status = response.status();
-        if !status.is_success() {
+        let mut retried = 0;
+        let response = loop {
+            activity.request(step + 1, max_steps);
+            let mut request = client.post(&endpoint).json(&body);
+            if let Some(key) = &settings.api_key {
+                request = if anthropic {
+                    request.header("x-api-key", key)
+                } else {
+                    request.bearer_auth(key)
+                };
+            }
+            if anthropic {
+                request = request.header("anthropic-version", "2023-06-01");
+            }
+            activity.attempt();
+            let response = request.send().context("API request failed")?;
+            let status = response.status();
+            if status.is_success() {
+                break response;
+            }
+            if let Some(delay) = crate::retry::delay(
+                status,
+                response.headers(),
+                retried,
+                cli.retries,
+                std::time::SystemTime::now(),
+            )? {
+                retried += 1;
+                activity.retry(status.as_u16(), retried, cli.retries, delay);
+                drop(response);
+                std::thread::sleep(delay);
+                continue;
+            }
             // Provider error bodies can echo credentials or input; never print them.
             let advice = match status.as_u16() {
                 401 | 403 => "check your API key and model access",
@@ -121,8 +139,14 @@ pub fn run(settings: &Settings, cli: &Cli, input: &str) -> Result<Answer> {
                 500..=599 => "provider unavailable; retry later",
                 _ => "check endpoint/model compatibility and request options",
             };
+            if retried > 0 {
+                bail!(
+                    "API returned HTTP {} after {retried} retries: {advice}",
+                    status.as_u16()
+                );
+            }
             bail!("API returned HTTP {}: {advice}", status.as_u16());
-        }
+        };
         let sse = response
             .headers()
             .get(reqwest::header::CONTENT_TYPE)
