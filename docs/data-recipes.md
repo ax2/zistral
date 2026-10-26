@@ -5,6 +5,8 @@ Combine native data operations without a model, shell subprocess or intermediate
 ```sh
 cat lines.txt | zi data --step trim --step dedupe --step sort:reverse
 zi data --recipe cleanup.toml -i lines.txt -o clean.txt
+zi data --show-plan --recipe cleanup.toml
+zi data --show-plan --step trim --step dedupe --step sort:reverse -o cleanup.toml
 ```
 
 Save this UTF-8 TOML definition as `cleanup.toml`:
@@ -54,3 +56,34 @@ is zero bytes. JSON formatting preserves numeric/string tokens, key order and re
 
 配方文件是用户维护的步骤定义，不是会话、记忆或脚本引擎。团队可以将它纳入版本控制、审阅和
 复用；没有读取过往任务、推测偏好或保存输入数据的行为。
+
+## Inspect and export a plan before processing data / 先看计划，再处理数据
+
+`--show-plan` accepts the same single operation, ordered `--step` list or explicit
+`--recipe`. It validates the whole definition with the normal 1–16 step and 64 KiB
+recipe limits, then emits normalized UTF-8 version-1 TOML. Order and reverse sorting
+remain; comments, source formatting, a BOM and default `reverse = false` are omitted.
+The output is a reusable recipe for `--recipe`, not a stable byte-canonical format or
+a record of input data, past answers, paths or execution permissions.
+
+```sh
+zi data --show-plan --step trim --step dedupe --step sort:reverse -o cleanup.toml
+zi data --show-plan --recipe cleanup.toml
+zi data --recipe cleanup.toml -i lines.txt -o cleaned.txt
+```
+
+Preview never reads or waits for stdin, runs operations, loads model configuration or
+contacts a model. `--input` (including `-i -`) is rejected to avoid silently previewing
+an invocation intended to process data. Stdin remains unread even when redirected.
+`--output -` prints the plan, while `-o FILE`
+saves the plan through the existing no-clobber/explicit `--force` publication path.
+Invalid definitions fail before output preparation and do not replace existing targets.
+Saving is explicit; preview does not create configuration, cache or task-history files.
+
+Success proves definition validity only. `trim` followed by `json-minify` is a valid
+plan even without data, but actual non-JSON input will fail at step 2. JSON type/syntax,
+input and intermediate growth, line counts and output races are checked only during
+execution/publication. Existing file output and shell-redirection limitations still apply.
+No execution simulation, type-flow inference, constant folding, model pipeline import,
+new operation, tool or dependency is introduced. This preview does not grant tools or
+execute embedded shell text.

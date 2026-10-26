@@ -20,7 +20,7 @@ Download a native installer from [Releases](https://github.com/ax2/zistral/relea
 | Platform | Package | Installation |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | Per-user installer; adds PATH and a Start menu launcher; no administrator required |
-| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.14.0-linux-amd64.deb` |
+| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.15.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | Open the package; installs `/usr/local/bin/zi` |
 
 Then type `zi`. On first launch, choose an existing Codex, WorkBuddy or dsh configuration,
@@ -315,6 +315,8 @@ See [tool pipeline examples and boundaries](docs/tool-pipelines.md).
 ```sh
 cat lines.txt | zi data --step trim --step dedupe --step sort:reverse
 zi data --recipe docs/examples/cleanup.toml -i lines.txt -o clean.txt
+zi data --show-plan --recipe docs/examples/cleanup.toml
+zi data --show-plan --step trim --step dedupe --step sort:reverse -o cleanup.toml
 ```
 
 Use one operation, repeated `--step` in execution order, or an explicit `--recipe` file.
@@ -327,6 +329,11 @@ Limits: 1–16 steps, 64 KiB UTF-8 recipe, 8 MiB initial input, 16 MiB per inter
 result; existing line/key/depth limits still apply. The recipe is caller-supplied local
 data, never a model prompt or project permission. No shell, includes, variables, implicit
 discovery or model access. [Recipe format and examples](docs/data-recipes.md).
+
+`--show-plan` validates the same plan and exports normalized version-1 TOML without
+reading/waiting for stdin or running data operations. Explicit `--input` is rejected;
+`-o` saves the definition using the usual no-overwrite rules. Exported plans are reusable
+recipes, not dry-run results or a guarantee that future data will pass each operation.
 
 ## Reusable task presets
 

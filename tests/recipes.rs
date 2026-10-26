@@ -307,3 +307,311 @@ fn step_recipe_input_and_intermediate_limits_are_enforced() {
     assert!(!out.status.success() && out.stdout.is_empty());
     assert!(String::from_utf8_lossy(&out.stderr).contains("step 1 failed"));
 }
+
+#[test]
+fn preview_exports_reusable_ordered_recipes_for_all_native_operations() {
+    let root = tempfile::tempdir().unwrap();
+    let root = root.path();
+    for (operation, input) in [
+        ("trim", " b \r\na \n"),
+        ("dedupe", "b\nb\na\n"),
+        ("sort", "b\na\n"),
+        ("json-format", r#"{"n":1.2300E+400,"n":-0}"#),
+        ("json-minify", r#" { "n":123456789012345678901234567890 } "#),
+        ("json-keys", r#"{"z":0,"a":1,"z":2}"#),
+        ("jsonl-to-array", "1.2300E+400\n-0\n"),
+        ("array-to-jsonl", "[1.2300E+400,-0]"),
+    ] {
+        let preview = invoke(
+            root,
+            &["data", operation, "--show-plan"],
+            b"\xffPRIVATE_STDIN",
+        );
+        assert!(
+            preview.status.success(),
+            "{}",
+            String::from_utf8_lossy(&preview.stderr)
+        );
+        assert!(preview.stderr.is_empty());
+        let text = std::str::from_utf8(&preview.stdout).unwrap();
+        let parsed: toml::Value = toml::from_str(text).unwrap();
+        assert_eq!(parsed["version"].as_integer(), Some(1));
+        assert_eq!(parsed["steps"][0]["operation"].as_str(), Some(operation));
+        assert!(!text.contains("PRIVATE"));
+        std::fs::write(root.join("exported.toml"), &preview.stdout).unwrap();
+        let actual = invoke(
+            root,
+            &["data", "--recipe", "exported.toml"],
+            input.as_bytes(),
+        );
+        let direct = invoke(root, &["data", operation], input.as_bytes());
+        assert!(actual.status.success() && direct.status.success());
+        assert_eq!(actual.stdout, direct.stdout);
+        assert!(actual.stderr.is_empty());
+    }
+    std::fs::write(root.join("ordered.toml"), "\u{feff}# source comment\nversion=1\n[[steps]]\noperation='trim'\nreverse=false\n[[steps]]\noperation='dedupe'\n[[steps]]\noperation='sort'\nreverse=true\n").unwrap();
+    let file = invoke(
+        root,
+        &["data", "--show-plan", "--recipe", "ordered.toml"],
+        b"",
+    );
+    let steps = invoke(
+        root,
+        &[
+            "data",
+            "--show-plan",
+            "--step",
+            "trim",
+            "--step",
+            "dedupe",
+            "--step",
+            "sort:reverse",
+        ],
+        b"",
+    );
+    assert!(file.status.success() && steps.status.success());
+    assert_eq!(file.stdout, steps.stdout);
+    let text = String::from_utf8(file.stdout).unwrap();
+    assert!(!text.contains("source comment") && !text.contains("false"));
+    assert_eq!(text.matches("[[steps]]").count(), 3);
+    let single = invoke(root, &["data", "sort", "--reverse", "--show-plan"], b"");
+    assert_eq!(
+        single.stdout,
+        invoke(
+            root,
+            &["data", "--show-plan", "--step", "sort:reverse"],
+            b""
+        )
+        .stdout
+    );
+}
+
+#[test]
+fn preview_finishes_while_stdin_is_still_open_and_rejects_explicit_data_input() {
+    use std::time::{Duration, Instant};
+    let root = tempfile::tempdir().unwrap();
+    for (args, success) in [
+        (vec!["data", "json-keys", "--show-plan"], true),
+        (
+            vec![
+                "data",
+                "--show-plan",
+                "--step",
+                "trim",
+                "-i",
+                "missing-data",
+            ],
+            false,
+        ),
+        (
+            vec!["-i", "-", "data", "--show-plan", "--step", "trim"],
+            false,
+        ),
+    ] {
+        let mut child = command(root.path())
+            .args(&args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let stdin = child.stdin.take().unwrap();
+        let end = Instant::now() + Duration::from_secs(5);
+        loop {
+            if child.try_wait().unwrap().is_some() {
+                break;
+            }
+            if Instant::now() > end {
+                child.kill().ok();
+                panic!("preview waited for stdin EOF: {args:?}");
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        drop(stdin);
+        let out = child.wait_with_output().unwrap();
+        assert_eq!(
+            out.status.success(),
+            success,
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        if success {
+            assert!(out.stderr.is_empty());
+            assert!(String::from_utf8_lossy(&out.stdout).contains("json-keys"));
+        } else {
+            assert!(out.stdout.is_empty());
+            assert!(String::from_utf8_lossy(&out.stderr).contains("does not read data"));
+        }
+    }
+    assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
+}
+
+#[test]
+fn preview_rejects_invalid_plans_before_preparing_output_and_hides_definition_values() {
+    let root = tempfile::tempdir().unwrap();
+    let root = root.path();
+    std::fs::write(root.join("keep.toml"), b"original plan\r\n").unwrap();
+    for spec in [
+        "version=2\n[[steps]]\noperation='trim'\n".to_owned(),
+        "version=1\nsteps=[]\n".into(),
+        "version=1\n[[steps]]\noperation='trim'\n[[steps]]\noperation='dedupe'\nreverse=true\n"
+            .into(),
+        "version=1\n[[steps]]\noperation='PRIVATE_OPERATION'\n".into(),
+        "version=1\n[[steps]]\noperation='trim'\npath='PRIVATE_PATH'\n".into(),
+        "version=1\ninclude='PRIVATE_INCLUDE'\n[[steps]]\noperation='trim'\n".into(),
+        format!("version=1\n{}", "[[steps]]\noperation='trim'\n".repeat(17)),
+        format!("#{}", "x".repeat(65536)),
+    ] {
+        std::fs::write(root.join("bad.toml"), &spec).unwrap();
+        let out = invoke(
+            root,
+            &[
+                "data",
+                "--show-plan",
+                "--recipe",
+                "bad.toml",
+                "-o",
+                "keep.toml",
+                "--force",
+            ],
+            b"PRIVATE_DATA",
+        );
+        assert!(!out.status.success());
+        assert!(out.stdout.is_empty());
+        let error = String::from_utf8_lossy(&out.stderr);
+        assert!(!error.contains("PRIVATE"), "{error}");
+        if spec.contains("reverse=true") {
+            assert!(error.contains("step 2 is invalid"), "{error}");
+        }
+        assert_eq!(
+            std::fs::read(root.join("keep.toml")).unwrap(),
+            b"original plan\r\n"
+        );
+        assert_eq!(std::fs::read_dir(root).unwrap().count(), 2);
+    }
+    for args in [
+        vec!["data", "--show-plan"],
+        vec![
+            "data",
+            "--show-plan",
+            "--step",
+            "trim",
+            "--recipe",
+            "bad.toml",
+        ],
+        vec!["data", "--show-plan", "--step", "trim:reverse"],
+        vec!["data", "--show-plan", "--step", "$(touch marker)"],
+    ] {
+        let out = invoke(root, &args, b"");
+        assert!(!out.status.success());
+        assert!(out.stdout.is_empty());
+    }
+    assert!(!root.join("marker").exists());
+}
+
+#[test]
+fn preview_file_export_preserves_no_clobber_and_reuses_native_publication() {
+    let root = tempfile::tempdir().unwrap();
+    let root = root.path();
+    std::fs::write(
+        root.join("invalid-model-config.toml"),
+        "not valid model config",
+    )
+    .unwrap();
+    let args = [
+        "data",
+        "--show-plan",
+        "--step",
+        "trim",
+        "--step",
+        "dedupe",
+        "-o",
+        "cleanup.toml",
+    ];
+    let out = invoke(root, &args, b"\xffPRIVATE_DATA");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(out.stdout.is_empty() && out.stderr.is_empty());
+    let original = std::fs::read(root.join("cleanup.toml")).unwrap();
+    let out = invoke(
+        root,
+        &[
+            "data",
+            "--show-plan",
+            "--step",
+            "sort:reverse",
+            "-o",
+            "cleanup.toml",
+        ],
+        b"",
+    );
+    assert!(!out.status.success() && out.stdout.is_empty());
+    assert_eq!(std::fs::read(root.join("cleanup.toml")).unwrap(), original);
+    let out = invoke(
+        root,
+        &[
+            "data",
+            "--show-plan",
+            "--step",
+            "sort:reverse",
+            "-o",
+            "cleanup.toml",
+            "--force",
+        ],
+        b"",
+    );
+    assert!(out.status.success() && out.stdout.is_empty() && out.stderr.is_empty());
+    let plan = std::fs::read(root.join("cleanup.toml")).unwrap();
+    assert_ne!(plan, original);
+    let out = invoke(
+        root,
+        &["data", "--show-plan", "--recipe", "cleanup.toml", "-o", "-"],
+        b"",
+    );
+    assert!(out.status.success());
+    assert_eq!(out.stdout, plan);
+    assert_eq!(
+        invoke(root, &["data", "--recipe", "cleanup.toml"], b"a\nb\n").stdout,
+        b"b\na\n"
+    );
+    assert_eq!(std::fs::read_dir(root).unwrap().count(), 2);
+    assert!(!root.join("config").exists());
+}
+
+#[test]
+fn preview_validates_definition_without_claiming_data_execution_will_succeed() {
+    let root = tempfile::tempdir().unwrap();
+    let root = root.path();
+    let out = invoke(
+        root,
+        &[
+            "data",
+            "--show-plan",
+            "--step",
+            "trim",
+            "--step",
+            "json-minify",
+            "-o",
+            "plan.toml",
+        ],
+        b"",
+    );
+    assert!(out.status.success() && out.stdout.is_empty());
+    std::fs::write(root.join("keep.txt"), b"original result\r\n").unwrap();
+    let out = invoke(
+        root,
+        &["data", "--recipe", "plan.toml", "-o", "keep.txt", "--force"],
+        b" PRIVATE_NOT_JSON \n",
+    );
+    assert!(!out.status.success() && out.stdout.is_empty());
+    let error = String::from_utf8_lossy(&out.stderr);
+    assert!(error.contains("step 2 failed") && !error.contains("PRIVATE_NOT_JSON"));
+    assert_eq!(
+        std::fs::read(root.join("keep.txt")).unwrap(),
+        b"original result\r\n"
+    );
+    assert_eq!(std::fs::read_dir(root).unwrap().count(), 2);
+}

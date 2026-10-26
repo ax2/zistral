@@ -65,6 +65,11 @@ and emits only the final success. Recipe files are not read by model tools or se
 the model must explicitly supply its own inline steps when using the transform tool.
 Sessions, permissions and memory are unchanged.
 
+`zi data --show-plan` uses the same prepared plan to export a reusable version-1 TOML
+definition. It bypasses input reads and all step execution, rejects explicit `--input`,
+and optionally uses the existing result writer to save the definition. It is a CLI-only
+inspection/export path, not a model tool, hidden recipe import or data-dependent dry run.
+
 `selection.rs` fixes the older Value-based select/join path: syntax/depth validation
 precedes a bounded RFC 6901 traversal that borrows RawValue text and skips unrelated
 values. Referenced duplicate keys fail; selected containers retain their lexical numbers,

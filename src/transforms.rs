@@ -1,7 +1,7 @@
 //! Deterministic transformations of explicit input. No model, filesystem or shell access.
 use anyhow::{Context, Result, bail};
 use serde::{
-    Deserialize,
+    Deserialize, Serialize,
     de::{IgnoredAny, MapAccess, Visitor},
 };
 use std::{
@@ -16,7 +16,7 @@ pub const CLI_OUTPUT: usize = 16 * 1024 * 1024;
 pub const MAX_STEPS: usize = 16;
 const TOOL_OUTPUT: usize = 64 * 1024;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Operation {
     /// Trim Unicode whitespace from each line; retain blank lines

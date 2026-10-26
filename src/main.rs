@@ -133,7 +133,7 @@ pub struct Cli {
 enum Commands {
     /// Transform explicit input locally, without a model or configuration
     #[command(
-        after_help = "Examples:\n  zi data trim -i notes.txt\n  zi data --step trim --step dedupe --step sort:reverse -i notes.txt\n  zi data --recipe cleanup.toml -i notes.txt -o clean.txt\n\nRecipe example (UTF-8 TOML):\n  version = 1\n  [[steps]]\n  operation = \"trim\"\n  [[steps]]\n  operation = \"sort\"\n  reverse = true\n\nUse one operation, repeated --step, or --recipe. Recipes allow only the eight native\noperations: no shell, file paths or model requests. Limits: 16 steps, 64 KiB recipe,\n8 MiB initial input, 16 MiB per intermediate/final result. Only final output is emitted."
+        after_help = "Examples:\n  zi data trim -i notes.txt\n  zi data --step trim --step dedupe --step sort:reverse -i notes.txt\n  zi data --recipe cleanup.toml -i notes.txt -o clean.txt\n  zi data --show-plan --recipe cleanup.toml\n  zi data --show-plan --step trim --step dedupe -o cleanup.toml\n\nRecipe example (UTF-8 TOML):\n  version = 1\n  [[steps]]\n  operation = \"trim\"\n  [[steps]]\n  operation = \"sort\"\n  reverse = true\n\nUse one operation, repeated --step, or --recipe. --show-plan validates and exports\nthe resolved version-1 TOML without reading stdin or executing data operations;\n--input is rejected and -o saves the plan. Data-dependent failures still require a run.\nRecipes allow only the eight native operations: no shell, file paths or model requests.\nLimits: 16 steps, 64 KiB recipe, 8 MiB initial input, 16 MiB intermediate/final result."
     )]
     Data {
         #[arg(value_enum, required_unless_present_any = ["steps", "recipe"], conflicts_with_all = ["steps", "recipe"])]
@@ -147,6 +147,9 @@ enum Commands {
         /// Read an explicit versioned TOML recipe of native operations
         #[arg(long)]
         recipe: Option<PathBuf>,
+        /// Validate and export a reusable TOML plan without reading data or running steps
+        #[arg(long)]
+        show_plan: bool,
     },
     /// List, inspect, render or initialize reusable task presets (offline)
     Presets {
@@ -245,6 +248,7 @@ fn run(mut cli: Cli) -> Result<()> {
         reverse,
         steps,
         recipe,
+        show_plan,
     }) = &cli.command
     {
         if cli.preset.is_some()
@@ -259,10 +263,17 @@ fn run(mut cli: Cli) -> Result<()> {
         {
             bail!("zi data accepts input and local operation options only; see zi data --help");
         }
+        if *show_plan && cli.input.is_some() {
+            bail!("--show-plan does not read data; omit --input to preview or export the plan");
+        }
         let plan = recipes::Plan::prepare(*operation, *reverse, steps, recipe.as_deref())?;
         let target = prepare_output(&cli)?;
-        let input = read_input(&cli)?;
-        let output = plan.run(&input)?;
+        let output = if *show_plan {
+            plan.render()?
+        } else {
+            let input = read_input(&cli)?;
+            plan.run(&input)?
+        };
         if let Some(target) = target {
             return save_output(
                 &output,

@@ -2,24 +2,28 @@
 use crate::transforms::{self, Operation};
 use anyhow::{Context, Result, bail};
 use clap::ValueEnum;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{io::Read, path::Path};
 
 const MAX_RECIPE: u64 = 64 * 1024;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct Recipe {
     version: u32,
     steps: Vec<Step>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct Step {
     operation: Operation,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_false")]
     reverse: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 pub struct Plan(Vec<(Operation, bool)>);
@@ -72,13 +76,26 @@ impl Plan {
         if plan.is_empty() || plan.len() > transforms::MAX_STEPS {
             bail!("a data pipeline requires 1-16 steps");
         }
-        for &(operation, reverse) in &plan {
-            transforms::validate_step(operation, reverse)?;
+        for (index, &(operation, reverse)) in plan.iter().enumerate() {
+            transforms::validate_step(operation, reverse)
+                .with_context(|| format!("data pipeline step {} is invalid", index + 1))?;
         }
         Ok(Self(plan))
     }
 
     pub fn run(&self, input: &str) -> Result<String> {
         transforms::run_pipeline(input, &self.0)
+    }
+
+    pub fn render(&self) -> Result<String> {
+        let recipe = Recipe {
+            version: 1,
+            steps: self
+                .0
+                .iter()
+                .map(|&(operation, reverse)| Step { operation, reverse })
+                .collect(),
+        };
+        toml::to_string_pretty(&recipe).context("cannot render data plan")
     }
 }

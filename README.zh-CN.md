@@ -17,7 +17,7 @@ git diff | zi "生成一句简洁的提交说明"
 | 平台 | 安装包 | 安装方法 |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | 双击安装，无需管理员权限，自动添加用户 PATH 和开始菜单入口 |
-| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.14.0-linux-amd64.deb` |
+| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.15.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | 双击安装，命令放到 `/usr/local/bin/zi` |
 
 安装后直接运行 `zi`。Windows 安装结束可立即启动，或在开始菜单打开 zi；
@@ -237,6 +237,8 @@ Agent 可通过现有 `transform_input` 的有序 `steps` 一次完成“去空�
 ```sh
 cat lines.txt | zi data --step trim --step dedupe --step sort:reverse
 zi data --recipe docs/examples/cleanup.toml -i lines.txt -o clean.txt
+zi data --show-plan --recipe docs/examples/cleanup.toml
+zi data --show-plan --step trim --step dedupe --step sort:reverse -o cleanup.toml
 ```
 
 单一操作、按执行顺序重复的 `--step`、显式 `--recipe` 三选一。TOML 配方包含 `version = 1`
@@ -247,6 +249,10 @@ shell `>` 的创建/截断行为仍由 shell 决定。
 配方最多 64 KiB UTF-8、1–16 步；原始输入最多 8 MiB，每步中间/最终结果最多 16 MiB，
 行数、根键数、JSONL 记录数和 JSON 嵌套限制继续适用。配方由调用者显式提供，只组合现有八种本地操作，
 不含命令、include、变量、自动发现、模型访问或项目权限。[格式与示例](docs/data-recipes.md)。
+
+`--show-plan` 只校验并导出规范化的 version-1 TOML，不读取或等待 stdin，也不执行步骤；显式
+`--input` 会被拒绝。`-o` 保存的是配方定义，沿用默认不覆盖和显式 `--force` 规则。导出结果可直接
+用作 `--recipe`，但定义有效不代表未来数据一定满足各步骤的类型、语法和资源要求。
 
 ## 场景命令与自定义提示词
 

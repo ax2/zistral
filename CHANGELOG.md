@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.15.0 — 2026-10-26
+
+- Add `zi data --show-plan` to validate a positional operation, ordered `--step`
+  list or explicit recipe and export a reusable version-1 TOML definition. Preserve
+  operation order and reverse sorting while removing comments and default false values.
+- Preview without reading or waiting for stdin, executing transformations, loading
+  model configuration or contacting a provider. Reject explicit `--input` rather than
+  silently treating data processing as a preview. Definition validity does not prove
+  that future input satisfies each operation's type, syntax or resource requirements.
+- Save exported plans through existing `-o` no-clobber/explicit `--force` publication;
+  invalid definitions fail before output preparation. Include the step number for
+  invalid per-operation options while retaining the existing recipe and step bounds.
+- Verify all eight operations round-trip through exported recipes, open-stdin behavior,
+  definition failures, file preservation and later data-dependent errors. No added
+  dependencies, native operations, model tools, permissions or persistent task memory.
+
 ## 0.14.0 — 2026-10-26
 
 - Let the existing `transform_input` model tool accept an ordered `steps` array

@@ -64,6 +64,9 @@ without arbitrary shell commands, includes, dynamically loaded libraries, hidden
 or secrets. Definitions contain no input/result paths and are validated before input/output.
 Limits are 16 steps, 64 KiB definition, 8 MiB initial data and 16 MiB per intermediate.
 This is reusable user-maintained computation, not persistent task memory or a plugin engine.
+`zi data --show-plan` validates and exports that definition without reading data or
+running steps. A reusable reviewed recipe fits this customization layer; it contains
+neither past inputs nor model conclusions and does not infer execution success from syntax.
 JSONL/array conversion fits this scope as deterministic structured-log reshaping, shared
 with the existing transform tool. It adds no tool names, file permissions or model runtime.
 
