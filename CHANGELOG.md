@@ -8,6 +8,7 @@
 - Preserve JSON values when composing: string quotes/escapes, numeric tokens, key order
   and repeated keys inside selected values. Keep existing `--select` display/join behavior.
   Validate pointer syntax/limits before IO; reject missing paths and ambiguous referenced keys.
+  Keep normalized exported recipes within the same 64 KiB read limit, including escapes.
 - Extend existing `transform_input` single/ordered steps with the same pointer validation.
   Keep original-input isolation, bounded intermediates/final results and file preservation
   on failure. No new dependencies, tool names, project permissions or Agent-loop changes.

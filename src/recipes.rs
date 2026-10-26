@@ -75,7 +75,13 @@ impl Plan {
             step.validate()
                 .with_context(|| format!("data pipeline step {} is invalid", index + 1))?;
         }
-        Ok(Self(plan))
+        let plan = Self(plan);
+        // Exported plans must remain readable within the same recipe-size contract.
+        // Escaping pointers can expand a compact source definition significantly.
+        if plan.render()?.len() as u64 > MAX_RECIPE {
+            bail!("normalized recipe exceeds 64 KiB; shorten pointers or reduce steps");
+        }
+        Ok(plan)
     }
 
     pub fn run(&self, input: &str) -> Result<String> {

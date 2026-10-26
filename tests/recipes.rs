@@ -298,6 +298,46 @@ fn selection_recipe_replaces_input_only_after_a_complete_success() {
 }
 
 #[test]
+fn escaped_pointer_plan_growth_is_rejected_before_data_or_output_preparation() {
+    let root = tempfile::tempdir().unwrap();
+    let step = format!(
+        "[[steps]]\noperation='json-select'\npointer='/{}'\n",
+        "\t".repeat(2047)
+    );
+    let spec = format!("version=1\n{}", step.repeat(16));
+    assert!(spec.len() < 65536);
+    std::fs::write(root.path().join("large.toml"), spec).unwrap();
+    std::fs::write(root.path().join("keep.toml"), b"original\r\n").unwrap();
+    for preview in [false, true] {
+        let mut args = vec![
+            "data",
+            "--recipe",
+            "large.toml",
+            "-o",
+            "keep.toml",
+            "--force",
+        ];
+        if preview {
+            args.push("--show-plan");
+        } else {
+            args.extend(["-i", "missing.json"]);
+        }
+        let out = invoke(root.path(), &args, b"");
+        assert!(!out.status.success() && out.stdout.is_empty());
+        let error = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            error.contains("normalized recipe exceeds 64 KiB"),
+            "{error}"
+        );
+        assert_eq!(
+            std::fs::read(root.path().join("keep.toml")).unwrap(),
+            b"original\r\n"
+        );
+    }
+    assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 2);
+}
+
+#[test]
 fn ordered_steps_match_composed_operations_and_pipe_into_another_command() {
     let root = tempfile::tempdir().unwrap();
     let root = root.path();

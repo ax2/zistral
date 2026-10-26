@@ -83,3 +83,7 @@ Existing limits remain: 64 KiB recipe/tool arguments, 1–16 steps, 8 MiB origin
 envelope (including escaping). Selection from an expanded intermediate may use the full
 16 MiB allowance. Pointer validation does not turn these bounds into a process memory cap.
 No new dependencies, tool names, permissions, runtime, network calls or memory files.
+
+The normalized TOML definition must also fit 64 KiB, checked before input/output for both
+execution and preview. Pointer escaping can expand a short literal source; such plans fail
+early rather than exporting a recipe that the same program cannot read back.
