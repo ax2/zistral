@@ -20,7 +20,7 @@ Download a native installer from [Releases](https://github.com/ax2/zistral/relea
 | Platform | Package | Installation |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | Per-user installer; adds PATH and a Start menu launcher; no administrator required |
-| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.12.0-linux-amd64.deb` |
+| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.13.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | Open the package; installs `/usr/local/bin/zi` |
 
 Then type `zi`. On first launch, choose an existing Codex, WorkBuddy or dsh configuration,
@@ -445,6 +445,13 @@ is the first item of `abc`, `~1` escapes `/`, and `~0` escapes `~`. An empty
 pointer selects the root. Strings print without JSON quotes; other values
 print compact JSON. `--join` requires an array and joins its displayed values.
 
+Selection/join preserves original numeric tokens, object key order and repeated keys
+inside selected containers, without a numeric value tree. Referenced duplicate member
+names fail rather than choosing one. Plain pointers are bounded to 4096 UTF-8 bytes/128
+tokens, JSON depth to 128, local input/result text to 64 MiB (normal input defaults still
+apply) and select_input tool text to 64 KiB. `--json` also uses lexical compaction, so
+validation preserves oversized numbers and escape forms. [Exact rules](docs/json-selection.md).
+
 `--count` returns JSON with clearly defined fields:
 
 | Field | Meaning |
@@ -493,7 +500,7 @@ Feature boundaries and the session/memory assessment are recorded in
 implicit history, load repository configuration or run plugin code.
 
 
-Default data mode uses only `count_input` and `select_input`. Explicit project mode adds
+Default data mode uses only `count_input`, `select_input` and `transform_input`. Explicit project mode adds
 local inspection, file changes and commands as described above. There is no built-in web
 browser, persistent conversation history, background agent service or OS sandbox. Network
 mode sends the instruction, input and any inspected project/tool content to the configured

@@ -58,6 +58,14 @@ CLI pipes compose multiple transformations. `recipes.rs` additionally validates 
 and emits only the final success. No recipe steps are added to model tools or task context.
 Sessions, permissions and memory are unchanged.
 
+`selection.rs` fixes the older Value-based select/join path: syntax/depth validation
+precedes a bounded RFC 6901 traversal that borrows RawValue text and skips unrelated
+values. Referenced duplicate keys fail; selected containers retain their lexical numbers,
+key order and repeated keys. Local selection text is capped at 64 MiB; tool text at 64 KiB.
+Final `--json` validation in one-shot and interactive tasks shares lexical compaction,
+without a numeric round trip. serde_json's optional raw-value features add no packages;
+only the validated selector disables recursion checks after the common 128-depth guard.
+
 ## Verified requirements
 
 `--output` is caller-controlled result delivery in `output.rs`, not an agent tool. A

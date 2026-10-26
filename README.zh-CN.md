@@ -17,7 +17,7 @@ git diff | zi "生成一句简洁的提交说明"
 | 平台 | 安装包 | 安装方法 |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | 双击安装，无需管理员权限，自动添加用户 PATH 和开始菜单入口 |
-| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.12.0-linux-amd64.deb` |
+| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.13.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | 双击安装，命令放到 `/usr/local/bin/zi` |
 
 安装后直接运行 `zi`。Windows 安装结束可立即启动，或在开始菜单打开 zi；
@@ -349,6 +349,12 @@ cat 1.json | zi --select /abc/0 --join ','
 `--join` 将选中的数组用指定分隔符连接。自然语言模式也能调用这些内置工具，
 但工具选择与最终表述由模型决定；需要严格确定结果时使用本地参数模式。
 
+选择和连接保留数字原文、选中容器的对象键顺序与重复键；被引用的对象成员重名时直接报错，
+不再静默取最后一个。字符串仍输出解码后的文本，其他值输出紧凑 JSON。指针最多 4096 个
+UTF-8 字节、128 个引用段；JSON 最多 128 层，选择输入/本地结果正文最多 64 MiB（默认输入
+仍为 8 MiB），select_input 工具文本最多 64 KiB。`--json` 最终校验也改为只检查语法和压缩
+空白，保留超大数字、转义与键顺序。[精确规则](docs/json-selection.md)。
+
 ## 脚本行为
 
 - 标准输入与文件均为 UTF-8，支持移除开头的 UTF-8 BOM。
@@ -360,7 +366,7 @@ cat 1.json | zi --select /abc/0 --join ','
 - 默认最多读取 8 MiB，`--max-input` 可提高到 64 MiB；完整缓冲输入，不做流式切分。
 - 成功返回 0，运行错误返回 1，命令参数错误返回 2；下游关闭管道时安静退出。
 - 无后台服务，无自动升级，无本地聊天历史。网络模式会把输入发送给配置的模型服务。
-- 默认数据模式使用计数与 JSON 提取工具；显式项目模式提供读写与命令能力。没有内置网页浏览器或系统级沙箱。
+- 默认数据模式使用计数、JSON 提取和原生转换工具；显式项目模式提供读写与命令能力。没有内置网页浏览器或系统级沙箱。
 
 源码构建：
 

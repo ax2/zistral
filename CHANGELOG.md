@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.13.0 — 2026-10-26
+
+- Fix JSON selection/join rounding oversized integers, rejecting large exponents
+  in unrelated fields, and rewriting numeric tokens or object key order. Borrow
+  selected JSON text instead of constructing a numeric value tree; keep strings
+  as decoded text and compact other values without changing their lexical tokens.
+- Apply the same syntax-check/lexical-compaction path to `--json` final answers,
+  including interactive tasks, so validation cannot reintroduce numeric rounding.
+- Enforce plain RFC 6901 escapes and array indices; reject duplicate member names
+  on the referenced path instead of silently selecting the last value. Preserve
+  repeated keys inside selected containers and leave unreferenced duplicates alone.
+- Bound pointers to 4096 UTF-8 bytes/128 tokens, JSON depth to 128, selection input
+  and local result text to 64 MiB, and select_input tool text to 64 KiB. Fail joins
+  on output growth rather than allocating an unbounded joined result.
+- Verify exact lexical results, Unicode/escape rules, strict-JSON output, all three
+  protocols, real interactive terminals and file preservation. Enable existing
+  serde_json raw-value features without adding packages, model tools or permissions.
+
 ## 0.12.0 — 2026-10-26
 
 - Add explicit `--retries 0..3` per model turn, defaulting to zero. Retry only HTTP

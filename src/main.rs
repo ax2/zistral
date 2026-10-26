@@ -9,6 +9,7 @@ mod process;
 mod project;
 mod recipes;
 mod retry;
+mod selection;
 mod stream;
 mod transforms;
 mod ui;
@@ -389,13 +390,11 @@ fn run(mut cli: Cli) -> Result<()> {
         answer.text
     };
     let output = if cli.json {
-        let value: serde_json::Value =
-            serde_json::from_str(&output).context(if cli.output.is_some() {
-                "output is not valid JSON (nothing published)"
-            } else {
-                "output is not valid JSON (nothing written to stdout)"
-            })?;
-        serde_json::to_string(&value)?
+        transforms::compact_json(&output, data::RESULT_LIMIT).context(if cli.output.is_some() {
+            "output is not valid JSON (nothing published)"
+        } else {
+            "output is not valid JSON (nothing written to stdout)"
+        })?
     } else {
         output
     };
@@ -553,8 +552,8 @@ fn session(cli: &mut Cli) -> Result<()> {
                 }
                 let answer = answer.text;
                 if task.json {
-                    match serde_json::from_str::<serde_json::Value>(&answer) {
-                        Ok(value) => emit(&serde_json::to_string(&value)?, &task)?,
+                    match transforms::compact_json(&answer, data::RESULT_LIMIT) {
+                        Ok(value) => emit(&value, &task)?,
                         Err(_) => {
                             eprintln!("zi: output is not valid JSON (nothing written to stdout)")
                         }

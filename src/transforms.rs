@@ -72,7 +72,7 @@ impl Write for Buffer {
     }
 }
 
-fn validate_json(input: &str) -> Result<()> {
+pub(crate) fn validate_json(input: &str) -> Result<()> {
     // IgnoredAny validates syntax without converting numbers or constructing a Value.
     // Check nesting first: its skip parser uses an explicit stack rather than Value's depth limit.
     let (mut string, mut escaped, mut depth) = (false, false, 0usize);
@@ -109,6 +109,17 @@ fn validate_json(input: &str) -> Result<()> {
                 e.column()
             )
         })
+}
+
+pub(crate) fn compact_valid_json(input: &str, limit: usize) -> Result<String> {
+    let mut output = Buffer::new(limit);
+    format_json(input, false, &mut output)?;
+    Ok(output.finish())
+}
+
+pub(crate) fn compact_json(input: &str, limit: usize) -> Result<String> {
+    validate_json(input)?;
+    compact_valid_json(input, limit)
 }
 
 fn format_json(input: &str, pretty: bool, out: &mut Buffer) -> Result<()> {
