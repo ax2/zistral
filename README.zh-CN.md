@@ -17,7 +17,7 @@ git diff | zi "生成一句简洁的提交说明"
 | 平台 | 安装包 | 安装方法 |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | 双击安装，无需管理员权限，自动添加用户 PATH 和开始菜单入口 |
-| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.13.0-linux-amd64.deb` |
+| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.14.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | 双击安装，命令放到 `/usr/local/bin/zi` |
 
 安装后直接运行 `zi`。Windows 安装结束可立即启动，或在开始菜单打开 zi；
@@ -226,9 +226,10 @@ JSON 格式化和压缩仅改变字符串外的无意义空白，保留数字/�
 `-i/--input FILE` 可放在 `data` 前后，`-` 读取 stdin。只有显式 `-o FILE --force` 才替换输入文件。
 Windows PowerShell 可用 `Get-Content -Raw` 读取 UTF-8 文件。
 
-Agent 可通过 `transform_input` 使用同一计算核心，不获得文件或命令权限，工具结果含 JSON 包装
-最多 64 KiB，超限返回错误而非截断。每次工具调用都处理原始输入；多个转换可用显式管道或下述
-本地流程串联，不改变模型工具。
+Agent 可通过现有 `transform_input` 的有序 `steps` 一次完成“去空白→去重→排序”等组合，旧单操作
+调用继续兼容。每次调用从原始输入开始，只有同一次调用内的步骤处理前一步结果；1–16 步均为
+既有操作，原始输入最多 8 MiB，中间结果最多 16 MiB，最终工具结果含 JSON 包装最多 64 KiB。
+失败返回错误，不交付中间正文，不新增工具名称或文件权限。[示例与完整边界](docs/tool-pipelines.md)。
 `data` 为保留命令；要把它作为普通指令开头，可用 `zi -- data ...`。
 
 ## 可复用的离线处理流程

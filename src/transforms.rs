@@ -276,6 +276,10 @@ pub fn validate_step(operation: Operation, reverse: bool) -> Result<()> {
 
 /// Buffer only the current/next stage. Never emit an intermediate result.
 pub fn run_pipeline(input: &str, steps: &[(Operation, bool)]) -> Result<String> {
+    pipeline(input, steps, CLI_OUTPUT)
+}
+
+fn pipeline(input: &str, steps: &[(Operation, bool)], final_limit: usize) -> Result<String> {
     if steps.is_empty() || steps.len() > MAX_STEPS {
         bail!("a data pipeline requires 1-16 steps");
     }
@@ -286,7 +290,12 @@ pub fn run_pipeline(input: &str, steps: &[(Operation, bool)]) -> Result<String> 
     for (index, &(operation, reverse)) in steps.iter().enumerate() {
         let source = if index == 0 { input } else { &current };
         let input_limit = if index == 0 { MAX_INPUT } else { CLI_OUTPUT };
-        current = transform(source, operation, reverse, input_limit, CLI_OUTPUT)
+        let limit = if index + 1 == steps.len() {
+            final_limit
+        } else {
+            CLI_OUTPUT
+        };
+        current = transform(source, operation, reverse, input_limit, limit)
             .with_context(|| format!("data pipeline step {} failed", index + 1))?;
     }
     Ok(current)
@@ -351,19 +360,43 @@ fn transform(
 }
 
 pub fn execute(arguments: &str, input: &str) -> Result<String> {
+    if arguments.len() > 64 * 1024 {
+        bail!("transform tool arguments exceed 64 KiB");
+    }
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
-    struct Args {
+    struct Step {
         operation: Operation,
         #[serde(default)]
         reverse: bool,
     }
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Steps {
+        steps: Vec<Step>,
+    }
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Args {
+        Single(Step),
+        Pipeline(Steps),
+    }
     let args: Args = serde_json::from_str(arguments).map_err(|_| {
         anyhow::anyhow!(
-            "transform_input requires a supported operation and optional boolean reverse"
+            "transform_input requires either operation with optional boolean reverse, or 1-16 steps of the same shape; do not combine them"
         )
     })?;
-    let output = run(input, args.operation, args.reverse, TOOL_OUTPUT)?;
+    let output = match args {
+        Args::Single(step) => run(input, step.operation, step.reverse, TOOL_OUTPUT)?,
+        Args::Pipeline(args) => {
+            let steps: Vec<_> = args
+                .steps
+                .into_iter()
+                .map(|s| (s.operation, s.reverse))
+                .collect();
+            pipeline(input, &steps, TOOL_OUTPUT)?
+        }
+    };
     let result = serde_json::to_string(&serde_json::json!({"output":output}))?;
     if result.len() > TOOL_OUTPUT {
         bail!("transform tool result exceeds 64 KiB; reduce input or use zi data locally");
@@ -374,6 +407,119 @@ pub fn execute(arguments: &str, input: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn tool_steps_preserve_order_and_old_single_operation_shape() {
+        let input = " 乙 \r\n甲\n 乙\n\n";
+        let args = r#"{"steps":[{"operation":"trim"},{"operation":"dedupe"},{"operation":"sort","reverse":true}]}"#;
+        let result: serde_json::Value =
+            serde_json::from_str(&execute(args, input).unwrap()).unwrap();
+        assert_eq!(result["output"], "甲\n乙\n\n");
+        let old: serde_json::Value = serde_json::from_str(
+            &execute(r#"{"operation":"sort","reverse":true}"#, "a\nb").unwrap(),
+        )
+        .unwrap();
+        assert_eq!(old["output"], "b\na\n");
+        let source =
+            r#" {"n":123456789012345678901234567890,"n":1.2300E+400,"z":-0,"s":"\u4e2d"} "#;
+        let result: serde_json::Value = serde_json::from_str(
+            &execute(
+                r#"{"steps":[{"operation":"json-format"},{"operation":"json-minify"}]}"#,
+                source,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(result["output"], source.trim());
+    }
+    #[test]
+    fn tool_plan_validation_is_exclusive_bounded_and_hides_values() {
+        for args in [
+            r#"{}"#,
+            r#"{"steps":[]}"#,
+            r#"{"steps":null}"#,
+            r#"{"operation":"trim","steps":[{"operation":"dedupe"}]}"#,
+            r#"{"steps":[{"operation":"trim"}],"reverse":false}"#,
+            r#"{"steps":[{"operation":"trim","reverse":true}]}"#,
+            r#"{"steps":[{"operation":"trim","path":"PRIVATE_PATH"}]}"#,
+            r#"{"steps":[{"operation":"PRIVATE_OPERATION"}]}"#,
+            r#"{"steps":[{"operation":"trim","reverse":null}]}"#,
+            r#"{"steps":[{"operation":"trim","operation":"sort"}]}"#,
+            r#"{"steps":[{"operation":"trim"}],"steps":[{"operation":"sort"}]}"#,
+        ] {
+            let error = format!("{:#}", execute(args, "PRIVATE_INPUT").unwrap_err());
+            assert!(!error.contains("PRIVATE"), "{error}");
+        }
+        let excessive =
+            serde_json::json!({"steps":vec![serde_json::json!({"operation":"trim"});17]})
+                .to_string();
+        assert!(execute(&excessive, "x").is_err());
+        assert!(
+            execute(
+                &format!("{}{{\"operation\":\"trim\"}}", " ".repeat(65536)),
+                "x"
+            )
+            .is_err()
+        );
+        let failure = execute(
+            r#"{"steps":[{"operation":"trim"},{"operation":"json-minify"}]}"#,
+            " PRIVATE_INPUT ",
+        )
+        .unwrap_err();
+        let failure = format!("{failure:#}");
+        assert!(failure.contains("step 2 failed") && !failure.contains("PRIVATE_INPUT"));
+    }
+    #[test]
+    fn tool_pipeline_allows_large_intermediate_but_bounds_final_envelope() {
+        let source = format!(
+            "{}{}-0{}",
+            "[".repeat(99),
+            "1.2300E+400,".repeat(2000),
+            "]".repeat(99)
+        );
+        assert!(
+            run(&source, Operation::JsonFormat, false, CLI_OUTPUT)
+                .unwrap()
+                .len()
+                > TOOL_OUTPUT
+        );
+        let result = execute(
+            r#"{"steps":[{"operation":"json-format"},{"operation":"json-minify"}]}"#,
+            &source,
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&result).unwrap()["output"],
+            source
+        );
+        assert!(result.len() <= TOOL_OUTPUT);
+        let input = "line\n".repeat(20000);
+        let result = execute(
+            r#"{"steps":[{"operation":"sort"},{"operation":"dedupe"}]}"#,
+            &input,
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&result).unwrap()["output"],
+            "line\n"
+        );
+        let quote_heavy = "\"".repeat(40000);
+        assert!(
+            execute(r#"{"steps":[{"operation":"trim"}]}"#, &quote_heavy)
+                .unwrap_err()
+                .to_string()
+                .contains("64 KiB")
+        );
+        assert!(
+            execute(
+                r#"{"steps":[{"operation":"trim"}]}"#,
+                &"x".repeat(MAX_INPUT + 1)
+            )
+            .is_err()
+        );
+        let sixteen = serde_json::json!({"steps":vec![serde_json::json!({"operation":"trim"});16]})
+            .to_string();
+        assert!(execute(&sixteen, "x").is_ok());
+    }
     fn apply(text: &str, op: Operation) -> String {
         run(text, op, false, CLI_OUTPUT).unwrap()
     }

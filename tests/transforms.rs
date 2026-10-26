@@ -276,12 +276,16 @@ fn later_invalid_jsonl_record_never_publishes_partial_records_or_changes_target(
 }
 
 fn model(api: &str, args: Value, expected: Value) -> (String, std::thread::JoinHandle<()>) {
+    model_turns(api, vec![(args, expected)])
+}
+
+fn model_turns(api: &str, calls: Vec<(Value, Value)>) -> (String, std::thread::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     listener.set_nonblocking(true).unwrap();
     let url = format!("http://{}/v1", listener.local_addr().unwrap());
     let api = api.to_owned();
     let task = std::thread::spawn(move || {
-        for turn in 0..2 {
+        for turn in 0..=calls.len() {
             let end = Instant::now() + Duration::from_secs(10);
             let mut stream = loop {
                 match listener.accept() {
@@ -338,7 +342,19 @@ fn model(api: &str, args: Value, expected: Value) -> (String, std::thread::JoinH
                     .unwrap();
                 assert!(ops.contains(&json!("jsonl-to-array")));
                 assert!(ops.contains(&json!("array-to-jsonl")));
-            } else {
+                let steps = &schema["properties"]["steps"];
+                assert_eq!(steps["minItems"], 1);
+                assert_eq!(steps["maxItems"], 16);
+                assert_eq!(
+                    steps["items"]["properties"]["operation"]["enum"]
+                        .as_array()
+                        .unwrap(),
+                    ops
+                );
+                assert_eq!(steps["items"]["additionalProperties"], false);
+            }
+            if turn > 0 {
+                let expected = &calls[turn - 1].1;
                 let result =
                     match api.as_str() {
                         "chat" => {
@@ -359,15 +375,16 @@ fn model(api: &str, args: Value, expected: Value) -> (String, std::thread::JoinH
                 let result: Value = serde_json::from_str(result).unwrap();
                 if expected.is_null() {
                     assert!(result["error"].is_string());
-                    assert!(result.get("output").is_none())
+                    assert!(result.get("output").is_none());
+                    assert!(!result["error"].as_str().unwrap().contains("PRIVATE"));
                 } else {
-                    assert_eq!(result["output"], expected)
+                    assert_eq!(&result["output"], expected)
                 }
             }
-            let payload=if turn==0 { match api.as_str(){
-                "chat"=>json!({"choices":[{"finish_reason":"tool_calls","message":{"tool_calls":[{"id":"t","type":"function","function":{"name":"transform_input","arguments":args.to_string()}}]}}]}),
-                "responses"=>json!({"status":"completed","output":[{"type":"function_call","call_id":"t","name":"transform_input","arguments":args.to_string()}]}),
-                _=>json!({"stop_reason":"tool_use","content":[{"type":"tool_use","id":"t","name":"transform_input","input":args}]}),
+            let payload=if let Some((args,_))=calls.get(turn) { let id=format!("t{turn}"); match api.as_str(){
+                "chat"=>json!({"choices":[{"finish_reason":"tool_calls","message":{"tool_calls":[{"id":id,"type":"function","function":{"name":"transform_input","arguments":args.to_string()}}]}}]}),
+                "responses"=>json!({"status":"completed","output":[{"type":"function_call","call_id":id,"name":"transform_input","arguments":args.to_string()}]}),
+                _=>json!({"stop_reason":"tool_use","content":[{"type":"tool_use","id":id,"name":"transform_input","input":args}]}),
             }}else {match api.as_str(){
                 "chat"=>json!({"choices":[{"finish_reason":"stop","message":{"content":"verified"}}]}),
                 "responses"=>json!({"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"verified"}]}]}),
@@ -377,6 +394,179 @@ fn model(api: &str, args: Value, expected: Value) -> (String, std::thread::JoinH
         }
     });
     (url, task)
+}
+#[test]
+fn tool_pipelines_compose_in_order_and_keep_lexical_json_in_every_protocol() {
+    for api in ["chat", "responses", "anthropic"] {
+        let root = tempfile::tempdir().unwrap();
+        for (args, input, expected) in [
+            (
+                json!({"steps":[{"operation":"trim"},{"operation":"dedupe"},{"operation":"sort","reverse":true}]}),
+                " 乙 \r\n甲\n 乙\n\n",
+                json!("甲\n乙\n\n"),
+            ),
+            (
+                json!({"steps":[{"operation":"dedupe"},{"operation":"trim"}]}),
+                "a\na \n",
+                json!("a\na\n"),
+            ),
+            (
+                json!({"steps":[{"operation":"jsonl-to-array"},{"operation":"json-format"},{"operation":"json-minify"},{"operation":"array-to-jsonl"}]}),
+                "{\"n\":1.2300E+400,\"n\":-0}\n123456789012345678901234567890\n\"\\u4e2d\"\n",
+                json!(
+                    "{\"n\":1.2300E+400,\"n\":-0}\n123456789012345678901234567890\n\"\\u4e2d\"\n"
+                ),
+            ),
+        ] {
+            let (url, server) = model(api, args, expected);
+            let out = invoke(
+                root.path(),
+                &[
+                    "--api",
+                    api,
+                    "--base-url",
+                    &url,
+                    "--model",
+                    "fixture",
+                    "transform",
+                ],
+                input.as_bytes(),
+            );
+            assert!(
+                out.status.success(),
+                "{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            assert_eq!(out.stdout, b"verified\n");
+            assert!(out.stderr.is_empty());
+            server.join().unwrap();
+            assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
+        }
+    }
+}
+#[test]
+fn tool_pipeline_invalid_shapes_and_midstep_failures_return_no_intermediate() {
+    for api in ["chat", "responses", "anthropic"] {
+        let root = tempfile::tempdir().unwrap();
+        for args in [
+            json!({"steps":[]}),
+            json!({"steps":vec![json!({"operation":"trim"});17]}),
+            json!({"operation":"trim","steps":[{"operation":"dedupe"}]}),
+            json!({"steps":[{"operation":"trim"}],"reverse":false}),
+            json!({"steps":[{"operation":"trim"},{"operation":"dedupe","reverse":true}]}),
+            json!({"steps":[{"operation":"trim","path":"PRIVATE_PATH"}]}),
+            json!({"steps":[{"operation":"trim"},{"operation":"json-minify"}]}),
+        ] {
+            let (url, server) = model(api, args, Value::Null);
+            let out = invoke(
+                root.path(),
+                &[
+                    "--api",
+                    api,
+                    "--base-url",
+                    &url,
+                    "--model",
+                    "fixture",
+                    "transform",
+                ],
+                b" PRIVATE_INPUT \n",
+            );
+            assert!(
+                out.status.success(),
+                "{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            assert_eq!(out.stdout, b"verified\n");
+            assert!(out.stderr.is_empty());
+            server.join().unwrap();
+        }
+    }
+}
+#[test]
+fn tool_pipeline_can_reduce_large_intermediates_and_errors_stay_bounded() {
+    let root = tempfile::tempdir().unwrap();
+    for api in ["chat", "responses", "anthropic"] {
+        for (args, input, expected) in [
+            (
+                json!({"steps":[{"operation":"sort"},{"operation":"dedupe"}]}),
+                "line\n".repeat(20000),
+                json!("line\n"),
+            ),
+            (
+                json!({"steps":[{"operation":"trim"}]}),
+                "\"".repeat(40000),
+                Value::Null,
+            ),
+        ] {
+            let (url, server) = model(api, args, expected);
+            let out = invoke(
+                root.path(),
+                &[
+                    "--api",
+                    api,
+                    "--base-url",
+                    &url,
+                    "--model",
+                    "fixture",
+                    "transform",
+                ],
+                input.as_bytes(),
+            );
+            assert!(
+                out.status.success(),
+                "{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            assert_eq!(out.stdout, b"verified\n");
+            assert!(out.stderr.is_empty());
+            server.join().unwrap();
+        }
+    }
+}
+#[test]
+fn failed_tool_pipeline_can_recover_and_later_calls_restart_from_original_input() {
+    let root = tempfile::tempdir().unwrap();
+    for api in ["chat", "responses", "anthropic"] {
+        let calls = vec![
+            (
+                json!({"steps":[{"operation":"trim"},{"operation":"json-minify"}]}),
+                Value::Null,
+            ),
+            (
+                json!({"steps":[{"operation":"trim"},{"operation":"dedupe"}]}),
+                json!("b\na\n"),
+            ),
+            (json!({"operation":"dedupe"}), json!(" b \na\nb\n")),
+        ];
+        let (url, server) = model_turns(api, calls);
+        let out = invoke(
+            root.path(),
+            &[
+                "--api",
+                api,
+                "--base-url",
+                &url,
+                "--model",
+                "fixture",
+                "-o",
+                "result.txt",
+                "transform",
+            ],
+            b" b \na\nb\n",
+        );
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(out.stdout.is_empty() && out.stderr.is_empty());
+        assert_eq!(
+            std::fs::read(root.path().join("result.txt")).unwrap(),
+            b"verified\n"
+        );
+        std::fs::remove_file(root.path().join("result.txt")).unwrap();
+        server.join().unwrap();
+    }
 }
 #[test]
 fn transform_tool_works_on_original_input_in_every_protocol_without_project_permissions() {

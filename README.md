@@ -20,7 +20,7 @@ Download a native installer from [Releases](https://github.com/ax2/zistral/relea
 | Platform | Package | Installation |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | Per-user installer; adds PATH and a Start menu launcher; no administrator required |
-| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.13.0-linux-amd64.deb` |
+| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.14.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | Open the package; installs `/usr/local/bin/zi` |
 
 Then type `zi`. On first launch, choose an existing Codex, WorkBuddy or dsh configuration,
@@ -301,10 +301,13 @@ is buffered up to 16 MiB, including indentation growth. Errors exit nonzero with
 `-o FILE --force` can replace an input file. Windows PowerShell users can use
 `Get-Content -Raw` for UTF-8 input.
 
-The same core is available to the model as `transform_input` on the original input, with
-a 64 KiB JSON tool-result limit. It returns an error rather than a truncated result.
-Each tool call starts from the original input; CLI pipes or the following local pipelines
-compose transforms without changing the model tool.
+The same core is available to the model as `transform_input`, including an ordered `steps`
+array for compound tasks such as trim → dedupe → sort. The original single-operation
+shape remains valid. Each invocation starts from original input; only steps inside that
+invocation consume the preceding intermediate. Plans contain 1–16 existing operations,
+with 8 MiB original input, 16 MiB intermediates and a 64 KiB final JSON tool-result limit.
+Errors return no intermediate output. No tool names or permissions are added.
+See [tool pipeline examples and boundaries](docs/tool-pipelines.md).
 `data` is a reserved command; `zi -- data ...` treats it as a literal model instruction.
 
 ## Reusable offline pipelines

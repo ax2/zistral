@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.14.0 — 2026-10-26
+
+- Let the existing `transform_input` model tool accept an ordered `steps` array
+  of 1-16 native transformations, so compound cleanup and JSONL tasks can run
+  deterministically in one tool call. Keep the single-operation call compatible.
+- Reuse the offline pipeline core: validate the whole plan first, preserve JSON
+  lexical values, buffer only current/next stages, and return only the final output.
+  Each new invocation still starts from original input, without shared tool memory.
+- Bound tool arguments to 64 KiB, original input to 8 MiB, intermediate text to
+  16 MiB and the final serialized tool result to 64 KiB. Reject mixed call shapes,
+  unknown fields, invalid options and over-limit results rather than truncating.
+- Verify composition order, all three model protocols, failure/recovery, large
+  intermediate reduction, final-envelope limits and independent subsequent calls.
+  No new operation names, dependencies, tools, project permissions or model runtime.
+
 ## 0.13.0 — 2026-10-26
 
 - Fix JSON selection/join rounding oversized integers, rejecting large exponents

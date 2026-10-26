@@ -51,11 +51,18 @@ commas after full syntax validation and tracks string escapes/nesting. Blank/inv
 records and more than 100000 items fail. The wrapper counts toward the common depth cap.
 Input is bounded to 8 MiB, 100000 lines/keys/records and 128 containers. Local output is buffered up to
 16 MiB; tool results up to 64 KiB (including their JSON envelope) fail rather than truncate.
-Each tool invocation transforms the original input, not a previous tool's result; explicit
-CLI pipes compose multiple transformations. `recipes.rs` additionally validates caller-selected
+Each tool invocation transforms the original input, not a previous tool's result. The tool
+also accepts an exclusive ordered `steps` array of 1–16 native operations; its single-operation
+shape remains compatible. The whole plan is validated first, current/next intermediates are
+bounded to 16 MiB, and the final serialized result is capped at 64 KiB. A failed step returns
+an error without intermediate output; the model may adjust and call again on original input.
+There is no cross-call state or additional model request inside a tool. Tool arguments are
+capped at 64 KiB. See [tool pipeline contract](tool-pipelines.md).
+`recipes.rs` additionally validates caller-selected
 `--step` lists or versioned TOML `--recipe` files before reading data. The CLI executes at most
 16 pure steps, buffering only current/next intermediate (16 MiB each, initial input 8 MiB),
-and emits only the final success. No recipe steps are added to model tools or task context.
+and emits only the final success. Recipe files are not read by model tools or sent to task context;
+the model must explicitly supply its own inline steps when using the transform tool.
 Sessions, permissions and memory are unchanged.
 
 `selection.rs` fixes the older Value-based select/join path: syntax/depth validation

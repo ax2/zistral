@@ -67,6 +67,11 @@ This is reusable user-maintained computation, not persistent task memory or a pl
 JSONL/array conversion fits this scope as deterministic structured-log reshaping, shared
 with the existing transform tool. It adds no tool names, file permissions or model runtime.
 
+The same bounded native pipeline can be supplied inline to `transform_input`: 1–16 steps,
+original input only, 16 MiB intermediate text and 64 KiB final JSON envelope. It fixes the
+need for a model to reconstruct a compound deterministic transformation. It does not load
+recipe files, execute expressions or carry tool output into another invocation implicitly.
+
 ## Delivery rule
 
 Every released version needs appropriate tests, Windows/Linux/macOS checks and installable
