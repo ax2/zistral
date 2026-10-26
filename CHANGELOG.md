@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.15.1 — 2026-10-26
+
+- Reject `--config-example` combined with `--json`, `--count`, `--select`, explicit
+  input or an instruction instead of silently printing/saving a TOML template. Fix
+  successful `--json` calls replacing existing results with non-JSON template text.
+- Reject explicit project selectors (`--agent`, `--cwd/-C`, `--read-only`, `--no-exec`)
+  for offline and management commands before input, output or configuration access.
+  Validate requested selectors even when `--no-tools` disables effective capabilities.
+- Preserve legitimate JSON count/select, template exports, inherited model settings
+  in offline modes, and model tasks that combine project selectors with `--no-tools`.
+  Verify early exit with stdin held open, no probe requests or partial output, existing
+  file preservation and all three model protocols. No added dependencies or tools.
+
 ## 0.15.0 — 2026-10-26
 
 - Add `zi data --show-plan` to validate a positional operation, ordered `--step`

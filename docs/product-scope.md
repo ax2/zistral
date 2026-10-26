@@ -12,6 +12,9 @@ Accept a feature when it shortens a repeated input â†’ transformation/analysis â
 has a clear invocation and output contract, works across platforms, and has bounded resource
 use. Keep offline data operations usable without models. Preserve stdout/stderr separation,
 explicit project permissions, independent-task defaults and the single-executable installation.
+Conflicting task modes must fail before IO rather than silently replace the requested
+operation. Project selectors belong to model tasks; offline and management commands
+reject them even when effective capabilities would be disabled by `--no-tools`.
 
 Do not add browsers, desktop UI automation, service managers, a plugin marketplace, a model
 runtime/weights, automatic account credential collection or an autonomous background agent.

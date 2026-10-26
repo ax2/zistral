@@ -23,6 +23,11 @@ normal Cargo dependencies and their licenses remain in Cargo.lock.
 
 ## Task execution
 
+CLI mode validation precedes configuration, input reads and output preparation. Template
+export rejects JSON/data/instruction modes; project selectors are rejected for offline and
+management commands based on requested flags rather than effective tool permissions.
+Model tasks still allow `--no-tools` to disable project tools. See [CLI mode rules](cli-modes.md).
+
 `agent.rs` manages protocol histories, tool dispatch, streaming, turn budgets and final output.
 `project.rs` owns each task's root, permissions, scoped instructions, read revisions, edit
 preimages and plan. `process.rs` runs noninteractive commands with separate bounded streams,

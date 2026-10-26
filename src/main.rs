@@ -74,7 +74,7 @@ pub struct Cli {
     #[arg(long)]
     no_stream: bool,
     /// Print a configuration template without reading input or contacting a model
-    #[arg(long)]
+    #[arg(long, conflicts_with_all = ["count", "select", "json", "input", "prompt"])]
     config_example: bool,
     /// Require valid JSON output and emit compact JSON
     #[arg(long)]
@@ -217,6 +217,14 @@ fn read_input(cli: &Cli) -> Result<String> {
 }
 
 fn run(mut cli: Cli) -> Result<()> {
+    // Validate requested modes even when --no-tools disables effective project capabilities.
+    if (cli.command.is_some() || cli.count || cli.select.is_some() || cli.config_example)
+        && (cli.agent || cli.cwd.is_some() || cli.read_only || cli.no_exec)
+    {
+        bail!(
+            "project options (--agent, --cwd/-C, --read-only, --no-exec) are available for model tasks only; remove them for offline and management commands"
+        );
+    }
     if cli.retries > 0
         && (cli.command.is_some() || cli.count || cli.select.is_some() || cli.config_example)
     {

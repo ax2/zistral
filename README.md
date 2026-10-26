@@ -20,7 +20,7 @@ Download a native installer from [Releases](https://github.com/ax2/zistral/relea
 | Platform | Package | Installation |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | Per-user installer; adds PATH and a Start menu launcher; no administrator required |
-| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.15.0-linux-amd64.deb` |
+| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.15.1-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | Open the package; installs `/usr/local/bin/zi` |
 
 Then type `zi`. On first launch, choose an existing Codex, WorkBuddy or dsh configuration,
@@ -28,6 +28,11 @@ or enter your service and API key. No Rust, Python, Node.js or VC++ redistributa
 Windows setup can launch zi immediately; reopen existing terminals to refresh PATH.
 Upgrades retain your model settings. Uninstalling on Windows retains configuration and removes
 only the PATH entry owned by the installer. Linux requires glibc 2.35+ and system CA certificates.
+
+Choose one task mode: `--config-example` exports TOML and cannot be combined with JSON
+validation, local count/select, input data or an instruction. Project selectors are for
+model tasks, so remove them from offline `data`, count/select and management commands.
+`--count --json` and `--select /id --json` remain supported. [Mode rules](docs/cli-modes.md).
 Installers are unsigned. Portable archives and SHA256 checksums are also available.
 A working provider/API key is required for model tasks; no paid credentials are bundled.
 Offline operations work immediately without setup.

@@ -17,7 +17,7 @@ git diff | zi "生成一句简洁的提交说明"
 | 平台 | 安装包 | 安装方法 |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | 双击安装，无需管理员权限，自动添加用户 PATH 和开始菜单入口 |
-| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.15.0-linux-amd64.deb` |
+| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.15.1-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | 双击安装，命令放到 `/usr/local/bin/zi` |
 
 安装后直接运行 `zi`。Windows 安装结束可立即启动，或在开始菜单打开 zi；
@@ -26,6 +26,10 @@ git diff | zi "生成一句简洁的提交说明"
 Linux 包需要 glibc 2.35+ 和系统 CA 证书。其他架构可从源码编译。
 同时保留无需安装的便携压缩包；便携版需要自行放到 PATH 目录。所有下载均提供 `SHA256SUMS.txt` 校验。
 程序未做代码签名。项目名是 `zistral`，命令是 `zi`，尚未发布到 crates.io。
+
+请明确选择任务模式：`--config-example` 导出 TOML，不能与 `--json`、本地计数/选择、输入文件或
+指令混用。项目参数只用于模型任务，离线 `data`、计数/选择及管理命令需要移除它们。
+`--count --json` 和 `--select /id --json` 继续支持。[模式规则](docs/cli-modes.md)。
 
 首次直接输入 `zi` 会自动打开配置向导，检测 Codex、WorkBuddy 和 dsh 中已有的模型配置。
 也可随时手动打开：
