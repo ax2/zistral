@@ -3,6 +3,7 @@ mod config;
 mod data;
 mod doctor;
 mod imports;
+mod presets;
 mod process;
 mod project;
 mod stream;
@@ -31,13 +32,22 @@ pub struct Cli {
     /// Read UTF-8 data from a file instead of stdin; '-' means stdin
     #[arg(short = 'i', long)]
     input: Option<PathBuf>,
+    /// Use a builtin or user-defined task preset (zi presets lists names)
+    #[arg(short = 's', long)]
+    preset: Option<String>,
+    /// User preset file (default: presets.toml beside the selected config)
+    #[arg(long, env = "ZI_PRESETS", global = true)]
+    presets: Option<PathBuf>,
+    /// Set a literal preset variable; repeat for multiple NAME=VALUE pairs
+    #[arg(long = "var", global = true)]
+    vars: Vec<String>,
     /// Model identifier, overrides configuration
     #[arg(short, long, env = "ZI_MODEL")]
     model: Option<String>,
     /// API root, normally ending in /v1
     #[arg(long, env = "ZI_BASE_URL")]
     base_url: Option<String>,
-    /// Wire protocol: chat or responses
+    /// Wire protocol: chat, responses or anthropic
     #[arg(long, env = "ZI_API", value_parser = ["chat", "responses", "anthropic"])]
     api: Option<String>,
     /// Configuration file (default: platform config directory/zistral/config.toml)
@@ -107,6 +117,11 @@ pub struct Cli {
 
 #[derive(Subcommand, Clone, Debug)]
 enum Commands {
+    /// List, inspect, render or initialize reusable task presets (offline)
+    Presets {
+        #[command(subcommand)]
+        action: Option<PresetAction>,
+    },
     /// List saved model profiles without displaying keys
     Models,
     /// Choose the default saved model profile
@@ -128,6 +143,18 @@ enum Commands {
         #[arg(long, conflicts_with_all = ["manual", "name"])]
         list: bool,
     },
+}
+
+#[derive(Subcommand, Clone, Debug)]
+enum PresetAction {
+    /// List builtin and user-defined presets
+    List,
+    /// Inspect a preset without sending input to a model
+    Show { name: String },
+    /// Preview a resolved prompt; accepts --var NAME=VALUE
+    Render { name: String },
+    /// Create an example user preset file; never overwrite an existing file
+    Init,
 }
 
 fn read_input(cli: &Cli) -> Result<String> {
@@ -162,6 +189,36 @@ fn run(mut cli: Cli) -> Result<()> {
     if std::env::var_os("NO_COLOR").is_some() {
         console::set_colors_enabled(false);
         console::set_colors_enabled_stderr(false);
+    }
+    if cli.command.is_some() && cli.preset.is_some() {
+        bail!("--preset is for model tasks; use zi presets to manage presets");
+    }
+    if let Some(Commands::Presets { action }) = &cli.command {
+        if cli.input.is_some()
+            || cli.count
+            || cli.select.is_some()
+            || cli.config_example
+            || cli.json
+            || cli.stream
+            || !cli.prompt.is_empty()
+        {
+            bail!("zi presets does not accept input data or a model instruction");
+        }
+        let output = match action {
+            None | Some(PresetAction::List) => {
+                if !cli.vars.is_empty() {
+                    bail!("use zi presets render NAME --var NAME=VALUE");
+                }
+                presets::list(&cli)?
+            }
+            Some(PresetAction::Show { name }) => presets::show(&cli, name, false)?,
+            Some(PresetAction::Render { name }) => presets::show(&cli, name, true)?,
+            Some(PresetAction::Init) => presets::init(&cli)?,
+        };
+        return write_output(&output);
+    }
+    if cli.command.is_some() && !cli.vars.is_empty() {
+        bail!("--var is only supported for preset tasks and zi presets render");
     }
     if let Some(command) = &cli.command {
         if !matches!(command, Commands::Config { .. }) {
@@ -201,6 +258,7 @@ fn run(mut cli: Cli) -> Result<()> {
         }
         return config::configure_named(&cli, *manual, name.as_deref());
     }
+    presets::apply(&mut cli)?;
     if cli.config_example {
         return write_output(config::EXAMPLE);
     }
@@ -274,6 +332,7 @@ fn session(cli: &mut Cli) -> Result<()> {
             bail!("instruction exceeds --max-input");
         }
         let prompt = line.trim();
+        let mut scene = None;
         match prompt {
             "" => continue,
             "/exit" | "/quit" => {
@@ -282,9 +341,22 @@ fn session(cli: &mut Cli) -> Result<()> {
             }
             "/help" => {
                 eprintln!(
-                    "Ask a question, or use /models, /use NAME, /doctor, /config, /clear, /exit. Each prompt is an independent task; no chat history is sent or saved.\nFor files/pipes: cat file.txt | zi 'summarize' or zi -i file.txt 'summarize'."
+                    "Ask a question, or use /presets, /run NAME [instruction], /models, /use NAME, /doctor, /config, /clear, /exit. Each prompt is an independent task; no chat history is sent or saved.\nFor files/pipes: cat file.txt | zi 'summarize' or zi -i file.txt 'summarize'."
                 );
                 continue;
+            }
+            "/presets" => {
+                match presets::list(cli) {
+                    Ok(list) => eprintln!("{}", ui::clean(&list)),
+                    Err(error) => eprintln!("zi: {}", ui::clean(&error.to_string())),
+                }
+                continue;
+            }
+            _ if prompt.starts_with("/run ") => {
+                let value = prompt[5..].trim();
+                let (name, instruction) =
+                    value.split_once(char::is_whitespace).unwrap_or((value, ""));
+                scene = Some((name, instruction.trim()));
             }
             "/models" => {
                 config::models(cli)?;
@@ -325,22 +397,35 @@ fn session(cli: &mut Cli) -> Result<()> {
             }
             _ => (),
         }
-        cli.prompt = vec![prompt.into()];
-        match agent::run(&settings, cli, "") {
+        let mut task = cli.clone();
+        task.prompt = vec![prompt.into()];
+        if let Some((name, instruction)) = scene {
+            task.preset = Some(name.into());
+            task.prompt = if instruction.is_empty() {
+                Vec::new()
+            } else {
+                vec![instruction.into()]
+            };
+        }
+        if let Err(error) = presets::apply(&mut task) {
+            eprintln!("zi: {}", ui::clean(&error.to_string()));
+            continue;
+        }
+        match agent::run(&settings, &task, "") {
             Ok(answer) => {
                 if answer.streamed {
                     continue;
                 }
                 let answer = answer.text;
-                if cli.json {
+                if task.json {
                     match serde_json::from_str::<serde_json::Value>(&answer) {
-                        Ok(value) => emit(&serde_json::to_string(&value)?, cli)?,
+                        Ok(value) => emit(&serde_json::to_string(&value)?, &task)?,
                         Err(_) => {
                             eprintln!("zi: output is not valid JSON (nothing written to stdout)")
                         }
                     }
                 } else {
-                    emit(&answer, cli)?;
+                    emit(&answer, &task)?;
                 }
             }
             Err(error) => eprintln!("zi: {}", ui::clean(&format!("{error:#}"))),

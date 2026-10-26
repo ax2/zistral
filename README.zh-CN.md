@@ -1,6 +1,7 @@
 # Zistral · zi
 
-轻量、跨平台、支持管道的 Rust 命令行 Agent。一个可执行文件，不需要 Python 或 Node.js。
+聚焦文本、结构化数据和明确开发场景的轻量 Rust 命令行助手，跨平台、支持管道。
+一个可执行文件，不需要 Python 或 Node.js；不扩张为通用桌面自动化工具。
 
 ```sh
 cat 1.json | zi "将 .abc 数组的第一个元素中的内容连接起来"
@@ -16,7 +17,7 @@ git diff | zi "生成一句简洁的提交说明"
 | 平台 | 安装包 | 安装方法 |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | 双击安装，无需管理员权限，自动添加用户 PATH 和开始菜单入口 |
-| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.6.0-linux-amd64.deb` |
+| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.7.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | 双击安装，命令放到 `/usr/local/bin/zi` |
 
 安装后直接运行 `zi`。Windows 安装结束可立即启动，或在开始菜单打开 zi；
@@ -66,7 +67,7 @@ cat 1.txt | zi '统计汉字数量'
 输入 `-` 可清除已保存的 Key，便于切换到无需认证的本地服务。Ctrl+C 中途取消不会覆盖原文件。
 也支持 `zi config --config PATH`。向导需要交互终端，不接收管道输入。
 OpenAI 服务默认选择 `responses`，其他兼容服务默认 `chat`，可按提供方要求修改。
-`config`、`models`、`use`、`doctor` 是保留命令；例如 `zi -- doctor` 可将该词作为普通指令。
+`config`、`models`、`use`、`doctor`、`presets` 是保留命令；例如 `zi -- doctor` 可将该词作为普通指令。
 
 Key 保存在本地 TOML 文件中，没有使用加密钥匙串；Linux/macOS 文件权限为 `0600`，
 Windows 使用配置目录继承的访问权限。向导只保存配置，不发送模型测试请求。
@@ -157,6 +158,55 @@ cat article.txt | zi --stream "总结"  # 显式开启流式，包括重定向�
 `--stream` 不能与 `--json` 一起使用。`--plain` 关闭自动流式和界面装饰，仍可显式搭配 `--stream`。
 流式文本逐段显示，完整回答模式保留标题、列表和代码块高亮。
 
+## 场景命令与自定义提示词
+
+```sh
+zi presets                                # 离线列出内置和自定义场景
+cat article.txt | zi -s summarize
+cat notes.txt | zi -s translate --var language=French
+git diff | zi -s review "重点检查正确性"
+git diff --cached | zi -s commit
+cat ticket.txt | zi -s extract "姓名、优先级、下一步"
+zi presets show translate
+zi presets render translate --var language=Chinese  # 只预览提示词，不调用模型
+```
+
+内置 `summarize`、`translate`、`extract`、`explain`、`review`、`commit`、`rewrite` 七个场景。
+翻译默认目标为中文；后面的自然语言可补充要求。输入仍单独作为数据发送，不拼进提示词模板。
+`extract` 自动开启完整 JSON 校验，不能搭配 `--stream`。模型选择、终端和管道规则沿用原有设置。
+场景不会自动授权读写文件或运行命令；审查管道 diff 无需项目权限，要读项目时可明确搭配
+`-C . --read-only -s review`。
+
+```sh
+zi presets init
+zi --presets ./my-presets.toml presets init
+zi --presets ./my-presets.toml -s team-summary --var audience=研发团队
+```
+
+默认在当前模型配置文件旁创建 `presets.toml`，已有文件绝不覆盖。支持 `--presets FILE` / `ZI_PRESETS`；
+不会扫描项目并自动加载其提示词。自定义格式如下，修改文件后下一次调用直接读取：
+
+```toml
+version = 1
+[presets.team-summary]
+description = "面向团队的总结"
+prompt = "为 {{audience}} 总结输入，保留事实、决定和下一步。"
+# json = true
+[presets.team-summary.defaults]
+audience = "研发团队"
+```
+
+`{{name}}` 仅做一次字面替换，不执行表达式、脚本或命令，不递归展开变量，不读取其他文件。
+变量名为最多 32 字节的英文字母/数字/下划线，不能以数字开头；`input` 保留，管道数据单独传递。
+双花括号专用于变量，普通 JSON 单花括号不受影响。值为 1–4096 字节，最多 12 个变量；
+缺值、重复、未使用的覆盖参数会在请求前报错。文件最多 256 KiB / 64 个自定义场景，
+模板最多 16 KiB，展开后连同补充指令最多 128 KiB。自定义名称不能覆盖内置场景。
+未知字段/格式版本和错误 TOML 明确报错，不回显原始配置正文。
+
+初始化使用原子写入，Unix 权限为 0600；模板是普通本地文本，不要写入 API Key。
+交互界面支持 `/presets` 和 `/run NAME [补充要求]`，每项仍是独立任务；变量覆盖使用命令行 `--var`。
+字面指令恰好从保留词 presets 开头时，使用 `zi -- presets`。
+
 ## 在项目中执行多步任务
 
 ```sh
@@ -225,7 +275,7 @@ cat 1.json | zi --select /abc/0 --join ','
 源码构建：
 
 ```sh
-cargo install --git https://github.com/ax2/zistral --tag v0.6.0 --locked
+cargo install --git https://github.com/ax2/zistral --tag v0.7.0 --locked
 ```
 
 更多配置、精确定义、开发与验证范围见 [English README](README.md)。MIT 开源协议。

@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.7.0 — 2026-10-26
+
+- Add seven reusable task presets: summarize, translate, extract, explain, review,
+  commit and rewrite. Invoke them with `-s/--preset`; retain separate pipe input,
+  explicit model selection and existing project permission boundaries.
+- Add offline `zi presets`, `show`, `render` and `init` commands, plus interactive
+  `/presets` and `/run NAME [instruction]` shortcuts.
+- Support versioned user TOML presets with bounded literal variables, defaults,
+  `--var NAME=VALUE` overrides and explicit `--presets FILE` / `ZI_PRESETS` selection.
+  Initialization never overwrites an existing file; no plugin code is executed.
+- Keep extraction output validated and atomic; reject JSON streaming, malformed
+  templates and missing/unknown variables before contacting the model.
+- Document the focused task-assistant scope, session/memory assessment and
+  zi-devtools design references. Keep tasks independent without implicit memory.
+- Verify the preset workflow across all three model protocols and a real terminal;
+  preserve lightweight, single-executable Windows/Linux/macOS installations.
+
 ## 0.6.0 — 2026-10-23
 
 - Add explicit project mode with `--agent` or `-C/--cwd DIR`: inspect projects,

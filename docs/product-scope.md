@@ -1,0 +1,73 @@
+# Product scope and development direction
+
+## Position
+
+zi is a small command-line task assistant for text, structured data and focused developer
+workflows. Its home is a pipe: supply explicit input, choose a task, receive usable output.
+Natural language handles interpretation; deterministic tools handle exact operations.
+Project tools support a bounded developer task when explicitly enabled. They are not a
+mandate to become a general Codex replacement or automate a user's entire computer.
+
+Accept a feature when it shortens a repeated input → transformation/analysis → output task,
+has a clear invocation and output contract, works across platforms, and has bounded resource
+use. Keep offline data operations usable without models. Preserve stdout/stderr separation,
+explicit project permissions, independent-task defaults and the single-executable installation.
+
+Do not add browsers, desktop UI automation, service managers, a plugin marketplace, a model
+runtime/weights, automatic account credential collection or an autonomous background agent.
+Do not expose many unrelated tools merely because they can be implemented.
+
+## Sessions and memory assessment
+
+Short follow-up context can fit a task (clarify a summary, refine an extraction or review the
+same input), but global chat history and implicit long-term memory do not fit the defaults.
+They would introduce hidden provider disclosures, stale input assumptions and permission drift.
+The current release keeps each prompt independent; presets are explicit reusable instructions,
+not memories of past inputs or model conclusions.
+
+Any future task-session design must be opt-in, bounded and inspectable, distinguish current
+input from previous observations, reset tool/read/undo state per task, retain model/profile
+and permission boundaries, and provide a clear reset/delete path. Start with an in-memory
+task session only if a concrete workflow needs it. Persistent auto-summaries, semantic
+memories and cross-project retrieval are deferred, not assumed necessary.
+
+Explicit user-maintained instructions/templates are a better first step than automatically
+learning preferences. They must be previewable, editable and never grant tools or execute code.
+
+## What to borrow from zi-devtools
+
+The sibling project is a broader desktop toolbox. Its bounded prompt-template handling and
+pure text/JSON algorithms are useful design references; its GUI, service manager, MCP host,
+image/calendar/knowledge systems are outside zi's position. No source, build or runtime
+dependency on the sibling checkout is introduced.
+
+Reviewed primary sources:
+
+- [Prompt template design](https://github.com/ax2/zi-devtools/blob/main/src/prompt_template.rs): bounded literal variables, preview before use; zi's preset implementation is independent.
+- [Pure text transformations](https://github.com/ax2/zi-devtools/blob/main/crates/zi-text-core/src/transforms.rs): separate deterministic computation from UI/IO.
+- [JSON core](https://github.com/ax2/zi-devtools/blob/main/crates/zi-json-core/src/lib.rs): bounded structured results.
+- [Reusable workflows](https://github.com/ax2/zi-devtools/blob/main/docs/workflows.md): saved declarative steps contain definitions, not captured inputs or execution grants.
+
+Candidate native tools should therefore target text cleanup, line selection/deduplication,
+JSON inspection and small tabular conversions. They need precise semantics and examples;
+they should not require a shell, network service or a desktop installation.
+
+## Customization and scenarios
+
+The first customization layer is a local, versioned TOML preset library. Builtin scenarios
+cover summarize, translate, extract-as-JSON, explain, diff review, commit messages and rewrite.
+Additional instructions and literal variables adapt them. The selected model and the user's
+explicit flags still control execution. There is no implicit project preset discovery.
+
+Future custom pipelines can compose a small allowlist of native data operations, without
+embedding arbitrary shell commands, dynamically loaded libraries, hidden file reads or secrets.
+Keep definition files separate from input/result data and validate all steps before output.
+
+## Delivery rule
+
+Every released version needs appropriate tests, Windows/Linux/macOS checks and installable
+executables, current-version-only release notes, and one illustrated development article in
+Feishu 文章/zistral. Articles begin with the real need, show examples and actual-version output,
+explain changes/results/limits, and include diagrams when the main loop or architecture changes.
+Controlled-model demos must be identified; successful execution is not evidence of live-model
+quality. Record the article URL and release evidence before starting the next release.

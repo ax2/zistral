@@ -1,6 +1,7 @@
 # Zistral · zi
 
-A small, cross-platform Rust agent for your terminal. Pipe data in, describe what
+A small, cross-platform Rust task assistant for text, structured data and focused developer
+workflows. It is not a general desktop automation agent. Pipe data in, describe what
 you want, pipe the result out. One executable, no Python or Node.js runtime.
 
 [中文说明](README.zh-CN.md) · [Downloads](https://github.com/ax2/zistral/releases)
@@ -19,7 +20,7 @@ Download a native installer from [Releases](https://github.com/ax2/zistral/relea
 | Platform | Package | Installation |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | Per-user installer; adds PATH and a Start menu launcher; no administrator required |
-| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.6.0-linux-amd64.deb` |
+| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.7.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | Open the package; installs `/usr/local/bin/zi` |
 
 Then type `zi`. On first launch, choose an existing Codex, WorkBuddy or dsh configuration,
@@ -50,7 +51,7 @@ Portable archives contain one executable plus documentation. Extract zi (zi.exe 
 Build from source with Rust 1.85+ (a current stable toolchain is recommended):
 
 ```sh
-cargo install --git https://github.com/ax2/zistral --tag v0.6.0 --locked
+cargo install --git https://github.com/ax2/zistral --tag v0.7.0 --locked
 ```
 
 The package is named `zistral`; the installed command is `zi`. It is not yet
@@ -213,6 +214,64 @@ already contain partial text; default pipes/redirection and `--json` keep atomic
 combined with explicit `--stream`. UTF-8, SSE frame/response bounds and terminal-control sanitizing
 also apply across streamed chunks. Each interactive prompt remains an independent task.
 
+## Reusable task presets
+
+```sh
+zi presets                              # Offline list of builtin and user presets
+cat article.txt | zi -s summarize
+cat notes.txt | zi -s translate --var language=French
+git diff | zi -s review 'Focus on correctness'
+git diff --cached | zi -s commit
+cat ticket.txt | zi -s extract 'name, urgency, next_action'
+zi presets show translate
+zi presets render translate --var language=Chinese  # Offline prompt preview
+```
+
+Builtins: `summarize`, `translate` (Chinese by default), `extract`, `explain`, `review`,
+`commit`, and `rewrite`. Additional instruction words refine the selected task; piped input
+remains a separate data message. `extract` enables whole-answer JSON validation automatically
+and conflicts with `--stream`. Presets use the selected model and existing pipe/stream rules.
+They never enable project, file or command capabilities; add project flags explicitly when
+appropriate, for example `-C . --read-only -s review`. Reviewing a piped diff requires none.
+
+Create an editable personal preset file without overwriting existing content:
+
+```sh
+zi presets init
+zi --presets ./my-presets.toml presets init
+zi --presets ./my-presets.toml -s team-summary --var audience=developers
+```
+
+Default: `presets.toml` beside the selected model config (`--config` / platform directory).
+`--presets FILE` / `ZI_PRESETS` selects another file. Project directories are not scanned for
+presets; a repository cannot silently install instructions. Example format:
+
+```toml
+version = 1
+[presets.team-summary]
+description = "Summarize for a particular audience"
+prompt = "Summarize the input for {{audience}}. Preserve decisions and action items."
+# json = true  # Optional: validate the entire answer as JSON
+[presets.team-summary.defaults]
+audience = "the engineering team"
+```
+
+Only literal `{{name}}` variables are substituted once, without expressions, commands,
+recursive expansion or file reads. Names use ASCII letters/digits/underscore, start with
+a letter/underscore, and have at most 32 bytes. `input` is reserved: original input is sent
+separately, never interpolated. Values are 1–4096 bytes, with at most 12 distinct variables;
+missing, duplicate and unused overrides fail before contacting a model. Double braces are
+variable syntax, not an escape language; ordinary single JSON braces are unchanged.
+Files are limited to 256 KiB / 64 custom presets, prompts to 16 KiB, rendered tasks to 128 KiB.
+Custom names cannot replace builtins. Unknown fields/versions and malformed presets fail
+explicitly without echoing raw TOML. `init` is atomic, never clobbers a file, and uses `0600`
+on Unix. Presets are ordinary local text, not encrypted storage: do not put keys in prompts.
+
+Interactive shortcuts: `/presets` lists tasks, `/run NAME [additional instruction]` runs one
+as an independent task. Use CLI `--var` for parameterized overrides; interactive `/run` uses
+the preset defaults plus its additional instruction. Nothing is added to persistent memory.
+For a literal instruction beginning with the reserved word `presets`, use `zi -- presets`.
+
 ## Work on a project
 
 ```sh
@@ -316,6 +375,11 @@ zi --help
 ```
 
 ## Scope and privacy
+
+Feature boundaries and the session/memory assessment are recorded in
+[product scope](docs/product-scope.md). Presets/custom prompts do not grant tools, create
+implicit history, load repository configuration or run plugin code.
+
 
 Default data mode uses only `count_input` and `select_input`. Explicit project mode adds
 local inspection, file changes and commands as described above. There is no built-in web
