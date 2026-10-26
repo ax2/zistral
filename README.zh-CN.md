@@ -17,7 +17,7 @@ git diff | zi "生成一句简洁的提交说明"
 | 平台 | 安装包 | 安装方法 |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | 双击安装，无需管理员权限，自动添加用户 PATH 和开始菜单入口 |
-| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.10.0-linux-amd64.deb` |
+| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.11.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | 双击安装，命令放到 `/usr/local/bin/zi` |
 
 安装后直接运行 `zi`。Windows 安装结束可立即启动，或在开始菜单打开 zi；
@@ -197,12 +197,19 @@ cat lines.txt | zi data sort --reverse
 zi data json-format -i payload.json
 cat payload.json | zi data json-minify
 cat payload.json | zi data json-keys
+cat events.jsonl | zi data jsonl-to-array
+zi data array-to-jsonl -i payload.json -o events.jsonl
 ```
 
 这些命令不加载模型配置、不需要 Key，也不启用项目工具。`trim` 按行去除 Unicode 首尾空白，
 保留空行；`dedupe` 保留完全相同行的第一次出现，不自动去空白或忽略大小写；`sort` 按区分
 大小写的 Unicode 顺序排序，保留重复行，`--reverse` 倒序。不是数字、自然、拼音或区域排序。
 LF/CRLF 输入统一输出 LF 结尾的行；空输入输出零字节，一个空行仍是一个空行。
+
+`jsonl-to-array` 将每行一个完整 JSON 值收集成数组，拒绝空行/坏记录并报告记录编号，空文件输出
+`[]`；`array-to-jsonl` 将根数组的每个元素输出为一行紧凑 JSON，空数组输出零字节。两者保留
+数字/字符串原文、元素顺序、对象键顺序及重复键，最多 100000 条记录、128 层 JSON 容器，
+聚合时新增的外层数组也计入层数。不解压 gzip，也不是无限流式处理。[示例与 BOM 兼容规则](docs/json-lines.md)。
 
 JSON 格式化和压缩仅改变字符串外的无意义空白，保留数字/字符串原文、键顺序及重复键，
 不会把超大整数或高精度小数转换为浮点数。它不做规范 JSON 归一化或重复键校验。
@@ -232,7 +239,7 @@ zi data --recipe docs/examples/cleanup.toml -i lines.txt -o clean.txt
 shell `>` 的创建/截断行为仍由 shell 决定。
 
 配方最多 64 KiB UTF-8、1–16 步；原始输入最多 8 MiB，每步中间/最终结果最多 16 MiB，
-行数、根键数和 JSON 嵌套限制继续适用。配方由调用者显式提供，只组合现有六种本地操作，
+行数、根键数、JSONL 记录数和 JSON 嵌套限制继续适用。配方由调用者显式提供，只组合现有八种本地操作，
 不含命令、include、变量、自动发现、模型访问或项目权限。[格式与示例](docs/data-recipes.md)。
 
 ## 场景命令与自定义提示词

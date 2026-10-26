@@ -20,7 +20,7 @@ Download a native installer from [Releases](https://github.com/ax2/zistral/relea
 | Platform | Package | Installation |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | Per-user installer; adds PATH and a Start menu launcher; no administrator required |
-| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.10.0-linux-amd64.deb` |
+| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.11.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | Open the package; installs `/usr/local/bin/zi` |
 
 Then type `zi`. On first launch, choose an existing Codex, WorkBuddy or dsh configuration,
@@ -264,6 +264,8 @@ cat lines.txt | zi data sort --reverse
 zi data json-format -i payload.json
 cat payload.json | zi data json-minify
 cat payload.json | zi data json-keys
+cat events.jsonl | zi data jsonl-to-array
+zi data array-to-jsonl -i payload.json -o events.jsonl
 ```
 
 These commands do not load model configuration, require a key, call a model or enable
@@ -272,6 +274,13 @@ project tools. `trim` removes Unicode whitespace from each line and retains blan
 case-sensitive Unicode order, retains duplicates, and accepts `--reverse`; it is not a
 numeric, locale or natural sort. LF/CRLF input lines become LF-terminated output records.
 Empty input produces zero bytes; a blank line remains one blank line.
+
+`jsonl-to-array` collects one valid JSON value per line into an array, rejecting blank/bad
+records with their record number; empty input produces `[]`. `array-to-jsonl` emits each root
+array item as one compact JSON line; `[]` emits zero bytes. Both preserve numeric/string
+tokens, item order, object key order and duplicate keys. They support at most 100000 records
+and 128 JSON containers (including the wrapper added by collection). No gzip or unbounded
+streaming is implied. [Examples and input/BOM rules](docs/json-lines.md).
 
 JSON formatting/minification changes only insignificant whitespace: number/string tokens,
 key order and duplicate keys are retained, including integers beyond machine precision.

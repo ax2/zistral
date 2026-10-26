@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.11.0 — 2026-10-26
+
+- Add offline `zi data jsonl-to-array` and `array-to-jsonl` for structured logs and
+  root JSON arrays. Support pipes, input/output files, ordered steps and TOML recipes.
+- Preserve original numeric/string tokens, item order, object key order and repeated
+  keys, including oversized integers, exponents and negative zero. Correctly handle
+  nested values, escaped delimiters, CRLF and missing final line terminators.
+- Reject blank/invalid JSONL records with one-based record numbers, nonarray roots,
+  more than 100000 records and nesting beyond 128 containers including the added
+  collection wrapper. Empty JSONL becomes `[]`; an empty array becomes zero bytes.
+- Extend the existing `transform_input` operation schema across all three protocols;
+  keep original-input semantics, 64 KiB tool envelopes and existing project permissions.
+  Add no model tool names, runtime dependencies, implicit memory or file discovery.
+- Verify lexical round trips, record/depth/output limits, actual pipe composition,
+  offline recipes and failure preservation. Include a reusable record-deduplication
+  recipe and document full buffering and CLI initial-BOM compatibility explicitly.
+
 ## 0.10.0 — 2026-10-26
 
 - Compose existing offline operations with ordered, repeated `zi data --step`,

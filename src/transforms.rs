@@ -31,6 +31,10 @@ pub enum Operation {
     JsonMinify,
     /// List root object keys in source order, including repeated keys
     JsonKeys,
+    /// Collect one JSON value per line into an array; reject blank/invalid records
+    JsonlToArray,
+    /// Emit each root array item as one compact JSON line, preserving numeric tokens
+    ArrayToJsonl,
 }
 
 struct Buffer {
@@ -165,6 +169,67 @@ fn format_json(input: &str, pretty: bool, out: &mut Buffer) -> Result<()> {
     Ok(())
 }
 
+fn jsonl_to_array(input: &str, out: &mut Buffer) -> Result<()> {
+    out.write_all(b"[")?;
+    for (index, line) in input.lines().enumerate() {
+        if index == MAX_ITEMS {
+            bail!("JSONL conversion accepts at most 100000 records");
+        }
+        validate_json(line).with_context(|| format!("invalid JSONL record {}", index + 1))?;
+        if index != 0 {
+            out.write_all(b",")?;
+        }
+        format_json(line, false, out)?;
+    }
+    out.write_all(b"]")?;
+    // Wrapping records adds one container. Never publish an array beyond the common depth cap.
+    validate_json(std::str::from_utf8(&out.bytes).expect("UTF-8 formatting"))
+        .context("collected JSON array exceeds supported nesting")
+}
+
+fn array_to_jsonl(input: &str, out: &mut Buffer) -> Result<()> {
+    validate_json(input)?;
+    let input = input.trim();
+    if !input.starts_with('[') {
+        bail!("array-to-jsonl requires a root JSON array");
+    }
+    let inner = &input[1..input.len() - 1];
+    if inner.trim().is_empty() {
+        return Ok(());
+    }
+    let (mut string, mut escaped, mut depth, mut start, mut count) =
+        (false, false, 0usize, 0usize, 0usize);
+    // Syntax was checked first. Only commas outside strings/nested containers split items.
+    for (index, byte) in inner.bytes().chain(std::iter::once(b',')).enumerate() {
+        if string {
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                string = false;
+            }
+            continue;
+        }
+        match byte {
+            b'"' => string = true,
+            b'[' | b'{' => depth += 1,
+            b']' | b'}' => depth -= 1,
+            b',' if depth == 0 => {
+                if count == MAX_ITEMS {
+                    bail!("JSONL conversion accepts at most 100000 records");
+                }
+                format_json(&inner[start..index], false, out)?;
+                out.write_all(b"\n")?;
+                count += 1;
+                start = index + 1;
+            }
+            _ => (),
+        }
+    }
+    Ok(())
+}
+
 struct Keys;
 impl<'de> Visitor<'de> for Keys {
     type Value = Vec<String>;
@@ -268,6 +333,8 @@ fn transform(
                 format_json(input, operation == Operation::JsonFormat, &mut out)?;
             }
         }
+        Operation::JsonlToArray => jsonl_to_array(input, &mut out)?,
+        Operation::ArrayToJsonl => array_to_jsonl(input, &mut out)?,
     }
     Ok(out.finish())
 }
@@ -298,6 +365,72 @@ mod tests {
     use super::*;
     fn apply(text: &str, op: Operation) -> String {
         run(text, op, false, CLI_OUTPUT).unwrap()
+    }
+    #[test]
+    fn jsonl_roundtrip_keeps_record_boundaries_and_original_lexical_values() {
+        let lines = " {\"n\":123456789012345678901234567890,\"n\":1.2300E+400,\"s\":\"[,]} \\\" \\u4e2d\"} \r\n[1, {\"x\":true}]\n\"line\\ntext\"\n-0\nnull\nfalse";
+        let expected = "[{\"n\":123456789012345678901234567890,\"n\":1.2300E+400,\"s\":\"[,]} \\\" \\u4e2d\"},[1,{\"x\":true}],\"line\\ntext\",-0,null,false]";
+        assert_eq!(apply(lines, Operation::JsonlToArray), expected);
+        let records = apply(expected, Operation::ArrayToJsonl);
+        assert_eq!(apply(&records, Operation::JsonlToArray), expected);
+        assert_eq!(records.lines().count(), 6);
+        assert!(records.ends_with('\n'));
+        assert_eq!(apply("", Operation::JsonlToArray), "[]");
+        assert_eq!(apply("[ ]", Operation::ArrayToJsonl), "");
+        for index in 0..200 {
+            let value = serde_json::json!([index, [null, {}, []], {"text":format!("[,]}} \\ \" \n 世界 {index}")}, true]);
+            let compact = value.to_string();
+            let pretty = serde_json::to_string_pretty(&value).unwrap();
+            let lines = apply(&pretty, Operation::ArrayToJsonl);
+            assert_eq!(apply(&lines, Operation::JsonlToArray), compact);
+        }
+    }
+    #[test]
+    fn jsonl_rejects_bad_records_types_depth_counts_and_output_overflow() {
+        for bad in [
+            "\n",
+            " \n",
+            "{}\n\n",
+            "{}\nnot-json",
+            "{} true",
+            "\u{feff}{}",
+            "{}\n\u{feff}{}",
+            "{\n\"x\":1\n}",
+        ] {
+            assert!(
+                run(bad, Operation::JsonlToArray, false, CLI_OUTPUT).is_err(),
+                "{bad:?}"
+            );
+        }
+        for bad in ["{}", "null", "[1,]", "[1] true", "[\"unclosed]"] {
+            assert!(run(bad, Operation::ArrayToJsonl, false, CLI_OUTPUT).is_err());
+        }
+        let within_depth = format!("{}0{}", "[".repeat(127), "]".repeat(127));
+        assert_eq!(
+            apply(
+                &apply(&within_depth, Operation::JsonlToArray),
+                Operation::ArrayToJsonl
+            ),
+            format!("{within_depth}\n")
+        );
+        let too_deep = format!("{}0{}", "[".repeat(128), "]".repeat(128));
+        assert!(run(&too_deep, Operation::JsonlToArray, false, CLI_OUTPUT).is_err());
+        let at_count = "0\n".repeat(MAX_ITEMS);
+        let array = apply(&at_count, Operation::JsonlToArray);
+        assert_eq!(apply(&array, Operation::ArrayToJsonl), at_count);
+        assert!(
+            run(
+                &(at_count + "0\n"),
+                Operation::JsonlToArray,
+                false,
+                CLI_OUTPUT
+            )
+            .is_err()
+        );
+        let too_many = format!("[{}0]", "0,".repeat(MAX_ITEMS));
+        assert!(run(&too_many, Operation::ArrayToJsonl, false, CLI_OUTPUT).is_err());
+        assert!(run("{}\n{}", Operation::JsonlToArray, false, 5).is_err());
+        assert!(run("[{},{}]", Operation::ArrayToJsonl, false, 5).is_err());
     }
     #[test]
     fn pipeline_allows_bounded_expansion_then_reduction_and_retains_json_tokens() {

@@ -128,7 +128,7 @@ pub struct Cli {
 enum Commands {
     /// Transform explicit input locally, without a model or configuration
     #[command(
-        after_help = "Examples:\n  zi data trim -i notes.txt\n  zi data --step trim --step dedupe --step sort:reverse -i notes.txt\n  zi data --recipe cleanup.toml -i notes.txt -o clean.txt\n\nRecipe example (UTF-8 TOML):\n  version = 1\n  [[steps]]\n  operation = \"trim\"\n  [[steps]]\n  operation = \"sort\"\n  reverse = true\n\nUse one operation, repeated --step, or --recipe. Recipes allow only the six native\noperations: no shell, file paths or model requests. Limits: 16 steps, 64 KiB recipe,\n8 MiB initial input, 16 MiB per intermediate/final result. Only final output is emitted."
+        after_help = "Examples:\n  zi data trim -i notes.txt\n  zi data --step trim --step dedupe --step sort:reverse -i notes.txt\n  zi data --recipe cleanup.toml -i notes.txt -o clean.txt\n\nRecipe example (UTF-8 TOML):\n  version = 1\n  [[steps]]\n  operation = \"trim\"\n  [[steps]]\n  operation = \"sort\"\n  reverse = true\n\nUse one operation, repeated --step, or --recipe. Recipes allow only the eight native\noperations: no shell, file paths or model requests. Limits: 16 steps, 64 KiB recipe,\n8 MiB initial input, 16 MiB per intermediate/final result. Only final output is emitted."
     )]
     Data {
         #[arg(value_enum, required_unless_present_any = ["steps", "recipe"], conflicts_with_all = ["steps", "recipe"])]

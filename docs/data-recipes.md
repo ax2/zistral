@@ -26,7 +26,8 @@ reverse = true
 顺序就是语义。先 trim 再 dedupe，会把 `a` 与 `a ` 合并；反过来会保留两行，随后才去空白。
 `dedupe` 本身不做去空白或大小写折叠，sort 是区分大小写的 Unicode 顺序，不是自然/数字排序。
 
-Operations: `trim`, `dedupe`, `sort`, `json-format`, `json-minify`, `json-keys`.
+Operations: `trim`, `dedupe`, `sort`, `json-format`, `json-minify`, `json-keys`,
+`jsonl-to-array`, `array-to-jsonl`. [JSONL conversion rules](json-lines.md).
 Only `sort` accepts `reverse = true`; `sort:reverse` is its CLI shorthand. Single-operation
 `zi data sort --reverse` remains supported. Do not mix positional operations, `--step`
 and `--recipe`; pipeline direction belongs to its individual step, not a global `--reverse`.

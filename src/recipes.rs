@@ -64,7 +64,7 @@ impl Plan {
                 let (name, reverse) = text.strip_suffix(":reverse")
                     .map_or((text.as_str(), false), |name| (name, true));
                 let operation = Operation::from_str(name, false).map_err(|_| {
-                    anyhow::anyhow!("unsupported --step; use trim, dedupe, sort, sort:reverse, json-format, json-minify or json-keys")
+                    anyhow::anyhow!("unsupported --step; see zi data --help for native operations (sort:reverse is also supported)")
                 })?;
                 Ok((operation, reverse))
             }).collect::<Result<Vec<_>>>()?

@@ -33,12 +33,16 @@ The full project mode has 15 tools. Data mode exposes count/select/transform; re
 excludes file mutation and arbitrary shell execution, including enforcement if a provider
 requests tools that were not advertised. `--no-tools` disables project capabilities too.
 
-`transforms.rs` implements six deterministic operations on explicit input, shared by the
+`transforms.rs` implements eight deterministic operations on explicit input, shared by the
 offline `zi data` command and the `transform_input` tool. They do not access a model,
 filesystem or shell. JSON syntax is checked with serde's IgnoredAny; a lexical formatter
 changes only insignificant whitespace, preserving number/string tokens, key order and
-repeated keys. Root-key enumeration skips values without numeric conversion. Input is
-bounded to 8 MiB, 100000 lines/keys and 128 containers. Local output is buffered up to
+repeated keys. Root-key enumeration skips values without numeric conversion. Conversion
+between JSONL records and root array items also avoids numeric conversion;
+record collection validates every physical line, while array splitting scans only root
+commas after full syntax validation and tracks string escapes/nesting. Blank/invalid
+records and more than 100000 items fail. The wrapper counts toward the common depth cap.
+Input is bounded to 8 MiB, 100000 lines/keys/records and 128 containers. Local output is buffered up to
 16 MiB; tool results up to 64 KiB (including their JSON envelope) fail rather than truncate.
 Each tool invocation transforms the original input, not a previous tool's result; explicit
 CLI pipes compose multiple transformations. `recipes.rs` additionally validates caller-selected

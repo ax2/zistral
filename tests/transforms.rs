@@ -141,6 +141,140 @@ fn local_failures_keep_stdout_empty_and_do_not_mutate_input() {
     assert_eq!(std::fs::read(root.join("source.json")).unwrap(), b"{broken");
 }
 
+#[test]
+fn jsonl_conversions_work_offline_with_recipes_files_and_real_pipes() {
+    let root = tempfile::tempdir().unwrap();
+    let root = root.path();
+    std::fs::write(root.join("broken-config.toml"), "not model configuration").unwrap();
+    let original = "\u{feff}{\"n\":123456789012345678901234567890,\"n\":-0}\r\n[1,2]\n\"a,b\"";
+    std::fs::write(root.join("records.jsonl"), original).unwrap();
+    let out = invoke(
+        root,
+        &[
+            "--config",
+            "broken-config.toml",
+            "data",
+            "jsonl-to-array",
+            "-i",
+            "records.jsonl",
+            "-o",
+            "array.json",
+        ],
+        b"",
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(out.stdout.is_empty() && out.stderr.is_empty());
+    assert_eq!(
+        std::fs::read(root.join("records.jsonl")).unwrap(),
+        original.as_bytes()
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.join("array.json")).unwrap(),
+        "[{\"n\":123456789012345678901234567890,\"n\":-0},[1,2],\"a,b\"]\n"
+    );
+    std::fs::write(
+        root.join("lines.toml"),
+        "version=1\n[[steps]]\noperation='json-minify'\n[[steps]]\noperation='array-to-jsonl'\n",
+    )
+    .unwrap();
+    let out = invoke(
+        root,
+        &[
+            "data",
+            "--recipe",
+            "lines.toml",
+            "-i",
+            "array.json",
+            "-o",
+            "records.jsonl",
+            "--force",
+        ],
+        b"",
+    );
+    assert!(out.status.success());
+    assert_eq!(
+        std::fs::read_to_string(root.join("records.jsonl")).unwrap(),
+        "{\"n\":123456789012345678901234567890,\"n\":-0}\n[1,2]\n\"a,b\"\n"
+    );
+    let mut first = command(root)
+        .args(["data", "array-to-jsonl", "-i", "array.json"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let second = command(root)
+        .args(["data", "jsonl-to-array"])
+        .stdin(Stdio::from(first.stdout.take().unwrap()))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let out = second.wait_with_output().unwrap();
+    assert!(first.wait().unwrap().success() && out.status.success());
+    assert_eq!(out.stdout, std::fs::read(root.join("array.json")).unwrap());
+    for (op, input, expected) in [
+        ("jsonl-to-array", b"".as_slice(), b"[]\n".as_slice()),
+        ("array-to-jsonl", b"[]", b""),
+    ] {
+        let out = invoke(root, &["data", op], input);
+        assert!(out.status.success());
+        assert_eq!(out.stdout, expected);
+    }
+    assert!(!root.join("config").exists());
+}
+
+#[test]
+fn later_invalid_jsonl_record_never_publishes_partial_records_or_changes_target() {
+    let root = tempfile::tempdir().unwrap();
+    let root = root.path();
+    std::fs::write(root.join("result.json"), b"old result\r\n").unwrap();
+    for input in [
+        b"{}\nsecret invalid record".as_slice(),
+        b"{}\n\n",
+        b"{\n\"x\":1\n}",
+        b"{}\n\xef\xbb\xbf{}",
+    ] {
+        for save in [false, true] {
+            let mut args = vec!["data", "jsonl-to-array"];
+            if save {
+                args.extend(["-o", "result.json", "--force"]);
+            }
+            let out = invoke(root, &args, input);
+            assert!(!out.status.success());
+            assert!(out.stdout.is_empty());
+            assert!(!String::from_utf8_lossy(&out.stderr).contains("secret invalid"));
+            assert_eq!(
+                std::fs::read(root.join("result.json")).unwrap(),
+                b"old result\r\n"
+            );
+            assert_eq!(std::fs::read_dir(root).unwrap().count(), 1);
+        }
+    }
+    let out = invoke(root, &["data", "jsonl-to-array"], b"{}\nsecret");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("record 2"));
+    for op in ["jsonl-to-array", "array-to-jsonl"] {
+        let out = invoke(root, &["data", op, "--reverse"], b"[]");
+        assert!(!out.status.success() && out.stdout.is_empty());
+    }
+    let out = invoke(
+        root,
+        &[
+            "data",
+            "--step",
+            "array-to-jsonl",
+            "--step",
+            "jsonl-to-array",
+        ],
+        b"[{},{}]",
+    );
+    assert!(out.status.success());
+    assert_eq!(out.stdout, b"[{},{}]\n");
+}
+
 fn model(api: &str, args: Value, expected: Value) -> (String, std::thread::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     listener.set_nonblocking(true).unwrap();
@@ -194,6 +328,16 @@ fn model(api: &str, args: Value, expected: Value) -> (String, std::thread::JoinH
                     })
                     .collect();
                 assert_eq!(names, ["count_input", "select_input", "transform_input"]);
+                let schema = match api.as_str() {
+                    "chat" => &request["tools"][2]["function"]["parameters"],
+                    "responses" => &request["tools"][2]["parameters"],
+                    _ => &request["tools"][2]["input_schema"],
+                };
+                let ops = schema["properties"]["operation"]["enum"]
+                    .as_array()
+                    .unwrap();
+                assert!(ops.contains(&json!("jsonl-to-array")));
+                assert!(ops.contains(&json!("array-to-jsonl")));
             } else {
                 let result =
                     match api.as_str() {
@@ -249,6 +393,16 @@ fn transform_tool_works_on_original_input_in_every_protocol_without_project_perm
                 "{ \"n\":123456789012345678901234567890 }",
                 json!("{\"n\":123456789012345678901234567890}"),
             ),
+            (
+                json!({"operation":"jsonl-to-array"}),
+                "{\"n\":1.2300E+400}\n-0\n",
+                json!("[{\"n\":1.2300E+400},-0]"),
+            ),
+            (
+                json!({"operation":"array-to-jsonl"}),
+                "[ {\"n\":123456789012345678901234567890}, \"a,b\" ]",
+                json!("{\"n\":123456789012345678901234567890}\n\"a,b\"\n"),
+            ),
         ] {
             let (url, task) = model(api, args, expected);
             let out = invoke(
@@ -284,6 +438,8 @@ fn tool_argument_and_output_limits_return_errors_to_model_without_partial_output
             json!({"operation":"sort","path":"must-not-read"}),
             "a".into(),
         ),
+        (json!({"operation":"jsonl-to-array"}), "{}\ninvalid".into()),
+        (json!({"operation":"array-to-jsonl"}), "{}".into()),
     ] {
         let (url, task) = model("chat", args, Value::Null);
         let out = invoke(

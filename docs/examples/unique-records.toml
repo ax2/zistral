@@ -1,0 +1,10 @@
+version = 1
+
+[[steps]]
+operation = "array-to-jsonl"
+
+[[steps]]
+operation = "dedupe"
+
+[[steps]]
+operation = "jsonl-to-array"
