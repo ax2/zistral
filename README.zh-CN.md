@@ -17,7 +17,7 @@ git diff | zi "生成一句简洁的提交说明"
 | 平台 | 安装包 | 安装方法 |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | 双击安装，无需管理员权限，自动添加用户 PATH 和开始菜单入口 |
-| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.9.0-linux-amd64.deb` |
+| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.10.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | 双击安装，命令放到 `/usr/local/bin/zi` |
 
 安装后直接运行 `zi`。Windows 安装结束可立即启动，或在开始菜单打开 zi；
@@ -211,12 +211,29 @@ JSON 格式化和压缩仅改变字符串外的无意义空白，保留数字/�
 
 输入最多 8 MiB，即使提高 `--max-input` 也不超过该上限；最多 100000 行/根键、128 层容器。
 本地结果先完整缓冲，最多 16 MiB，包含格式化缩进；错误返回非零退出码，stdout 不写半段结果。
-`-i/--input FILE` 可放在 `data` 前后，`-` 读取 stdin，不覆盖输入文件。
+`-i/--input FILE` 可放在 `data` 前后，`-` 读取 stdin。只有显式 `-o FILE --force` 才替换输入文件。
 Windows PowerShell 可用 `Get-Content -Raw` 读取 UTF-8 文件。
 
 Agent 可通过 `transform_input` 使用同一计算核心，不获得文件或命令权限，工具结果含 JSON 包装
-最多 64 KiB，超限返回错误而非截断。每次调用都处理原始输入，多个转换用显式命令管道串联。
+最多 64 KiB，超限返回错误而非截断。每次工具调用都处理原始输入；多个转换可用显式管道或下述
+本地流程串联，不改变模型工具。
 `data` 为保留命令；要把它作为普通指令开头，可用 `zi -- data ...`。
+
+## 可复用的离线处理流程
+
+```sh
+cat lines.txt | zi data --step trim --step dedupe --step sort:reverse
+zi data --recipe docs/examples/cleanup.toml -i lines.txt -o clean.txt
+```
+
+单一操作、按执行顺序重复的 `--step`、显式 `--recipe` 三选一。TOML 配方包含 `version = 1`
+和 `[[steps]]`，每步声明 `operation`，可选 `reverse` 只用于 sort。先检查完整定义再读取输入，
+全部成功后只输出最终结果；后续步骤失败时不向 stdout 输出中间数据，也不替换已有的 `-o` 文件。
+shell `>` 的创建/截断行为仍由 shell 决定。
+
+配方最多 64 KiB UTF-8、1–16 步；原始输入最多 8 MiB，每步中间/最终结果最多 16 MiB，
+行数、根键数和 JSON 嵌套限制继续适用。配方由调用者显式提供，只组合现有六种本地操作，
+不含命令、include、变量、自动发现、模型访问或项目权限。[格式与示例](docs/data-recipes.md)。
 
 ## 场景命令与自定义提示词
 

@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.10.0 — 2026-10-26
+
+- Compose existing offline operations with ordered, repeated `zi data --step`,
+  including `sort:reverse`, without launching multiple processes or model requests.
+- Load explicit versioned TOML recipes with `zi data --recipe FILE`. Validate the
+  complete definition before reading input or preparing output; reject unsupported
+  operations, unknown fields, invalid reverse flags and incompatible CLI options.
+- Buffer each stage and publish only the final result. Later-stage failures leave
+  stdout empty and preserve existing `-o` files; keep UTF-8, empty-output and
+  same-input/output behavior compatible with existing commands and pipes.
+- Limit recipes to 64 KiB and 1–16 native steps, initial input to 8 MiB, and each
+  intermediate/final result to 16 MiB. Preserve JSON numeric tokens, key order and
+  repeated keys through composed formatting; support bounded expansion/reduction.
+- Add cross-platform subprocess/pipe tests and a reusable recipe example. No shell,
+  recursive includes, implicit discovery, model tools or runtime dependencies added.
+
 ## 0.9.0 — 2026-10-26
 
 - Add `-o/--output FILE` for complete model results, offline data operations,

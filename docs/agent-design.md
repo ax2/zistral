@@ -41,7 +41,11 @@ repeated keys. Root-key enumeration skips values without numeric conversion. Inp
 bounded to 8 MiB, 100000 lines/keys and 128 containers. Local output is buffered up to
 16 MiB; tool results up to 64 KiB (including their JSON envelope) fail rather than truncate.
 Each tool invocation transforms the original input, not a previous tool's result; explicit
-CLI pipes compose multiple transformations. Sessions, permissions and memory are unchanged.
+CLI pipes compose multiple transformations. `recipes.rs` additionally validates caller-selected
+`--step` lists or versioned TOML `--recipe` files before reading data. The CLI executes at most
+16 pure steps, buffering only current/next intermediate (16 MiB each, initial input 8 MiB),
+and emits only the final success. No recipe steps are added to model tools or task context.
+Sessions, permissions and memory are unchanged.
 
 ## Verified requirements
 

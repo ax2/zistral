@@ -7,6 +7,7 @@ mod output;
 mod presets;
 mod process;
 mod project;
+mod recipes;
 mod stream;
 mod transforms;
 mod ui;
@@ -126,12 +127,21 @@ pub struct Cli {
 #[derive(Subcommand, Clone, Debug)]
 enum Commands {
     /// Transform explicit input locally, without a model or configuration
+    #[command(
+        after_help = "Examples:\n  zi data trim -i notes.txt\n  zi data --step trim --step dedupe --step sort:reverse -i notes.txt\n  zi data --recipe cleanup.toml -i notes.txt -o clean.txt\n\nRecipe example (UTF-8 TOML):\n  version = 1\n  [[steps]]\n  operation = \"trim\"\n  [[steps]]\n  operation = \"sort\"\n  reverse = true\n\nUse one operation, repeated --step, or --recipe. Recipes allow only the six native\noperations: no shell, file paths or model requests. Limits: 16 steps, 64 KiB recipe,\n8 MiB initial input, 16 MiB per intermediate/final result. Only final output is emitted."
+    )]
     Data {
-        #[arg(value_enum)]
-        operation: transforms::Operation,
+        #[arg(value_enum, required_unless_present_any = ["steps", "recipe"], conflicts_with_all = ["steps", "recipe"])]
+        operation: Option<transforms::Operation>,
         /// Reverse line order; only valid with sort
-        #[arg(long)]
+        #[arg(long, requires = "operation", conflicts_with_all = ["steps", "recipe"])]
         reverse: bool,
+        /// Chain a native operation; repeat in execution order (sort:reverse is supported)
+        #[arg(long = "step", conflicts_with = "recipe")]
+        steps: Vec<String>,
+        /// Read an explicit versioned TOML recipe of native operations
+        #[arg(long)]
+        recipe: Option<PathBuf>,
     },
     /// List, inspect, render or initialize reusable task presets (offline)
     Presets {
@@ -220,7 +230,13 @@ fn run(mut cli: Cli) -> Result<()> {
         console::set_colors_enabled(false);
         console::set_colors_enabled_stderr(false);
     }
-    if let Some(Commands::Data { operation, reverse }) = &cli.command {
+    if let Some(Commands::Data {
+        operation,
+        reverse,
+        steps,
+        recipe,
+    }) = &cli.command
+    {
         if cli.preset.is_some()
             || !cli.vars.is_empty()
             || cli.count
@@ -233,9 +249,10 @@ fn run(mut cli: Cli) -> Result<()> {
         {
             bail!("zi data accepts input and local operation options only; see zi data --help");
         }
+        let plan = recipes::Plan::prepare(*operation, *reverse, steps, recipe.as_deref())?;
         let target = prepare_output(&cli)?;
         let input = read_input(&cli)?;
-        let output = transforms::run(&input, *operation, *reverse, transforms::CLI_OUTPUT)?;
+        let output = plan.run(&input)?;
         if let Some(target) = target {
             return save_output(
                 &output,

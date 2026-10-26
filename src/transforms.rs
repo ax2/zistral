@@ -13,6 +13,7 @@ use std::{
 const MAX_INPUT: usize = 8 * 1024 * 1024;
 const MAX_ITEMS: usize = 100_000;
 pub const CLI_OUTPUT: usize = 16 * 1024 * 1024;
+pub const MAX_STEPS: usize = 16;
 const TOOL_OUTPUT: usize = 64 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum, Deserialize)]
@@ -187,12 +188,45 @@ impl<'de> Visitor<'de> for Keys {
 }
 
 pub fn run(input: &str, operation: Operation, reverse: bool, limit: usize) -> Result<String> {
-    if input.len() > MAX_INPUT {
-        bail!("data transformations accept at most 8 MiB of UTF-8 input");
-    }
+    transform(input, operation, reverse, MAX_INPUT, limit)
+}
+
+pub fn validate_step(operation: Operation, reverse: bool) -> Result<()> {
     if reverse && operation != Operation::Sort {
         bail!("--reverse is only valid for sort");
     }
+    Ok(())
+}
+
+/// Buffer only the current/next stage. Never emit an intermediate result.
+pub fn run_pipeline(input: &str, steps: &[(Operation, bool)]) -> Result<String> {
+    if steps.is_empty() || steps.len() > MAX_STEPS {
+        bail!("a data pipeline requires 1-16 steps");
+    }
+    for &(operation, reverse) in steps {
+        validate_step(operation, reverse)?;
+    }
+    let mut current = String::new();
+    for (index, &(operation, reverse)) in steps.iter().enumerate() {
+        let source = if index == 0 { input } else { &current };
+        let input_limit = if index == 0 { MAX_INPUT } else { CLI_OUTPUT };
+        current = transform(source, operation, reverse, input_limit, CLI_OUTPUT)
+            .with_context(|| format!("data pipeline step {} failed", index + 1))?;
+    }
+    Ok(current)
+}
+
+fn transform(
+    input: &str,
+    operation: Operation,
+    reverse: bool,
+    input_limit: usize,
+    limit: usize,
+) -> Result<String> {
+    if input.len() > input_limit {
+        bail!("data transformation input exceeds {input_limit} bytes");
+    }
+    validate_step(operation, reverse)?;
     let mut out = Buffer::new(limit);
     match operation {
         Operation::Trim | Operation::Dedupe | Operation::Sort => {
@@ -264,6 +298,30 @@ mod tests {
     use super::*;
     fn apply(text: &str, op: Operation) -> String {
         run(text, op, false, CLI_OUTPUT).unwrap()
+    }
+    #[test]
+    fn pipeline_allows_bounded_expansion_then_reduction_and_retains_json_tokens() {
+        let source = format!(
+            "{}{}-0{}",
+            "[".repeat(99),
+            "1.2300E+400,".repeat(50000),
+            "]".repeat(99)
+        );
+        let pretty = run(&source, Operation::JsonFormat, false, CLI_OUTPUT).unwrap();
+        assert!(pretty.len() > MAX_INPUT && pretty.len() <= CLI_OUTPUT);
+        let reduced = run_pipeline(
+            &source,
+            &[
+                (Operation::JsonFormat, false),
+                (Operation::JsonMinify, false),
+            ],
+        )
+        .unwrap();
+        assert_eq!(reduced, source);
+        assert!(run_pipeline(&"x".repeat(MAX_INPUT + 1), &[(Operation::Trim, false)]).is_err());
+        assert!(run_pipeline("x", &[]).is_err());
+        assert!(run_pipeline("x", &[(Operation::Trim, false); MAX_STEPS + 1]).is_err());
+        assert!(run_pipeline("x", &[(Operation::Trim, true)]).is_err());
     }
     #[test]
     fn line_records_are_exact_and_cross_platform() {

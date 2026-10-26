@@ -20,7 +20,7 @@ Download a native installer from [Releases](https://github.com/ax2/zistral/relea
 | Platform | Package | Installation |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | Per-user installer; adds PATH and a Start menu launcher; no administrator required |
-| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.9.0-linux-amd64.deb` |
+| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.10.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | Open the package; installs `/usr/local/bin/zi` |
 
 Then type `zi`. On first launch, choose an existing Codex, WorkBuddy or dsh configuration,
@@ -282,13 +282,33 @@ decoded. Nested values are skipped without numeric conversion. JSON CLI output e
 Input is capped at 8 MiB even with a larger `--max-input`; line operations/root key lists
 support at most 100000 records/keys and JSON at most 128 nested containers. Local output
 is buffered up to 16 MiB, including indentation growth. Errors exit nonzero with no output.
-`-i/--input FILE` works before or after `data`; `-` reads stdin. The original file is never
-overwritten. Windows PowerShell users can use `Get-Content -Raw` for UTF-8 input.
+`-i/--input FILE` works before or after `data`; `-` reads stdin. Only an explicit
+`-o FILE --force` can replace an input file. Windows PowerShell users can use
+`Get-Content -Raw` for UTF-8 input.
 
 The same core is available to the model as `transform_input` on the original input, with
 a 64 KiB JSON tool-result limit. It returns an error rather than a truncated result.
-Each call starts from the original input; use explicit CLI pipes for composed transforms.
+Each tool call starts from the original input; CLI pipes or the following local pipelines
+compose transforms without changing the model tool.
 `data` is a reserved command; `zi -- data ...` treats it as a literal model instruction.
+
+## Reusable offline pipelines
+
+```sh
+cat lines.txt | zi data --step trim --step dedupe --step sort:reverse
+zi data --recipe docs/examples/cleanup.toml -i lines.txt -o clean.txt
+```
+
+Use one operation, repeated `--step` in execution order, or an explicit `--recipe` file.
+Recipes have `version = 1` and `[[steps]]` entries with `operation` and optional `reverse`
+(sort only). All definitions are checked before reading input. Only the complete final
+result is emitted; a failed later step emits no intermediate stdout and does not replace
+an existing output file. Shell `>` still opens/truncates its destination independently.
+
+Limits: 1–16 steps, 64 KiB UTF-8 recipe, 8 MiB initial input, 16 MiB per intermediate/final
+result; existing line/key/depth limits still apply. The recipe is caller-supplied local
+data, never a model prompt or project permission. No shell, includes, variables, implicit
+discovery or model access. [Recipe format and examples](docs/data-recipes.md).
 
 ## Reusable task presets
 

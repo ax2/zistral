@@ -1,0 +1,11 @@
+version = 1
+
+[[steps]]
+operation = "trim"
+
+[[steps]]
+operation = "dedupe"
+
+[[steps]]
+operation = "sort"
+reverse = true

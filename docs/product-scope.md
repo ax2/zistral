@@ -59,9 +59,11 @@ cover summarize, translate, extract-as-JSON, explain, diff review, commit messag
 Additional instructions and literal variables adapt them. The selected model and the user's
 explicit flags still control execution. There is no implicit project preset discovery.
 
-Future custom pipelines can compose a small allowlist of native data operations, without
-embedding arbitrary shell commands, dynamically loaded libraries, hidden file reads or secrets.
-Keep definition files separate from input/result data and validate all steps before output.
+Explicit `zi data --step` and versioned `--recipe` files compose the six native operations,
+without arbitrary shell commands, includes, dynamically loaded libraries, hidden data reads
+or secrets. Definitions contain no input/result paths and are validated before input/output.
+Limits are 16 steps, 64 KiB definition, 8 MiB initial data and 16 MiB per intermediate.
+This is reusable user-maintained computation, not persistent task memory or a plugin engine.
 
 ## Delivery rule
 
