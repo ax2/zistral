@@ -50,7 +50,8 @@ same-directory temporary result is prepared before requests; file mode suppresse
 streaming and validates JSON before publication. Default no-clobber and explicit replacement
 check observed revisions; neither is an OS sandbox, exclusive lock or full agent transaction.
 Project edits/commands are not rolled back on a delivery error. The destination's old bytes
-and path never enter model context. Stdout delivery remains the default.
+and path are not injected into model context by the output writer. Explicit user input
+or separately enabled project tools may still contain them. Stdout remains the default.
 
 Automated local-provider fixtures drive the actual zi subprocess through all three protocols
 (Chat Completions, Responses and Anthropic Messages). For each, zi inspects a real tiny Rust

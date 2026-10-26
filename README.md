@@ -252,8 +252,9 @@ Temporary files are private on Unix; replacement preserves basic rwx permissions
 ownership, ACLs, extended attributes or hard-link identity. A process crash can leave a
 temporary file; no guarantee of power-loss durability is made. Project-agent edits and
 commands remain independent side effects; saving an answer does not roll them back.
-Only the caller-selected destination is used; its old content and path are not sent to
-the model, and no filesystem tools are enabled by `--output`.
+Only the caller-selected destination is used. The output writer does not add its path or
+old content to model requests. Explicit user input/instructions and separately enabled
+project tools can still include that information; `--output` itself enables no file tools.
 
 ## Offline text and JSON transformations
 
