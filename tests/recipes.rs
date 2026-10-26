@@ -38,6 +38,266 @@ fn invoke(root: &Path, args: &[&str], input: &[u8]) -> Output {
 }
 
 #[test]
+fn json_selection_plan_roundtrips_nested_pointer_and_exact_records() {
+    let root = tempfile::tempdir().unwrap();
+    let input = r#"{"data":{"a/b":{"~items:reverse":[{"n":1.2300E+400,"n":-0},"\u4e2d",123456789012345678901234567890]}}}"#;
+    let out = invoke(
+        root.path(),
+        &[
+            "data",
+            "--show-plan",
+            "--step",
+            "json-select:/data",
+            "--step",
+            "json-select:/a~1b/~0items:reverse",
+            "--step",
+            "array-to-jsonl",
+            "-o",
+            "records.toml",
+        ],
+        b"ignored",
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(out.stdout.is_empty() && out.stderr.is_empty());
+    let plan = std::fs::read_to_string(root.path().join("records.toml")).unwrap();
+    assert!(plan.contains("pointer = \"/a~1b/~0items:reverse\""));
+    let records = invoke(
+        root.path(),
+        &["data", "--recipe", "records.toml"],
+        input.as_bytes(),
+    );
+    assert!(
+        records.status.success(),
+        "{}",
+        String::from_utf8_lossy(&records.stderr)
+    );
+    assert_eq!(
+        records.stdout,
+        b"{\"n\":1.2300E+400,\"n\":-0}\n\"\\u4e2d\"\n123456789012345678901234567890\n"
+    );
+    assert!(records.stderr.is_empty());
+    let preview = invoke(
+        root.path(),
+        &["data", "--show-plan", "--recipe", "records.toml"],
+        b"not JSON",
+    );
+    assert!(preview.status.success());
+    assert_eq!(preview.stdout, plan.as_bytes());
+    assert!(!root.path().join("config").exists());
+}
+
+#[test]
+fn pipeline_json_selection_keeps_strings_quoted_and_empty_pointer_explicit() {
+    let root = tempfile::tempdir().unwrap();
+    for (args, input, expected) in [
+        (
+            vec!["data", "json-select", "--pointer", "/x"],
+            r#"{"x":"\u4e2d\ntext"}"#,
+            "\"\\u4e2d\\ntext\"\n",
+        ),
+        (
+            vec!["data", "--step", "json-select:", "--step", "json-minify"],
+            r#""\u4e2d""#,
+            "\"\\u4e2d\"\n",
+        ),
+        (
+            vec!["data", "json-select", "--pointer", ""],
+            " null ",
+            "null\n",
+        ),
+        (
+            vec!["data", "json-select", "--pointer", "/"],
+            r#"{"":false}"#,
+            "false\n",
+        ),
+        (
+            vec!["data", "json-select", "--pointer", "/a:reverse"],
+            r#"{"a:reverse":[]}"#,
+            "[]\n",
+        ),
+        (
+            vec!["--select", "/x"],
+            r#"{"x":"\u4e2d\ntext"}"#,
+            "中\ntext\n",
+        ),
+    ] {
+        let out = invoke(root.path(), &args, input.as_bytes());
+        assert!(
+            out.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(out.stdout, expected.as_bytes());
+        assert!(out.stderr.is_empty());
+    }
+    let plan = invoke(
+        root.path(),
+        &["data", "--show-plan", "--step", "json-select:"],
+        b"",
+    );
+    assert!(plan.status.success());
+    assert!(String::from_utf8_lossy(&plan.stdout).contains("pointer = \"\""));
+}
+
+#[test]
+fn invalid_selection_definitions_exit_before_input_and_output_access() {
+    use std::time::{Duration, Instant};
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join("keep.json"), b"original\r\n").unwrap();
+    for args in [
+        vec!["data", "json-select"],
+        vec!["data", "trim", "--pointer", ""],
+        vec!["data", "json-select", "--pointer", "bad"],
+        vec!["data", "--step", "json-select:/x~2"],
+        vec!["data", "json-select", "--pointer", "", "--reverse"],
+    ] {
+        let mut child = command(root.path())
+            .args(&args)
+            .args(["-o", "keep.json", "--force"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let stdin = child.stdin.take().unwrap();
+        let end = Instant::now() + Duration::from_secs(3);
+        while child.try_wait().unwrap().is_none() {
+            if Instant::now() > end {
+                child.kill().ok();
+                panic!("invalid plan waited for stdin: {args:?}");
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        drop(stdin);
+        let out = child.wait_with_output().unwrap();
+        assert!(!out.status.success() && out.stdout.is_empty());
+        assert_eq!(
+            std::fs::read(root.path().join("keep.json")).unwrap(),
+            b"original\r\n"
+        );
+    }
+    for spec in [
+        "operation='json-select'\npointer=3",
+        "operation='json-select'\npointer='/x~2'",
+        "operation='trim'\npointer=''",
+        "operation='json-select'",
+    ] {
+        std::fs::write(
+            root.path().join("bad.toml"),
+            format!("version=1\n[[steps]]\n{spec}\n"),
+        )
+        .unwrap();
+        let out = invoke(
+            root.path(),
+            &[
+                "data",
+                "--recipe",
+                "bad.toml",
+                "--show-plan",
+                "-o",
+                "keep.json",
+                "--force",
+            ],
+            b"PRIVATE_DATA",
+        );
+        assert!(!out.status.success() && out.stdout.is_empty());
+        assert_eq!(
+            std::fs::read(root.path().join("keep.json")).unwrap(),
+            b"original\r\n"
+        );
+    }
+    assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 2);
+}
+
+#[test]
+fn selection_runtime_failures_preserve_files_and_report_the_failing_step() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join("keep.json"), b"original\r\n").unwrap();
+    for input in [
+        r#"{"x":1,"x":2}"#,
+        r#"{"y":1}"#,
+        r#"{"x":1} trailing"#,
+        r#"{"x":"PRIVATE_VALUE"}"#,
+    ] {
+        let out = invoke(
+            root.path(),
+            &[
+                "data",
+                "--step",
+                "json-select:/x",
+                "--step",
+                "array-to-jsonl",
+                "-o",
+                "keep.json",
+                "--force",
+            ],
+            input.as_bytes(),
+        );
+        assert!(!out.status.success() && out.stdout.is_empty());
+        let error = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            error.contains("step 1 failed") || error.contains("step 2 failed"),
+            "{error}"
+        );
+        assert!(!error.contains("PRIVATE_VALUE"));
+        assert_eq!(
+            std::fs::read(root.path().join("keep.json")).unwrap(),
+            b"original\r\n"
+        );
+    }
+    for pointer in ["/01", "/-", "/9999999999999999999999999999999"] {
+        let out = invoke(
+            root.path(),
+            &["data", "json-select", "--pointer", pointer],
+            b"[1,2]",
+        );
+        assert!(!out.status.success() && out.stdout.is_empty());
+    }
+    assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
+}
+
+#[test]
+fn selection_recipe_replaces_input_only_after_a_complete_success() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(
+        root.path().join("input.json"),
+        br#"{"items":[{"id":123456789012345678901234567890},-0]}"#,
+    )
+    .unwrap();
+    let out = invoke(
+        root.path(),
+        &[
+            "data",
+            "--step",
+            "json-select:/items",
+            "--step",
+            "array-to-jsonl",
+            "-i",
+            "input.json",
+            "-o",
+            "input.json",
+            "--force",
+        ],
+        b"",
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(out.stdout.is_empty() && out.stderr.is_empty());
+    assert_eq!(
+        std::fs::read(root.path().join("input.json")).unwrap(),
+        b"{\"id\":123456789012345678901234567890}\n-0\n"
+    );
+    assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
+}
+
+#[test]
 fn ordered_steps_match_composed_operations_and_pipe_into_another_command() {
     let root = tempfile::tempdir().unwrap();
     let root = root.path();

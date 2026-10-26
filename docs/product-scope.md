@@ -62,7 +62,7 @@ cover summarize, translate, extract-as-JSON, explain, diff review, commit messag
 Additional instructions and literal variables adapt them. The selected model and the user's
 explicit flags still control execution. There is no implicit project preset discovery.
 
-Explicit `zi data --step` and versioned `--recipe` files compose the eight native operations,
+Explicit `zi data --step` and versioned `--recipe` files compose the native operations,
 without arbitrary shell commands, includes, dynamically loaded libraries, hidden data reads
 or secrets. Definitions contain no input/result paths and are validated before input/output.
 Limits are 16 steps, 64 KiB definition, 8 MiB initial data and 16 MiB per intermediate.
@@ -86,3 +86,8 @@ Feishu 文章/zistral. Articles begin with the real need, show examples and actu
 explain changes/results/limits, and include diagrams when the main loop or architecture changes.
 Controlled-model demos must be identified; successful execution is not evidence of live-model
 quality. Record the article URL and release evidence before starting the next release.
+
+JSON selection inside a recipe shortens nested API-response processing. An explicit bounded
+RFC 6901 pointer selects from the current intermediate; values stay JSON, not display text.
+The same Step validation is shared by saved plans and transform_input. This reuses the
+existing lexical selector, adds no tool names or permissions, and stores no data/history.

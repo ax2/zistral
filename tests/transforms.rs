@@ -342,6 +342,8 @@ fn model_turns(api: &str, calls: Vec<(Value, Value)>) -> (String, std::thread::J
                     .unwrap();
                 assert!(ops.contains(&json!("jsonl-to-array")));
                 assert!(ops.contains(&json!("array-to-jsonl")));
+                assert!(ops.contains(&json!("json-select")));
+                assert_eq!(schema["properties"]["pointer"]["type"], "string");
                 let steps = &schema["properties"]["steps"];
                 assert_eq!(steps["minItems"], 1);
                 assert_eq!(steps["maxItems"], 16);
@@ -352,6 +354,7 @@ fn model_turns(api: &str, calls: Vec<(Value, Value)>) -> (String, std::thread::J
                     ops
                 );
                 assert_eq!(steps["items"]["additionalProperties"], false);
+                assert_eq!(steps["items"]["properties"]["pointer"]["type"], "string");
             }
             if turn > 0 {
                 let expected = &calls[turn - 1].1;
@@ -442,6 +445,71 @@ fn tool_pipelines_compose_in_order_and_keep_lexical_json_in_every_protocol() {
             server.join().unwrap();
             assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
         }
+    }
+}
+
+#[test]
+fn json_selection_steps_compose_and_reject_invalid_options_in_every_protocol() {
+    for api in ["chat", "responses", "anthropic"] {
+        let root = tempfile::tempdir().unwrap();
+        for (args, input, expected) in [
+            (
+                json!({"steps":[{"operation":"jsonl-to-array"},{"operation":"json-select","pointer":"/1/data"},{"operation":"array-to-jsonl"}]}),
+                "null\n{\"data\":[{\"n\":1.2300E+400,\"n\":-0},123456789012345678901234567890,\"\\u4e2d\"]}\n",
+                json!(
+                    "{\"n\":1.2300E+400,\"n\":-0}\n123456789012345678901234567890\n\"\\u4e2d\"\n"
+                ),
+            ),
+            (
+                json!({"operation":"json-select","pointer":"/x"}),
+                r#"{"x":"\u4e2d"}"#,
+                json!("\"\\u4e2d\""),
+            ),
+            (
+                json!({"steps":[{"operation":"json-select","pointer":"/x"},{"operation":"array-to-jsonl"}]}),
+                r#"{"x":"PRIVATE_VALUE"}"#,
+                Value::Null,
+            ),
+            (
+                json!({"operation":"json-select","pointer":"/x"}),
+                r#"{"x":1,"x":2}"#,
+                Value::Null,
+            ),
+            (
+                json!({"operation":"json-select","pointer":null}),
+                "{}",
+                Value::Null,
+            ),
+            (
+                json!({"operation":"trim","pointer":""}),
+                "PRIVATE_INPUT",
+                Value::Null,
+            ),
+        ] {
+            let (url, server) = model(api, args, expected);
+            let out = invoke(
+                root.path(),
+                &[
+                    "--api",
+                    api,
+                    "--base-url",
+                    &url,
+                    "--model",
+                    "fixture",
+                    "transform nested data",
+                ],
+                input.as_bytes(),
+            );
+            assert!(
+                out.status.success(),
+                "{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            assert_eq!(out.stdout, b"verified\n");
+            assert!(out.stderr.is_empty());
+            server.join().unwrap();
+        }
+        assert!(!root.path().join("config").exists());
     }
 }
 #[test]

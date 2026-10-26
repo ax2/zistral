@@ -17,7 +17,7 @@ git diff | zi "生成一句简洁的提交说明"
 | 平台 | 安装包 | 安装方法 |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | 双击安装，无需管理员权限，自动添加用户 PATH 和开始菜单入口 |
-| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.15.1-linux-amd64.deb` |
+| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.16.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | 双击安装，命令放到 `/usr/local/bin/zi` |
 
 安装后直接运行 `zi`。Windows 安装结束可立即启动，或在开始菜单打开 zi；
@@ -251,7 +251,7 @@ zi data --show-plan --step trim --step dedupe --step sort:reverse -o cleanup.tom
 shell `>` 的创建/截断行为仍由 shell 决定。
 
 配方最多 64 KiB UTF-8、1–16 步；原始输入最多 8 MiB，每步中间/最终结果最多 16 MiB，
-行数、根键数、JSONL 记录数和 JSON 嵌套限制继续适用。配方由调用者显式提供，只组合现有八种本地操作，
+行数、根键数、JSONL 记录数和 JSON 嵌套限制继续适用。配方由调用者显式提供，只组合本地原生操作，
 不含命令、include、变量、自动发现、模型访问或项目权限。[格式与示例](docs/data-recipes.md)。
 
 `--show-plan` 只校验并导出规范化的 version-1 TOML，不读取或等待 stdin，也不执行步骤；显式
@@ -386,3 +386,18 @@ cargo install --git https://github.com/ax2/zistral --tag v0.9.0 --locked
 ```
 
 更多配置、精确定义、开发与验证范围见 [English README](README.md)。MIT 开源协议。
+
+
+同一份配方可以先选择嵌套 JSON，再转为 JSONL：
+
+```sh
+zi data --step json-select:/data/items --step array-to-jsonl -i response.json
+zi data --show-plan --step json-select:/data/items --step array-to-jsonl -o records.toml
+zi data --recipe records.toml -i response.json -o records.jsonl
+```
+
+单操作用 `zi data json-select --pointer /data/items`；空指针显式选择根值。
+`json-select` 输出 JSON 值，字符串保留引号及转义，数字原文不变；现有 `--select`
+继续输出解码字符串及支持 `--join`。路径语法在 IO 前校验，存在性和类型在运行时判断。
+现有 `transform_input` 也接受带 pointer 的同形步骤，无需新增工具或权限。
+见[嵌套 JSON 配方](docs/json-selection-recipes.md)。

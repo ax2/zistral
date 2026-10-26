@@ -133,7 +133,7 @@ pub struct Cli {
 enum Commands {
     /// Transform explicit input locally, without a model or configuration
     #[command(
-        after_help = "Examples:\n  zi data trim -i notes.txt\n  zi data --step trim --step dedupe --step sort:reverse -i notes.txt\n  zi data --recipe cleanup.toml -i notes.txt -o clean.txt\n  zi data --show-plan --recipe cleanup.toml\n  zi data --show-plan --step trim --step dedupe -o cleanup.toml\n\nRecipe example (UTF-8 TOML):\n  version = 1\n  [[steps]]\n  operation = \"trim\"\n  [[steps]]\n  operation = \"sort\"\n  reverse = true\n\nUse one operation, repeated --step, or --recipe. --show-plan validates and exports\nthe resolved version-1 TOML without reading stdin or executing data operations;\n--input is rejected and -o saves the plan. Data-dependent failures still require a run.\nRecipes allow only the eight native operations: no shell, file paths or model requests.\nLimits: 16 steps, 64 KiB recipe, 8 MiB initial input, 16 MiB intermediate/final result."
+        after_help = "Examples:\n  zi data trim -i notes.txt\n  zi data --step trim --step dedupe --step sort:reverse -i notes.txt\n  zi data --recipe cleanup.toml -i notes.txt -o clean.txt\n  zi data --step json-select:/data/items --step array-to-jsonl -i response.json\n  zi data json-select --pointer /data/items -i response.json\n  zi data --show-plan --recipe cleanup.toml\n  zi data --show-plan --step trim --step dedupe -o cleanup.toml\n\nRecipe example (UTF-8 TOML):\n  version = 1\n  [[steps]]\n  operation = \"trim\"\n  [[steps]]\n  operation = \"sort\"\n  reverse = true\n\nUse one operation, repeated --step, or --recipe. --show-plan validates and exports\nthe resolved version-1 TOML without reading stdin or executing data operations;\n--input is rejected and -o saves the plan. Data-dependent failures still require a run.\nRecipes allow only native data operations: no shell, file paths or model requests.\nLimits: 16 steps, 64 KiB recipe, 8 MiB initial input, 16 MiB intermediate/final result."
     )]
     Data {
         #[arg(value_enum, required_unless_present_any = ["steps", "recipe"], conflicts_with_all = ["steps", "recipe"])]
@@ -141,7 +141,10 @@ enum Commands {
         /// Reverse line order; only valid with sort
         #[arg(long, requires = "operation", conflicts_with_all = ["steps", "recipe"])]
         reverse: bool,
-        /// Chain a native operation; repeat in execution order (sort:reverse is supported)
+        /// RFC 6901 pointer for the single json-select operation; empty selects the root
+        #[arg(long, requires = "operation", conflicts_with_all = ["steps", "recipe"])]
+        pointer: Option<String>,
+        /// Chain a native operation; repeat in execution order (sort:reverse and json-select:/path are supported)
         #[arg(long = "step", conflicts_with = "recipe")]
         steps: Vec<String>,
         /// Read an explicit versioned TOML recipe of native operations
@@ -254,6 +257,7 @@ fn run(mut cli: Cli) -> Result<()> {
     if let Some(Commands::Data {
         operation,
         reverse,
+        pointer,
         steps,
         recipe,
         show_plan,
@@ -274,7 +278,13 @@ fn run(mut cli: Cli) -> Result<()> {
         if *show_plan && cli.input.is_some() {
             bail!("--show-plan does not read data; omit --input to preview or export the plan");
         }
-        let plan = recipes::Plan::prepare(*operation, *reverse, steps, recipe.as_deref())?;
+        let plan = recipes::Plan::prepare(
+            *operation,
+            *reverse,
+            pointer.as_deref(),
+            steps,
+            recipe.as_deref(),
+        )?;
         let target = prepare_output(&cli)?;
         let output = if *show_plan {
             plan.render()?

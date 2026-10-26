@@ -20,7 +20,7 @@ Download a native installer from [Releases](https://github.com/ax2/zistral/relea
 | Platform | Package | Installation |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | Per-user installer; adds PATH and a Start menu launcher; no administrator required |
-| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.15.1-linux-amd64.deb` |
+| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.16.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | Open the package; installs `/usr/local/bin/zi` |
 
 Then type `zi`. On first launch, choose an existing Codex, WorkBuddy or dsh configuration,
@@ -550,3 +550,19 @@ test the binaries, attach archives and SHA-256 checksums, and publish only when
 every build succeeds. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 MIT licensed. Protocol reference: [OpenAI function calling](https://developers.openai.com/api/docs/guides/function-calling).
+
+
+Select nested JSON inside the same saved pipeline:
+
+```sh
+zi data --step json-select:/data/items --step array-to-jsonl -i response.json
+zi data --show-plan --step json-select:/data/items --step array-to-jsonl -o records.toml
+zi data --recipe records.toml -i response.json -o records.jsonl
+```
+
+`json-select` requires an explicit RFC 6901 `pointer` (empty selects root), also available
+as `zi data json-select --pointer /data/items`. It emits a JSON value: strings retain
+quotes/escapes, numbers remain exact. Existing `--select` still displays decoded strings
+and supports `--join`. Pointer validation precedes IO; existence/type depends on actual data.
+The same pointer-bearing steps work in `transform_input` without a new tool or permission.
+See [nested JSON recipes](docs/json-selection-recipes.md).

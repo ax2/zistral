@@ -35,6 +35,48 @@ pub enum Operation {
     JsonlToArray,
     /// Emit each root array item as one compact JSON line, preserving numeric tokens
     ArrayToJsonl,
+    /// Select a JSON value using an explicit RFC 6901 pointer; retain quoted strings
+    JsonSelect,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Step {
+    pub operation: Operation,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub reverse: bool,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "pointer_string"
+    )]
+    pub pointer: Option<String>,
+}
+
+fn pointer_string<'de, D: serde::Deserializer<'de>>(
+    de: D,
+) -> std::result::Result<Option<String>, D::Error> {
+    String::deserialize(de).map(Some)
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+impl Step {
+    pub fn validate(&self) -> Result<()> {
+        if self.reverse && self.operation != Operation::Sort {
+            bail!("--reverse is only valid for sort");
+        }
+        match (&self.pointer, self.operation) {
+            (Some(pointer), Operation::JsonSelect) => crate::selection::validate_pointer(pointer),
+            (None, Operation::JsonSelect) => bail!(
+                "json-select requires an explicit pointer; use an empty pointer to select the root"
+            ),
+            (Some(_), _) => bail!("pointer is only valid for json-select"),
+            (None, _) => Ok(()),
+        }
+    }
 }
 
 struct Buffer {
@@ -263,31 +305,35 @@ impl<'de> Visitor<'de> for Keys {
     }
 }
 
-pub fn run(input: &str, operation: Operation, reverse: bool, limit: usize) -> Result<String> {
-    transform(input, operation, reverse, MAX_INPUT, limit)
-}
-
-pub fn validate_step(operation: Operation, reverse: bool) -> Result<()> {
-    if reverse && operation != Operation::Sort {
-        bail!("--reverse is only valid for sort");
-    }
-    Ok(())
+#[cfg(test)]
+fn run(input: &str, operation: Operation, reverse: bool, limit: usize) -> Result<String> {
+    transform(
+        input,
+        &Step {
+            operation,
+            reverse,
+            pointer: None,
+        },
+        MAX_INPUT,
+        limit,
+    )
 }
 
 /// Buffer only the current/next stage. Never emit an intermediate result.
-pub fn run_pipeline(input: &str, steps: &[(Operation, bool)]) -> Result<String> {
+pub fn run_pipeline(input: &str, steps: &[Step]) -> Result<String> {
     pipeline(input, steps, CLI_OUTPUT)
 }
 
-fn pipeline(input: &str, steps: &[(Operation, bool)], final_limit: usize) -> Result<String> {
+fn pipeline(input: &str, steps: &[Step], final_limit: usize) -> Result<String> {
     if steps.is_empty() || steps.len() > MAX_STEPS {
         bail!("a data pipeline requires 1-16 steps");
     }
-    for &(operation, reverse) in steps {
-        validate_step(operation, reverse)?;
+    for (index, step) in steps.iter().enumerate() {
+        step.validate()
+            .with_context(|| format!("data pipeline step {} is invalid", index + 1))?;
     }
     let mut current = String::new();
-    for (index, &(operation, reverse)) in steps.iter().enumerate() {
+    for (index, step) in steps.iter().enumerate() {
         let source = if index == 0 { input } else { &current };
         let input_limit = if index == 0 { MAX_INPUT } else { CLI_OUTPUT };
         let limit = if index + 1 == steps.len() {
@@ -295,23 +341,18 @@ fn pipeline(input: &str, steps: &[(Operation, bool)], final_limit: usize) -> Res
         } else {
             CLI_OUTPUT
         };
-        current = transform(source, operation, reverse, input_limit, limit)
+        current = transform(source, step, input_limit, limit)
             .with_context(|| format!("data pipeline step {} failed", index + 1))?;
     }
     Ok(current)
 }
 
-fn transform(
-    input: &str,
-    operation: Operation,
-    reverse: bool,
-    input_limit: usize,
-    limit: usize,
-) -> Result<String> {
+fn transform(input: &str, step: &Step, input_limit: usize, limit: usize) -> Result<String> {
     if input.len() > input_limit {
         bail!("data transformation input exceeds {input_limit} bytes");
     }
-    validate_step(operation, reverse)?;
+    step.validate()?;
+    let operation = step.operation;
     let mut out = Buffer::new(limit);
     match operation {
         Operation::Trim | Operation::Dedupe | Operation::Sort => {
@@ -327,7 +368,7 @@ fn transform(
                 }
                 Operation::Sort => {
                     lines.sort_unstable();
-                    if reverse {
+                    if step.reverse {
                         lines.reverse();
                     }
                 }
@@ -355,6 +396,13 @@ fn transform(
         }
         Operation::JsonlToArray => jsonl_to_array(input, &mut out)?,
         Operation::ArrayToJsonl => array_to_jsonl(input, &mut out)?,
+        Operation::JsonSelect => {
+            return crate::selection::select_json(
+                input,
+                step.pointer.as_deref().expect("validated pointer"),
+                limit,
+            );
+        }
     }
     Ok(out.finish())
 }
@@ -362,13 +410,6 @@ fn transform(
 pub fn execute(arguments: &str, input: &str) -> Result<String> {
     if arguments.len() > 64 * 1024 {
         bail!("transform tool arguments exceed 64 KiB");
-    }
-    #[derive(Deserialize)]
-    #[serde(deny_unknown_fields)]
-    struct Step {
-        operation: Operation,
-        #[serde(default)]
-        reverse: bool,
     }
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
@@ -383,19 +424,12 @@ pub fn execute(arguments: &str, input: &str) -> Result<String> {
     }
     let args: Args = serde_json::from_str(arguments).map_err(|_| {
         anyhow::anyhow!(
-            "transform_input requires either operation with optional boolean reverse, or 1-16 steps of the same shape; do not combine them"
+            "transform_input requires either operation with optional reverse/pointer, or 1-16 steps of the same shape; do not combine them"
         )
     })?;
     let output = match args {
-        Args::Single(step) => run(input, step.operation, step.reverse, TOOL_OUTPUT)?,
-        Args::Pipeline(args) => {
-            let steps: Vec<_> = args
-                .steps
-                .into_iter()
-                .map(|s| (s.operation, s.reverse))
-                .collect();
-            pipeline(input, &steps, TOOL_OUTPUT)?
-        }
+        Args::Single(step) => transform(input, &step, MAX_INPUT, TOOL_OUTPUT)?,
+        Args::Pipeline(args) => pipeline(input, &args.steps, TOOL_OUTPUT)?,
     };
     let result = serde_json::to_string(&serde_json::json!({"output":output}))?;
     if result.len() > TOOL_OUTPUT {
@@ -407,6 +441,43 @@ pub fn execute(arguments: &str, input: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn selection_steps_validate_before_data_and_retain_tool_output_limits() {
+        for args in [
+            r#"{"operation":"json-select"}"#,
+            r#"{"operation":"json-select","pointer":null}"#,
+            r#"{"operation":"json-select","pointer":"PRIVATE_PATH"}"#,
+            r#"{"operation":"json-select","pointer":"/x~2"}"#,
+            r#"{"operation":"json-select","pointer":"","reverse":true}"#,
+            r#"{"operation":"trim","pointer":""}"#,
+            r#"{"steps":[{"operation":"trim"}],"pointer":""}"#,
+        ] {
+            let error = format!("{:#}", execute(args, "PRIVATE_INPUT").unwrap_err());
+            assert!(!error.contains("PRIVATE"), "{error}");
+        }
+        for pointer in [format!("/{}", "x".repeat(4096)), "/x".repeat(129)] {
+            assert!(
+                execute(
+                    &serde_json::json!({"operation":"json-select","pointer":pointer}).to_string(),
+                    "{}"
+                )
+                .is_err()
+            );
+        }
+        let input = serde_json::json!({"x":"\\".repeat(40000)}).to_string();
+        assert!(execute(r#"{"operation":"json-select","pointer":"/x"}"#, &input).is_err());
+        let input = format!(
+            "{}{}-0{}",
+            "[".repeat(99),
+            "1.2300E+400,".repeat(50000),
+            "]".repeat(99)
+        );
+        let pointer = "/0".repeat(98);
+        let args = serde_json::json!({"steps":[{"operation":"json-format"},{"operation":"json-select","pointer":pointer},{"operation":"json-select","pointer":"/0"}]}).to_string();
+        let value: serde_json::Value =
+            serde_json::from_str(&execute(&args, &input).unwrap()).unwrap();
+        assert_eq!(value["output"], "1.2300E+400");
+    }
     #[test]
     fn tool_steps_preserve_order_and_old_single_operation_shape() {
         let input = " 乙 \r\n甲\n 乙\n\n";
@@ -591,6 +662,11 @@ mod tests {
     }
     #[test]
     fn pipeline_allows_bounded_expansion_then_reduction_and_retains_json_tokens() {
+        let step = |operation, reverse| Step {
+            operation,
+            reverse,
+            pointer: None,
+        };
         let source = format!(
             "{}{}-0{}",
             "[".repeat(99),
@@ -602,16 +678,16 @@ mod tests {
         let reduced = run_pipeline(
             &source,
             &[
-                (Operation::JsonFormat, false),
-                (Operation::JsonMinify, false),
+                step(Operation::JsonFormat, false),
+                step(Operation::JsonMinify, false),
             ],
         )
         .unwrap();
         assert_eq!(reduced, source);
-        assert!(run_pipeline(&"x".repeat(MAX_INPUT + 1), &[(Operation::Trim, false)]).is_err());
+        assert!(run_pipeline(&"x".repeat(MAX_INPUT + 1), &[step(Operation::Trim, false)]).is_err());
         assert!(run_pipeline("x", &[]).is_err());
-        assert!(run_pipeline("x", &[(Operation::Trim, false); MAX_STEPS + 1]).is_err());
-        assert!(run_pipeline("x", &[(Operation::Trim, true)]).is_err());
+        assert!(run_pipeline("x", &vec![step(Operation::Trim, false); MAX_STEPS + 1]).is_err());
+        assert!(run_pipeline("x", &[step(Operation::Trim, true)]).is_err());
     }
     #[test]
     fn line_records_are_exact_and_cross_platform() {

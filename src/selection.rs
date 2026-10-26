@@ -47,6 +47,10 @@ fn tokens(pointer: &str) -> Result<Vec<String>> {
     }
     Ok(result)
 }
+
+pub(crate) fn validate_pointer(pointer: &str) -> Result<()> {
+    tokens(pointer).map(|_| ())
+}
 struct PathSeed<'a>(&'a [String]);
 impl<'de> DeserializeSeed<'de> for PathSeed<'_> {
     type Value = Found<'de>;
@@ -182,7 +186,7 @@ impl<'de> Visitor<'de> for Join<'_> {
         Ok(output)
     }
 }
-pub fn select(input: &str, pointer: &str, separator: Option<&str>, limit: usize) -> Result<String> {
+fn find<'a>(input: &'a str, pointer: &str) -> Result<&'a RawValue> {
     if input.len() > 64 * 1024 * 1024 {
         bail!("JSON selection input exceeds 64 MiB");
     }
@@ -205,6 +209,16 @@ pub fn select(input: &str, pointer: &str, separator: Option<&str>, limit: usize)
     deserializer.end().map_err(|_| {
         anyhow::anyhow!("JSON pointer traversal did not consume the complete input")
     })?;
+    Ok(raw)
+}
+
+/// Pipeline selection always returns a JSON value, including quoted string tokens.
+pub(crate) fn select_json(input: &str, pointer: &str, limit: usize) -> Result<String> {
+    crate::transforms::compact_valid_json(find(input, pointer)?.get(), limit)
+}
+
+pub fn select(input: &str, pointer: &str, separator: Option<&str>, limit: usize) -> Result<String> {
+    let raw = find(input, pointer)?;
     if let Some(separator) = separator {
         if !raw.get().starts_with('[') {
             bail!("--join requires the selected value to be an array");
@@ -222,6 +236,20 @@ pub fn select(input: &str, pointer: &str, separator: Option<&str>, limit: usize)
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn json_pipeline_selection_retains_string_tokens_while_display_decodes() {
+        let input = r#"{"x":"\u4e2d\ntext","n":1.2300E+400,"other":1e9999}"#;
+        assert_eq!(select_json(input, "/x", 100).unwrap(), r#""\u4e2d\ntext""#);
+        assert_eq!(select(input, "/x", None, 100).unwrap(), "中\ntext");
+        assert_eq!(select_json(input, "/n", 100).unwrap(), "1.2300E+400");
+        assert_eq!(
+            select_json(r#" [ {"x":1,"x":2}, -0 ] "#, "", 100).unwrap(),
+            r#"[{"x":1,"x":2},-0]"#
+        );
+        assert!(select_json(input, "/x", 5).is_err());
+        assert!(select_json("{\"x\":1} trailing", "/x", 100).is_err());
+        assert!(select_json("{\"x\":1,\"x\":2}", "/x", 100).is_err());
+    }
     fn apply(input: &str, pointer: &str, separator: Option<&str>) -> String {
         select(input, pointer, separator, 1024 * 1024).unwrap()
     }

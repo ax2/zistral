@@ -45,7 +45,7 @@ The full project mode has 15 tools. Data mode exposes count/select/transform; re
 excludes file mutation and arbitrary shell execution, including enforcement if a provider
 requests tools that were not advertised. `--no-tools` disables project capabilities too.
 
-`transforms.rs` implements eight deterministic operations on explicit input, shared by the
+`transforms.rs` implements nine deterministic operations on explicit input, shared by the
 offline `zi data` command and the `transform_input` tool. They do not access a model,
 filesystem or shell. JSON syntax is checked with serde's IgnoredAny; a lexical formatter
 changes only insignificant whitespace, preserving number/string tokens, key order and
@@ -126,3 +126,9 @@ quality, permissions, provider compatibility and the task's scope.
   per command, 64 KiB per command stream/read/search output. Use CLI options for turn/time budgets.
 
 These limits keep zi compact and useful for ordinary coding tasks without claiming Codex parity.
+
+In v0.16.0, recipes and transform_input share a pointer-aware Step definition. json-select
+uses the existing lexical JSON traversal, but returns quoted JSON strings for composition;
+select_input and CLI --select retain decoded display/join behavior. Pointer syntax/limits
+are validated before input, and the complete source JSON is validated before selection.
+Main-loop, original-input-per-call and project permission rules remain unchanged.

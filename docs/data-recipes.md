@@ -87,3 +87,8 @@ execution/publication. Existing file output and shell-redirection limitations st
 No execution simulation, type-flow inference, constant folding, model pipeline import,
 new operation, tool or dependency is introduced. This preview does not grant tools or
 execute embedded shell text.
+
+`json-select` is the ninth native operation. It requires `pointer` in a TOML step,
+`--pointer` in single-operation mode, or `--step json-select:/path`. It returns compact
+JSON, including quoted strings, from the current intermediate. An explicit empty pointer
+selects the root. See [selection recipes](json-selection-recipes.md) for exact contracts.

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.16.0 — 2026-10-26
+
+- Add `json-select` to native data pipelines and saved recipes, so nested API-response
+  arrays can be selected and converted to JSONL in one reusable task. Supply an explicit
+  RFC 6901 pointer through `--pointer`, `--step json-select:/path`, or a TOML step.
+- Preserve JSON values when composing: string quotes/escapes, numeric tokens, key order
+  and repeated keys inside selected values. Keep existing `--select` display/join behavior.
+  Validate pointer syntax/limits before IO; reject missing paths and ambiguous referenced keys.
+- Extend existing `transform_input` single/ordered steps with the same pointer validation.
+  Keep original-input isolation, bounded intermediates/final results and file preservation
+  on failure. No new dependencies, tool names, project permissions or Agent-loop changes.
+
 ## 0.15.1 — 2026-10-26
 
 - Reject `--config-example` combined with `--json`, `--count`, `--select`, explicit
