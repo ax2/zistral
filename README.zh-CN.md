@@ -17,7 +17,7 @@ git diff | zi "生成一句简洁的提交说明"
 | 平台 | 安装包 | 安装方法 |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | 双击安装，无需管理员权限，自动添加用户 PATH 和开始菜单入口 |
-| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.16.1-linux-amd64.deb` |
+| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.16.2-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | 双击安装，命令放到 `/usr/local/bin/zi` |
 
 安装后直接运行 `zi`。Windows 安装结束可立即启动，或在开始菜单打开 zi；
@@ -401,3 +401,6 @@ zi data --recipe records.toml -i response.json -o records.jsonl
 继续输出解码字符串及支持 `--join`。路径语法在 IO 前校验，存在性和类型在运行时判断。
 现有 `transform_input` 也接受带 pointer 的同形步骤，无需新增工具或权限。
 见[嵌套 JSON 配方](docs/json-selection-recipes.md)。
+
+维护者：[发版流程](docs/releasing.md)。普通 main 提交只运行 CI，正式发布由显式发版分支、
+版本标签或版本一致的手动入口触发。

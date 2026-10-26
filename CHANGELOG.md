@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.16.2 — 2026-10-26
+
+- Separate regular commits from publication: main pushes run CI without starting Release.
+  Start a release explicitly from `release/vVERSION`, the matching version tag, or manual
+  dispatch. Validate the entry point against Cargo.toml before building artifacts.
+- Check release-entry and release-note rules in normal CI, including rejected main pushes,
+  mismatched refs/manual tags and unchanged workflow outputs after validation failures.
+  Preserve native installers, all platform/MSRV checks and current-version-only notes.
+- Document the commit → CI → explicit release workflow. No CLI behavior, Rust dependencies,
+  model tools, permissions or Agent-loop changes.
+
 ## 0.16.1 — 2026-10-26
 
 - Reject native data plans whose normalized TOML exceeds the 64 KiB recipe read limit.

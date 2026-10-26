@@ -20,7 +20,7 @@ Download a native installer from [Releases](https://github.com/ax2/zistral/relea
 | Platform | Package | Installation |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | Per-user installer; adds PATH and a Start menu launcher; no administrator required |
-| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.16.1-linux-amd64.deb` |
+| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.16.2-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | Open the package; installs `/usr/local/bin/zi` |
 
 Then type `zi`. On first launch, choose an existing Codex, WorkBuddy or dsh configuration,
@@ -566,3 +566,6 @@ quotes/escapes, numbers remain exact. Existing `--select` still displays decoded
 and supports `--join`. Pointer validation precedes IO; existence/type depends on actual data.
 The same pointer-bearing steps work in `transform_input` without a new tool or permission.
 See [nested JSON recipes](docs/json-selection-recipes.md).
+
+Maintainers: [release workflow](docs/releasing.md). Main commits run CI; publication starts
+only from an explicit release branch/tag or a matching manual dispatch.

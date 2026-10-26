@@ -1,14 +1,14 @@
 name: Release
 on:
   push:
-    branches: [main]
+    branches: ['release/v*']
     tags: ['v*']
   workflow_dispatch:
     inputs:
       tag:
         description: Version tag to publish (must match Cargo.toml)
         required: true
-        default: v0.16.1
+        default: v0.16.2
 permissions:
   contents: read
 concurrency:
@@ -28,18 +28,11 @@ jobs:
       - uses: actions/checkout@v4
       - name: Resolve version
         id: version
-        shell: python
-        run: |
-          import os, re, tomllib
-          tag = 'v' + tomllib.load(open('Cargo.toml', 'rb'))['package']['version']
-          assert re.fullmatch(r'v\d+\.\d+\.\d+', tag)
-          requested = os.environ.get('REQUESTED_TAG')
-          if requested: assert requested == tag
-          if os.environ['GITHUB_REF_TYPE'] == 'tag': assert os.environ['GITHUB_REF_NAME'] == tag
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as f: f.write('tag=' + tag + '\n')
+        run: python scripts/release_target.py
       - name: Validate current version release notes
         run: |
           python scripts/test_release_notes.py
+          python scripts/test_release_target.py
           python scripts/release_notes.py "${{ steps.version.outputs.tag }}" > /dev/null
       - name: Skip versions already released
         id: check
