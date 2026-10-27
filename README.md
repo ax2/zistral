@@ -20,7 +20,7 @@ Download a native installer from [Releases](https://github.com/ax2/zistral/relea
 | Platform | Package | Installation |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | Per-user installer; adds PATH and a Start menu launcher; no administrator required |
-| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.18.0-linux-amd64.deb` |
+| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.19.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | Open the package; installs `/usr/local/bin/zi` |
 
 Then type `zi`. On first launch, choose an existing Codex, WorkBuddy or dsh configuration,
@@ -237,8 +237,8 @@ zi --config-example -o example.toml
 ```
 
 `-o/--output FILE` saves the complete UTF-8 result and emits no stdout. It applies to
-one-shot model tasks, local data/count/select and configuration examples. Management
-commands and bare interactive sessions reject a file destination. `--output -` keeps
+one-shot model tasks, local data/count/select, configuration examples and `presets export`.
+Other management commands and bare interactive sessions reject a file destination. `--output -` keeps
 normal stdout behavior, including explicit streaming; `--force` requires a real file.
 
 The default never replaces an existing file. `--force` authorizes replacing an existing
@@ -587,3 +587,17 @@ original tokens. A missing/ambiguous field or malformed later record fails the w
 with a record number, without partial stdout or replacing an existing `-o` target.
 Also available in the existing `transform_input` tool. No model is used for `zi data`.
 [Rules, recipe export, limits and examples](docs/jsonl-selection.md).
+
+## Export and adapt a task preset
+
+```sh
+zi presets export translate --name translate-ja --var language=Japanese -o team-presets.toml
+zi --presets team-presets.toml presets render translate-ja
+zi --presets team-presets.toml -s translate-ja -i notes.txt
+```
+
+Export one builtin/custom definition as reusable version-1 TOML. Keep placeholders, description
+and JSON-output rules; `--var` saves literal new defaults. Export is offline and does not read
+piped input or grant tools. Choose a non-builtin destination `--name`; `-o` defaults to no
+overwrite. Explicit `--force` replaces the whole target library, without merging.
+[Exact rules and export versus render](docs/preset-export.md).

@@ -1,6 +1,6 @@
 use crate::{Cli, config, ui};
 use anyhow::{Context, Result, bail};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read, Write};
 use std::path::PathBuf;
@@ -18,7 +18,7 @@ prompt = "Summarize the supplied input for {{audience}}. Keep the facts, decisio
 audience = "the engineering team"
 "#;
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Preset {
     description: String,
@@ -29,7 +29,7 @@ pub struct Preset {
     defaults: BTreeMap<String, String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct File {
     version: u32,
@@ -39,7 +39,7 @@ struct File {
 fn builtins() -> BTreeMap<String, Preset> {
     [
         ("summarize", "Summarize text and keep decisions, risks and actions", "Summarize the supplied input concisely. Preserve key facts, decisions, risks and action items. Do not invent missing details.", false, None),
-        ("translate", "Translate text; --var language=Chinese by default", "Translate the supplied input into {{language}}. Preserve meaning, formatting, code, URLs and identifiers; return only the translation.", false, Some(("language", "Chinese"))),
+        ("translate", "Translate text into the selected language (--var language=VALUE)", "Translate the supplied input into {{language}}. Preserve meaning, formatting, code, URLs and identifiers; return only the translation.", false, Some(("language", "Chinese"))),
         ("extract", "Extract requested fields as validated JSON", "Extract the information requested by the user's additional instruction from the supplied input. Return exactly one valid JSON value. Use null for missing values; do not invent facts. If no fields are specified, return the key factual fields present in the input.", true, None),
         ("explain", "Explain supplied code, logs or structured data", "Explain the supplied code, log or structured data. Identify what it does, relevant evidence and important uncertainties. Distinguish observations from hypotheses; do not claim to have read other files or run commands.", false, None),
         ("review", "Review a supplied diff with concrete evidence", "Review the supplied diff or code. Prioritize correctness, behavior regressions and missing verification; cite file names and line numbers only when present. Report actionable findings with evidence and state any limits. Do not invent repository context or claim tests were run.", false, None),
@@ -128,7 +128,7 @@ impl Preset {
         }
         Ok(())
     }
-    fn render(&self, provided: &[String]) -> Result<String> {
+    fn values(&self, provided: &[String]) -> Result<BTreeMap<String, String>> {
         self.validate()?;
         let names = self.variables()?;
         let mut values = self.defaults.clone();
@@ -146,6 +146,10 @@ impl Preset {
             validate_value(value)?;
             values.insert(key.into(), value.into());
         }
+        Ok(values)
+    }
+    fn render(&self, provided: &[String]) -> Result<String> {
+        let values = self.values(provided)?;
         let mut output = String::new();
         for part in parts(&self.prompt)? {
             output.push_str(match part {
@@ -267,6 +271,25 @@ pub fn show(cli: &Cli, name: &str, render: bool) -> Result<String> {
         p.prompt
     ))
 }
+
+/// Export a single definition, retaining placeholders and saving explicit variable defaults.
+pub fn export(cli: &Cli, name: &str, new_name: &str) -> Result<String> {
+    config::validate_name(new_name).context("invalid exported preset name")?;
+    if builtins().contains_key(new_name) {
+        bail!("exported preset cannot replace builtin {new_name}; choose another --name");
+    }
+    let mut preset = get(cli, name)?;
+    preset.defaults = preset.values(&cli.vars)?;
+    let output = toml::to_string_pretty(&File {
+        version: 1,
+        presets: BTreeMap::from([(new_name.to_owned(), preset)]),
+    })
+    .context("cannot render exported preset")?;
+    if output.len() as u64 > MAX_FILE {
+        bail!("exported presets file exceeds 256 KiB");
+    }
+    Ok(output)
+}
 pub fn init(cli: &Cli) -> Result<String> {
     if !cli.vars.is_empty() {
         bail!("presets init does not accept --var");
@@ -329,6 +352,41 @@ pub fn apply(cli: &mut Cli) -> Result<()> {
 mod tests {
     use super::*;
     use clap::Parser;
+    #[test]
+    fn definitions_keep_placeholders_unresolved_values_and_json_flags_on_roundtrip() {
+        let preset = Preset {
+            description: "A reusable definition".into(),
+            prompt: "For {{team}}, extract {{field}}; {{team}}".into(),
+            json: true,
+            defaults: BTreeMap::from([("team".into(), "support".into())]),
+        };
+        let values = preset
+            .values(&["team=研发 {{literal}}\nteam".into()])
+            .unwrap();
+        assert_eq!(values["team"], "研发 {{literal}}\nteam");
+        assert!(!values.contains_key("field"));
+        let file = File {
+            version: 1,
+            presets: BTreeMap::from([(
+                "copy".into(),
+                Preset {
+                    defaults: values,
+                    ..preset
+                },
+            )]),
+        };
+        let exported = toml::to_string_pretty(&file).unwrap();
+        let parsed: File = toml::from_str(&exported).unwrap();
+        assert_eq!(parsed.version, 1);
+        let copy = &parsed.presets["copy"];
+        assert!(copy.json);
+        assert!(copy.prompt.contains("{{field}}"));
+        assert!(copy.render(&[]).is_err());
+        assert_eq!(
+            copy.render(&["field=id".into()]).unwrap(),
+            "For 研发 {{literal}}\nteam, extract id; 研发 {{literal}}\nteam"
+        );
+    }
     #[test]
     fn variables_are_literal_bounded_and_checked() {
         let mut p = Preset {

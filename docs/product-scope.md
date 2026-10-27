@@ -95,3 +95,8 @@ existing lexical selector, adds no tool names or permissions, and stores no data
 Since v0.18.0, `jsonl-select` applies one explicit pointer to every JSONL record, with
 complete-result failure and original numeric/string tokens. It is shared by CLI plans
 and transform_input, adding no tool name or permission. See [record selection](jsonl-selection.md).
+
+Since v0.19.0, `presets export` copies one explicit builtin/custom definition into readable
+version-1 TOML under a required custom name, optionally saving literal variable defaults.
+It shortens user customization without capturing input, model credentials, permissions or
+task history. Exported files are explicitly selected, not automatically installed or merged.

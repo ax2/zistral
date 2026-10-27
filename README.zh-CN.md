@@ -17,7 +17,7 @@ git diff | zi "生成一句简洁的提交说明"
 | 平台 | 安装包 | 安装方法 |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | 双击安装，无需管理员权限，自动添加用户 PATH 和开始菜单入口 |
-| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.18.0-linux-amd64.deb` |
+| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.19.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | 双击安装，命令放到 `/usr/local/bin/zi` |
 
 安装后直接运行 `zi`。Windows 安装结束可立即启动，或在开始菜单打开 zi；
@@ -179,7 +179,7 @@ zi --config-example -o example.toml
 ```
 
 `-o/--output FILE` 保存完整 UTF-8 结果，stdout 不输出内容。适用于单次模型任务、离线 data、
-计数/选择及配置示例；管理命令和无指令的交互会话拒绝文件目标。`--output -` 保留正常标准输出
+计数/选择及配置示例；预设 export 可保存可复用定义；其他管理命令和无指令的交互会话拒绝文件目标。`--output -` 保留正常标准输出
 与流式行为；`--force` 只能搭配真实文件路径。
 
 默认不覆盖已有文件，只有显式 `--force` 才允许替换已有普通文件。父目录必须已存在；读取输入
@@ -421,3 +421,16 @@ zi data --recipe docs/examples/event-ids.toml -i events.jsonl -o ids.json
 或后续记录格式错误时整批失败，报告记录位置，不输出半成品，也不替换已有 `-o` 目标。
 同样可由现有 `transform_input` 工具调用；离线 `zi data` 不需要模型配置。
 [规则、配方导出、限制与示例](docs/jsonl-selection.md)。
+
+## 导出并定制常用场景
+
+```sh
+zi presets export translate --name translate-ja --var language=Japanese -o team-presets.toml
+zi --presets team-presets.toml presets render translate-ja
+zi --presets team-presets.toml -s translate-ja -i notes.txt
+```
+
+将一个内置或自定义预设导出为可加载的 version=1 TOML，保留模板变量、描述和 JSON 规则。
+`--var` 保存新的字面默认值；导出离线执行，不读取管道数据或授予工具权限。`--name` 必须
+是新的自定义名称，不能占用内置名称。文件默认不覆盖；`--force` 替换整个目标库，不做合并。
+[导出与预览的区别、示例和限制](docs/preset-export.md)。

@@ -44,3 +44,8 @@ fix concerns operation selectors and conflicting template input/output modes; it
 redefine all benign shared flags, environment parsing or existing numeric option validation.
 
 No new commands, operations, dependencies, model tools, config migrations or memory files.
+
+Since v0.19.0, only `presets export NAME --name CUSTOM_NAME` also supports the shared
+`-o/--output` writer. It produces reusable TOML after validating names/defaults, ignores
+piped stdin and rejects explicit input/model instructions, JSON/stream flags and project
+selectors. Other management actions still reject output files. See [preset export](preset-export.md).

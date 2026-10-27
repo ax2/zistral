@@ -98,6 +98,7 @@ fn project_selectors_are_rejected_for_every_nonmodel_mode_even_with_no_tools() {
         vec!["config", "--manual"],
         vec!["presets", "list"],
         vec!["presets", "render", "translate"],
+        vec!["presets", "export", "translate", "--name", "team-translate"],
         vec!["presets", "init"],
     ];
     for project in [

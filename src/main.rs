@@ -154,7 +154,7 @@ enum Commands {
         #[arg(long)]
         show_plan: bool,
     },
-    /// List, inspect, render or initialize reusable task presets (offline)
+    /// List, inspect, render, export or initialize reusable task presets (offline)
     Presets {
         #[command(subcommand)]
         action: Option<PresetAction>,
@@ -190,6 +190,14 @@ enum PresetAction {
     Show { name: String },
     /// Preview a resolved prompt; accepts --var NAME=VALUE
     Render { name: String },
+    /// Export one reusable TOML preset; --var saves new defaults without rendering the template
+    Export {
+        /// Source builtin or user-defined preset
+        name: String,
+        /// Required custom name in the exported definition; cannot replace a builtin
+        #[arg(long = "name")]
+        new_name: String,
+    },
     /// Create an example user preset file; never overwrite an existing file
     Init,
 }
@@ -234,12 +242,19 @@ fn run(mut cli: Cli) -> Result<()> {
         bail!("--retries is for model tasks only; diagnostics and offline commands do not retry");
     }
     if cli.output.is_some()
-        && cli
-            .command
-            .as_ref()
-            .is_some_and(|c| !matches!(c, Commands::Data { .. }))
+        && cli.command.as_ref().is_some_and(|c| {
+            !matches!(
+                c,
+                Commands::Data { .. }
+                    | Commands::Presets {
+                        action: Some(PresetAction::Export { .. })
+                    }
+            )
+        })
     {
-        bail!("--output is available for data/model tasks, not management commands");
+        bail!(
+            "--output is available for data/model tasks and presets export, not other management commands"
+        );
     }
     if cli.output.as_ref().is_some_and(|p| p.as_os_str() == "-") {
         if cli.force {
@@ -332,6 +347,13 @@ fn run(mut cli: Cli) -> Result<()> {
             }
             Some(PresetAction::Show { name }) => presets::show(&cli, name, false)?,
             Some(PresetAction::Render { name }) => presets::show(&cli, name, true)?,
+            Some(PresetAction::Export { name, new_name }) => {
+                let output = presets::export(&cli, name, new_name)?;
+                if let Some(target) = prepare_output(&cli)? {
+                    return save_output(&output, target, &cli, !output.ends_with('\n'));
+                }
+                output
+            }
             Some(PresetAction::Init) => presets::init(&cli)?,
         };
         return write_output(&output);

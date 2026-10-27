@@ -150,3 +150,8 @@ before a completed, validated turn. See [provider-turn contract](provider-turns.
 Since v0.18.0, `jsonl-select` applies one explicit pointer to every JSONL record, with
 complete-result failure and original numeric/string tokens. It is shared by CLI plans
 and transform_input, adding no tool name or permission. See [record selection](jsonl-selection.md).
+
+`presets export` (v0.19.0) is an offline CLI path before model configuration/input reads.
+It serializes one renamed definition after shared variable validation, preserving templates
+and JSON flags rather than rendering or contacting a model. Explicit result files reuse
+output.rs. It does not change Agent dispatch, tools, protocol histories or task boundaries.

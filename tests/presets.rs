@@ -139,6 +139,331 @@ fn offline_catalog_init_render_and_no_clobber() {
 }
 
 #[test]
+fn exported_builtin_roundtrips_as_editable_toml_with_literal_defaults() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join("invalid-model.toml"), "PRIVATE_INVALID_MODEL").unwrap();
+    let value = "研发 {{not_expanded}}\nline=two";
+    let variable = format!("language={value}");
+    let args = [
+        "--config",
+        "invalid-model.toml",
+        "presets",
+        "export",
+        "translate",
+        "--name",
+        "team-translate",
+        "--var",
+        &variable,
+    ];
+    let out = run(root, &args, b"PRIVATE_INPUT\xff");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(out.stderr.is_empty());
+    let definition: toml::Value =
+        toml::from_str(std::str::from_utf8(&out.stdout).unwrap()).unwrap();
+    assert_eq!(definition["version"].as_integer(), Some(1));
+    let presets = definition["presets"].as_table().unwrap();
+    assert_eq!(presets.len(), 1);
+    assert!(
+        presets["team-translate"]["prompt"]
+            .as_str()
+            .unwrap()
+            .contains("{{language}}")
+    );
+    assert_eq!(
+        presets["team-translate"]["defaults"]["language"].as_str(),
+        Some(value)
+    );
+    assert_eq!(presets["team-translate"]["json"].as_bool(), Some(false));
+    assert!(!String::from_utf8_lossy(&out.stdout).contains("PRIVATE"));
+    std::fs::write(root.join("copy.toml"), &out.stdout).unwrap();
+    let rendered = run(
+        root,
+        &[
+            "--presets",
+            "copy.toml",
+            "presets",
+            "render",
+            "team-translate",
+        ],
+        b"ignored",
+    );
+    assert!(rendered.status.success());
+    assert!(String::from_utf8_lossy(&rendered.stdout).contains(value));
+    let override_out = run(
+        root,
+        &[
+            "--presets",
+            "copy.toml",
+            "presets",
+            "render",
+            "team-translate",
+            "--var",
+            "language=French",
+        ],
+        b"",
+    );
+    assert!(override_out.status.success());
+    assert!(String::from_utf8_lossy(&override_out.stdout).contains("French"));
+    let stdout_out = run(
+        root,
+        &[
+            "presets",
+            "export",
+            "translate",
+            "--name",
+            "other",
+            "-o",
+            "-",
+        ],
+        b"",
+    );
+    assert!(stdout_out.status.success());
+    assert!(
+        toml::from_str::<toml::Value>(std::str::from_utf8(&stdout_out.stdout).unwrap()).is_ok()
+    );
+    assert!(!root.join("config").exists());
+}
+
+#[test]
+fn exported_presets_use_success_only_file_saving_without_merging_or_source_changes() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let source = b"version=1\n[presets.custom]\ndescription='For a team'\nprompt='For {{team}}: {{field}}'\njson=true\n[presets.custom.defaults]\nteam='support'\n[presets.unrelated]\ndescription='Other'\nprompt='Other prompt'\n";
+    std::fs::write(root.join("source.toml"), source).unwrap();
+    let out = run(
+        root,
+        &[
+            "--presets",
+            "source.toml",
+            "presets",
+            "export",
+            "custom",
+            "--name",
+            "copy",
+            "-o",
+            "copy.toml",
+        ],
+        b"not read",
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(out.stdout.is_empty() && out.stderr.is_empty());
+    let before = std::fs::read(root.join("copy.toml")).unwrap();
+    let exported: toml::Value = toml::from_str(std::str::from_utf8(&before).unwrap()).unwrap();
+    assert_eq!(exported["presets"].as_table().unwrap().len(), 1);
+    assert!(exported["presets"]["copy"]["json"].as_bool().unwrap());
+    let missing = run(
+        root,
+        &["--presets", "copy.toml", "presets", "render", "copy"],
+        b"",
+    );
+    assert!(!missing.status.success());
+    assert!(String::from_utf8_lossy(&missing.stderr).contains("missing variable field"));
+    let args = [
+        "presets",
+        "export",
+        "translate",
+        "--name",
+        "localized",
+        "--var",
+        "language=Japanese",
+        "-o",
+        "copy.toml",
+    ];
+    let out = run(root, &args, b"");
+    assert!(!out.status.success() && out.stdout.is_empty());
+    assert_eq!(std::fs::read(root.join("copy.toml")).unwrap(), before);
+    let mut force = args.to_vec();
+    force.push("--force");
+    let out = run(root, &force, b"");
+    assert!(out.status.success() && out.stdout.is_empty() && out.stderr.is_empty());
+    let after = std::fs::read(root.join("copy.toml")).unwrap();
+    assert_ne!(after, before);
+    assert_eq!(std::fs::read(root.join("source.toml")).unwrap(), source);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            std::fs::metadata(root.join("copy.toml"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+    }
+    assert_eq!(std::fs::read_dir(root).unwrap().count(), 2);
+}
+
+#[test]
+fn exported_json_presets_reuse_in_all_protocols_without_permission_or_input_leaks() {
+    for api in ["chat", "responses", "anthropic"] {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let out = run(
+            root,
+            &[
+                "presets",
+                "export",
+                "extract",
+                "--name",
+                "ticket",
+                "-o",
+                "ticket.toml",
+            ],
+            b"PRIVATE_INPUT",
+        );
+        assert!(out.status.success());
+        let definition = std::fs::read(root.join("ticket.toml")).unwrap();
+        assert!(!String::from_utf8_lossy(&definition).contains("PRIVATE_INPUT"));
+        let (url, server) = model(api, r#"{"ok":true}"#);
+        let out = run(
+            root,
+            &[
+                "--api",
+                api,
+                "--base-url",
+                &url,
+                "--model",
+                "fixture",
+                "--presets",
+                "ticket.toml",
+                "-s",
+                "ticket",
+                "requested fields",
+            ],
+            b"PRIVATE_INPUT {{not_expanded}}",
+        );
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(out.stdout, b"{\"ok\":true}\n");
+        assert!(out.stderr.is_empty());
+        let request = server.join().unwrap();
+        assert_eq!(request["stream"], false);
+        assert_eq!(request["tools"].as_array().unwrap().len(), 3);
+        let key = if api == "responses" {
+            "input"
+        } else {
+            "messages"
+        };
+        let messages = request[key].as_array().unwrap();
+        let prompt = messages.last().unwrap()["content"].as_str().unwrap();
+        assert!(prompt.contains("requested fields") && !prompt.contains("PRIVATE_INPUT"));
+        assert!(messages.iter().any(|m| {
+            m["content"]
+                .as_str()
+                .is_some_and(|s| s.contains("PRIVATE_INPUT {{not_expanded}}"))
+        }));
+        assert_eq!(std::fs::read(root.join("ticket.toml")).unwrap(), definition);
+        assert_eq!(std::fs::read_dir(root).unwrap().count(), 1);
+    }
+}
+
+#[test]
+fn export_validation_finishes_with_open_stdin_and_never_probes_a_model() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join("keep.toml"), b"original").unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    for mut args in [
+        vec!["presets", "export", "translate", "--name", "copy"],
+        vec!["presets", "export", "translate", "--name", "translate"],
+        vec!["presets", "export", "missing", "--name", "copy"],
+        vec!["presets", "export", "translate", "--name", "bad/name"],
+        vec![
+            "presets",
+            "export",
+            "translate",
+            "--name",
+            "copy",
+            "--var",
+            "unused=PRIVATE_VALUE",
+        ],
+        vec![
+            "presets",
+            "export",
+            "translate",
+            "--name",
+            "copy",
+            "--var",
+            "language=French",
+            "--var",
+            "language=Japanese",
+        ],
+        vec![
+            "presets",
+            "export",
+            "translate",
+            "--name",
+            "copy",
+            "-i",
+            "missing.txt",
+        ],
+    ] {
+        let valid = args == ["presets", "export", "translate", "--name", "copy"];
+        args.extend(["-o", "keep.toml", "--force"]);
+        let mut child = command(root)
+            .args(["--base-url", &url, "--model", "fixture"])
+            .args(&args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let stdin = child.stdin.take().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while child.try_wait().unwrap().is_none() {
+            if Instant::now() > deadline {
+                child.kill().ok();
+                panic!("export waited for stdin");
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        drop(stdin);
+        let out = child.wait_with_output().unwrap();
+        assert_eq!(
+            out.status.success(),
+            valid,
+            "{args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(out.stdout.is_empty());
+        assert!(!String::from_utf8_lossy(&out.stderr).contains("PRIVATE_VALUE"));
+        if valid {
+            std::fs::write(root.join("keep.toml"), b"original").unwrap();
+        }
+        assert_eq!(std::fs::read(root.join("keep.toml")).unwrap(), b"original");
+        assert_eq!(std::fs::read_dir(root).unwrap().count(), 1);
+        assert!(matches!(listener.accept(),Err(e) if e.kind()==std::io::ErrorKind::WouldBlock));
+    }
+    for action in [
+        vec!["presets", "list"],
+        vec!["presets", "show", "translate"],
+        vec!["presets", "render", "translate"],
+        vec!["presets", "init"],
+    ] {
+        let mut args = action;
+        args.extend(["-o", "keep.toml", "--force"]);
+        let out = run(root, &args, b"");
+        assert!(!out.status.success());
+        assert_eq!(std::fs::read(root.join("keep.toml")).unwrap(), b"original");
+    }
+}
+
+#[test]
 fn builtin_translation_preserves_input_and_permissions_all_protocols() {
     for api in ["chat", "responses", "anthropic"] {
         let dir = tempfile::tempdir().unwrap();

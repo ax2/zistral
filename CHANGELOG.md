@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.19.0 — 2026-10-27
+
+- Add offline `presets export NAME --name CUSTOM_NAME` to copy one builtin/custom task
+  preset into reusable version-1 TOML, retaining its template, description and JSON rules.
+- Save explicit `--var` overrides as literal defaults while keeping placeholders and unresolved
+  required variables. Reuse existing template validation, preset loading and per-task overrides.
+- Support stdout or the shared `-o` result writer with no-clobber by default and explicit
+  whole-file replacement; reject conflicting modes before output preparation. Do not merge
+  libraries, capture input/model credentials or grant tools. No new dependencies or memory.
+
 ## 0.18.0 — 2026-10-27
 
 - Add offline `jsonl-select` to extract one value from every JSONL record using an explicit
