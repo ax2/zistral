@@ -20,7 +20,7 @@ Download a native installer from [Releases](https://github.com/ax2/zistral/relea
 | Platform | Package | Installation |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | Per-user installer; adds PATH and a Start menu launcher; no administrator required |
-| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.25.0-linux-amd64.deb` |
+| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.25.1-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | Open the package; installs `/usr/local/bin/zi` |
 
 Then type `zi`. On first launch, choose an existing Codex, WorkBuddy or dsh configuration,
@@ -687,3 +687,7 @@ path, including spaces. Only the latest successful result is retained (at most 1
 process memory); a new task, /clear, /config or successful /use discards it. Complete streamed
 answers can be saved, partial/failed answers cannot. No extra request or chat history is sent.
 See [interactive export](docs/interactive-export.md) for JSON, file and path boundaries.
+
+Complete model answers printed directly to a terminal also remove provider terminal controls
+under `--plain` or `TERM=dumb`. Pipes, explicit files and `/save` retain original text and
+existing newline rules; see [terminal output boundaries](docs/terminal-output.md).

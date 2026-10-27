@@ -499,6 +499,8 @@ fn save_output(
 fn emit(output: &str, cli: &Cli) -> Result<()> {
     if ui::enabled(cli) && !cli.count && cli.select.is_none() {
         ui::result(output, cli)
+    } else if !cli.count && cli.select.is_none() && io::stdout().is_terminal() {
+        write_output(&ui::clean(output))
     } else {
         write_output(output)
     }

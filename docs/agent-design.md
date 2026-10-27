@@ -204,3 +204,9 @@ JSON is validated and compacted before retention. Nothing retained is added to a
 regular-file/revision checks and final publication. The unquoted remainder is a literal OS
 path, not shell syntax; no config, metadata or history is written automatically. Model
 project permissions and each fresh project Session stay unchanged. See [interactive export](interactive-export.md).
+
+Since v0.25.1, complete model answers sent directly to a terminal use the existing
+control-sequence cleaner even when rich UI is disabled. This is a display boundary only:
+pipe/file text, retained /save results, valid JSON tokens, offline data operations and
+stream decoding keep their contracts. Agent/project tools and permissions are unchanged.
+See [terminal output](terminal-output.md).

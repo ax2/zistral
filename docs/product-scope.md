@@ -142,3 +142,9 @@ complete-result behavior; discarded lines still count toward the 100000-line cap
 case-sensitive raw-line matching, not regex, structured predicates or implicit redaction.
 It adds no dependencies, model tool names, permissions, Agent-loop logic or memory.
 See [line filtering](line-filtering.md).
+
+Since v0.25.1, complete model answers sent directly to a terminal use the existing
+control-sequence cleaner even when rich UI is disabled. This is a display boundary only:
+pipe/file text, retained /save results, valid JSON tokens, offline data operations and
+stream decoding keep their contracts. Agent/project tools and permissions are unchanged.
+See [terminal output](terminal-output.md).

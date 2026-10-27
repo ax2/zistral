@@ -459,3 +459,51 @@ fn real_terminal_file_output_disables_auto_stream_and_shows_saved_status_only() 
     );
     no_temporary_files(root.path());
 }
+
+#[test]
+fn terminal_control_cleanup_never_rewrites_redirected_or_explicit_file_results() {
+    let payload = "BEFORE\x1b[31mCOLOR\x1b[0m\x1b]0;RAW_TITLE_SENTINEL\x07AFTER\r\nsecond line\n";
+    for api in ["chat", "responses", "anthropic"] {
+        for plain in [false, true] {
+            for file in [false, true] {
+                let dir = tempfile::tempdir().unwrap();
+                let root = dir.path();
+                let (url, server) = model(api, payload, 200, None);
+                let mut args = vec![
+                    "--api",
+                    api,
+                    "--base-url",
+                    &url,
+                    "--model",
+                    "fixture",
+                    "--no-stream",
+                ];
+                if plain {
+                    args.push("--plain");
+                }
+                if file {
+                    args.extend(["-o", "result.txt"]);
+                }
+                args.push("return raw text");
+                let out = invoke(root, &args, b"");
+                assert!(
+                    out.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&out.stderr)
+                );
+                if file {
+                    assert!(out.stdout.is_empty());
+                    assert_eq!(
+                        std::fs::read(root.join("result.txt")).unwrap(),
+                        payload.as_bytes()
+                    );
+                } else {
+                    assert_eq!(out.stdout, payload.as_bytes());
+                }
+                assert!(out.stderr.is_empty());
+                server.join().unwrap();
+                no_temporary_files(root);
+            }
+        }
+    }
+}

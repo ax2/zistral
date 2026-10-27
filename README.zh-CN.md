@@ -17,7 +17,7 @@ git diff | zi "生成一句简洁的提交说明"
 | 平台 | 安装包 | 安装方法 |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | 双击安装，无需管理员权限，自动添加用户 PATH 和开始菜单入口 |
-| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.25.0-linux-amd64.deb` |
+| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.25.1-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | 双击安装，命令放到 `/usr/local/bin/zi` |
 
 安装后直接运行 `zi`。Windows 安装结束可立即启动，或在开始菜单打开 zi；
@@ -510,3 +510,6 @@ zi data --step lines-include:ERROR --step lines-exclude:healthcheck -i app.log |
 仅在进程内保留最近一次成功结果，最多 16 MiB；新任务、/clear、/config 和成功的 /use 会清除它。
 完整流式回答也能保存，截断、失败或非法 JSON 回答不能保存，不会误用旧结果。保存不发送模型请求，
 保留的结果也不会作为聊天历史发给模型。见 [交互结果导出](docs/interactive-export.md)。
+
+完整模型回答直接显示到终端时，`--plain` 或 `TERM=dumb` 也会清理模型返回的终端控制序列。
+管道、显式文件和 `/save` 保留原始内容与既有换行规则；见 [终端输出边界](docs/terminal-output.md)。

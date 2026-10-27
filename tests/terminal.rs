@@ -11,6 +11,16 @@ fn terminal(
     plain: bool,
     answers: &[(&str, &str)],
 ) -> String {
+    terminal_with_environment(args, home, plain, answers, &[])
+}
+
+fn terminal_with_environment(
+    args: &[&str],
+    home: &std::path::Path,
+    plain: bool,
+    answers: &[(&str, &str)],
+    environment: &[(&str, &str)],
+) -> String {
     let pair = native_pty_system()
         .openpty(PtySize {
             rows: 40,
@@ -35,6 +45,7 @@ fn terminal(
         "ZI_API_KEY",
         "ZI_CONFIG",
         "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
         "NO_COLOR",
         "HTTP_PROXY",
         "HTTPS_PROXY",
@@ -52,6 +63,9 @@ fn terminal(
     command.env("XDG_CONFIG_HOME", home.join("config"));
     command.env("NO_PROXY", "*");
     command.env("TERM", "xterm-256color");
+    for (key, value) in environment {
+        command.env(*key, *value);
+    }
     let mut child = pair.slave.spawn_command(command).unwrap();
     drop(pair.slave);
     let mut reader = pair.master.try_clone_reader().unwrap();
@@ -541,4 +555,41 @@ fn interactive_export_does_not_reserve_piped_slash_prompts_or_create_hidden_resu
         .map(|p| p.unwrap().file_name())
         .collect();
     assert_eq!(files, vec![std::ffi::OsString::from("config")]);
+}
+
+#[test]
+fn terminal_controls_in_complete_model_answers_are_removed_when_rich_display_is_disabled() {
+    let payload = "BEFORE\x1b[31mCOLOR_TEXT\x1b[0m\x1b]0;PROVIDER_TITLE_SENTINEL\x07\x1b]8;;urn:zi:provider-link\x1b\\LINK_TEXT\x1b]8;;\x1b\\SAFE_AFTER\n";
+    for api in ["chat", "responses", "anthropic"] {
+        for plain in [true, false] {
+            let home = tempfile::tempdir().unwrap();
+            let (url, server) = export_server(vec![export_reply(api, payload, false, true)]);
+            export_config(home.path(), &url, api);
+            let output = terminal_with_environment(
+                &["--no-stream"],
+                home.path(),
+                plain,
+                &[
+                    ("zi>", "render controls"),
+                    ("SAFE_AFTER", "/save raw.txt"),
+                    ("Saved raw.txt", "/exit"),
+                    ("Goodbye.", ""),
+                ],
+                if plain { &[] } else { &[("TERM", "dumb")] },
+            );
+            assert!(
+                !output.contains("PROVIDER_TITLE_SENTINEL"),
+                "provider title sequence reached terminal: {api},plain={plain}"
+            );
+            assert!(!output.contains("urn:zi:provider-link"));
+            for word in ["BEFORE", "COLOR_TEXT", "LINK_TEXT", "SAFE_AFTER"] {
+                assert!(output.contains(word));
+            }
+            assert_eq!(
+                std::fs::read(home.path().join("raw.txt")).unwrap(),
+                payload.as_bytes()
+            );
+            assert_independent_export_requests(api, &server.join().unwrap(), &["render controls"]);
+        }
+    }
 }

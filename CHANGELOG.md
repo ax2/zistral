@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.25.1 — 2026-10-27
+
+- Sanitize complete model answers sent directly to a terminal even when rich display is
+  disabled by `--plain`, `TERM=dumb` or unavailable stderr terminal output. Reuse the
+  existing terminal-control cleaner; text, line breaks and tabs remain readable.
+- Preserve raw model text and existing newline rules in pipes, redirected output,
+  explicit result files and interactive `/save`. Stored results are not rewritten for display.
+- Add all-protocol plain/dumb-terminal and exact pipe/file-byte regression tests. Keep
+  streaming, offline data operations, model requests, tools, permissions and dependencies unchanged.
+
 ## 0.25.0 — 2026-10-27
 
 - Add interactive `/save PATH` for the latest completed answer and `/save! PATH` for
