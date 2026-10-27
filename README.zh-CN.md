@@ -17,7 +17,7 @@ git diff | zi "生成一句简洁的提交说明"
 | 平台 | 安装包 | 安装方法 |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | 双击安装，无需管理员权限，自动添加用户 PATH 和开始菜单入口 |
-| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.20.0-linux-amd64.deb` |
+| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.21.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | 双击安装，命令放到 `/usr/local/bin/zi` |
 
 安装后直接运行 `zi`。Windows 安装结束可立即启动，或在开始菜单打开 zi；
@@ -447,3 +447,15 @@ zi data --recipe docs/examples/csv-ids.toml -i table.csv -o ids.json
 所有单元格保留为 JSON 字符串，不猜测数字或空值；前导零和大整数文本不变。引号错误、
 空记录或列数不齐会整批失败，不输出半成品。现有 `transform_input` 也可调用，无新工具权限。
 [格式约定、资源限制、错误与示例](docs/csv-import.md)。
+
+## 将 JSONL 导出为 CSV
+
+```sh
+zi data jsonl-to-csv -i records.jsonl -o table.csv
+zi data --recipe docs/examples/api-csv.toml -i response.json
+```
+
+首条扁平对象定义列顺序，其余记录可调换键顺序，但必须具有相同的唯一列。字符串解码，
+数字原文本、布尔和 null 输出为单元格文本；统一引用全部字段，使用 LF 记录结束符且无 BOM。
+缺列、多列、重复键、嵌套值和坏记录会失败，不交付半份结果。CSV 不保存 JSON 类型，
+引用也不能控制电子表格的类型推断或净化公式内容。规则和限制见 [CSV 导出](docs/csv-export.md)。

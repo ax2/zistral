@@ -1,0 +1,11 @@
+version = 1
+
+[[steps]]
+operation = "json-select"
+pointer = "/data"
+
+[[steps]]
+operation = "array-to-jsonl"
+
+[[steps]]
+operation = "jsonl-to-csv"

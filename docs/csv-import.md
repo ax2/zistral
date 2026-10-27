@@ -49,7 +49,9 @@ CSV quoting is decoded into the cell value, then encoded as JSON, not copied byt
 This is a documented zi dialect inspired by common [CSV conventions](https://www.rfc-editor.org/rfc/rfc4180),
 with Unicode and LF support. It does not promise to accept every spreadsheet export, TSV,
 semicolon-separated CSV, comments, `sep=` directives, alternate encodings or compressed files.
-It is an import operation, not a spreadsheet/formula evaluator or a CSV export facility.
+This import operation does not evaluate spreadsheets/formulas. Since v0.21.0, the separate
+[`jsonl-to-csv` operation](csv-export.md) exports scalar object records as CSV; reimport still
+turns every cell into a string.
 
 ## Validation and failure behavior
 

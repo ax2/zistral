@@ -45,7 +45,7 @@ The full project mode has 15 tools. Data mode exposes count/select/transform; re
 excludes file mutation and arbitrary shell execution, including enforcement if a provider
 requests tools that were not advertised. `--no-tools` disables project capabilities too.
 
-`transforms.rs` implements eleven deterministic operations on explicit input, shared by the
+`transforms.rs` implements twelve deterministic operations on explicit input, shared by the
 offline `zi data` command and the `transform_input` tool. They do not access a model,
 filesystem or shell. JSON syntax is checked with serde's IgnoredAny; a lexical formatter
 changes only insignificant whitespace, preserving number/string tokens, key order and
@@ -161,3 +161,10 @@ JSONL string-valued objects. A quote/record preflight precedes csv-reader decodi
 headers and exact row widths are required. Shared pipelines/tools retain original-input
 and final-success-only output rules. It adds csv/csv-core packages, not tool names or rights.
 See [CSV import](csv-import.md).
+
+Since v0.21.0, `jsonl-to-csv` exports nonempty scalar-valued objects with first-record
+column order and exact subsequent column sets. Numeric tokens become exact text, strings
+decode, every CSV field is quoted. Nested values and ambiguous columns fail; CSV has no
+JSON type metadata or spreadsheet formula sanitization. The shared bounded pipeline and
+original-input tools gain no new names, dependencies, permissions or memory.
+See [CSV export](csv-export.md).

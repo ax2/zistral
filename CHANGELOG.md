@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.21.0 — 2026-10-27
+
+- Add offline `jsonl-to-csv` for nonempty flat scalar JSONL objects. The first object
+  defines column order; later objects may reorder keys but must have the same unique columns.
+- Decode strings, preserve exact numeric tokens and export booleans/null as text. Quote all
+  fields, double embedded quotes and use LF records with no BOM. Reject nested values,
+  duplicate/empty columns, shape changes, invalid records and existing resource-limit violations.
+- Share CSV output with ordered steps, version-1 recipes and transform_input in every provider
+  protocol. Add an API-array-to-CSV recipe and document CSV typing/spreadsheet boundaries.
+  Keep complete-result/file protections, with no new packages, tool names, permissions or memory.
+
 ## 0.20.0 — 2026-10-27
 
 - Add offline `csv-to-jsonl` for explicit comma CSV with a required unique nonempty header.

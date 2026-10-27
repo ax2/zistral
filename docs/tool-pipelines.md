@@ -39,7 +39,7 @@ operations fail. Only sort accepts `reverse: true`; explicit false remains valid
 individual step. The complete plan is validated before transforming input.
 
 Allowed operations are trim, dedupe, sort, json-format, json-minify, json-keys,
-jsonl-to-array, array-to-jsonl, csv-to-jsonl, json-select and jsonl-select. The last two require an explicit
+jsonl-to-array, array-to-jsonl, csv-to-jsonl, jsonl-to-csv, json-select and jsonl-select. The last two require an explicit
 string `pointer`; jsonl-select applies it to each record. No query/map/filter expressions, shell commands,
 file names, includes, variables or user-loaded code. JSON formatting/conversion retains
 numeric/string tokens, object order and repeated keys. Line operations use LF and their
@@ -69,3 +69,10 @@ JSONL string-valued objects. A quote/record preflight precedes csv-reader decodi
 headers and exact row widths are required. Shared pipelines/tools retain original-input
 and final-success-only output rules. It adds csv/csv-core packages, not tool names or rights.
 See [CSV import](csv-import.md).
+
+Since v0.21.0, `jsonl-to-csv` exports nonempty scalar-valued objects with first-record
+column order and exact subsequent column sets. Numeric tokens become exact text, strings
+decode, every CSV field is quoted. Nested values and ambiguous columns fail; CSV has no
+JSON type metadata or spreadsheet formula sanitization. The shared bounded pipeline and
+original-input tools gain no new names, dependencies, permissions or memory.
+See [CSV export](csv-export.md).

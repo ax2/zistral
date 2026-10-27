@@ -3,8 +3,8 @@ use anyhow::{Context, Result, bail};
 use serde::{Serializer as _, ser::SerializeMap};
 use std::{collections::HashSet, io::Write};
 
-const MAX_COLUMNS: usize = 1024;
-const MAX_HEADER: usize = 4096;
+pub(crate) const MAX_COLUMNS: usize = 1024;
+pub(crate) const MAX_HEADER: usize = 4096;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum State {

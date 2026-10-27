@@ -41,6 +41,8 @@ pub enum Operation {
     JsonlSelect,
     /// Convert header-based comma CSV to JSONL objects; keep every cell as a string
     CsvToJsonl,
+    /// Export flat scalar JSONL objects as quoted CSV; first object defines column order
+    JsonlToCsv,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -422,6 +424,7 @@ fn transform(input: &str, step: &Step, input_limit: usize, limit: usize) -> Resu
         Operation::JsonlToArray => jsonl_to_array(input, &mut out)?,
         Operation::ArrayToJsonl => array_to_jsonl(input, &mut out)?,
         Operation::CsvToJsonl => crate::csv_input::to_jsonl(input, &mut out, MAX_ITEMS)?,
+        Operation::JsonlToCsv => crate::csv_output::from_jsonl(input, &mut out, MAX_ITEMS)?,
         Operation::JsonlSelect => jsonl_select(
             input,
             step.pointer.as_deref().expect("validated pointer"),
@@ -472,6 +475,35 @@ pub fn execute(arguments: &str, input: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn csv_export_enforces_record_depth_output_and_serialized_envelope_bounds() {
+        let step = Step {
+            operation: Operation::JsonlToCsv,
+            reverse: false,
+            pointer: None,
+        };
+        let input = "{\"x\":0}\n".repeat(MAX_ITEMS);
+        let output = transform(&input, &step, MAX_INPUT, CLI_OUTPUT).unwrap();
+        assert_eq!(output.lines().count(), MAX_ITEMS + 1);
+        assert!(transform(&(input + "{\"x\":0}\n"), &step, MAX_INPUT, CLI_OUTPUT).is_err());
+        assert!(transform("{\"x\":1}", &step, MAX_INPUT, 3).is_err());
+        let escaped = serde_json::json!({"x":"\"".repeat(20000)}).to_string();
+        assert!(
+            transform(&escaped, &step, MAX_INPUT, TOOL_OUTPUT)
+                .unwrap()
+                .len()
+                < TOOL_OUTPUT
+        );
+        assert!(execute(r#"{"operation":"jsonl-to-csv"}"#, &escaped).is_err());
+        let deep = format!("{{\"x\":{}{}}}", "[".repeat(128), "]".repeat(128));
+        assert!(
+            format!(
+                "{:#}",
+                transform(&deep, &step, MAX_INPUT, CLI_OUTPUT).unwrap_err()
+            )
+            .contains("128")
+        );
+    }
     #[test]
     fn csv_limits_keep_record_counts_and_serialized_tool_envelope_bounded() {
         let step = Step {

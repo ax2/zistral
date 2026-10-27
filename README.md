@@ -20,7 +20,7 @@ Download a native installer from [Releases](https://github.com/ax2/zistral/relea
 | Platform | Package | Installation |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | Per-user installer; adds PATH and a Start menu launcher; no administrator required |
-| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.20.0-linux-amd64.deb` |
+| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.21.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | Open the package; installs `/usr/local/bin/zi` |
 
 Then type `zi`. On first launch, choose an existing Codex, WorkBuddy or dsh configuration,
@@ -615,3 +615,17 @@ quotes and multiline cells are supported. All cells become JSON strings, preserv
 zeros and large numeric text; no automatic trimming, type inference or skipped bad records.
 The same operation is available in `transform_input`, with existing result/permission limits.
 [Dialect, resource limits, errors and examples](docs/csv-import.md).
+
+## Export JSONL records as CSV
+
+```sh
+zi data jsonl-to-csv -i records.jsonl -o table.csv
+zi data --recipe docs/examples/api-csv.toml -i response.json
+```
+
+The first flat object defines column order; later records must have the same unique columns,
+with any key order. Strings decode; number tokens, boolean and null become exact cell text.
+All fields are quoted, with LF terminators and no BOM. Missing/extra/duplicate keys, nested
+values or bad records fail without partial results. CSV has no JSON type metadata; quoting
+does not control spreadsheet inference or sanitize formula-like content.
+See [CSV export](docs/csv-export.md) for limits, typing and consumer boundaries.

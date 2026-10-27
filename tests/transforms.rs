@@ -521,6 +521,211 @@ fn csv_model_tool_recovers_and_uses_original_input_in_every_protocol() {
     }
 }
 
+#[test]
+fn csv_export_offline_recipe_and_process_pipe_keep_scalar_text_and_input_files() {
+    let root = tempfile::tempdir().unwrap();
+    let root = root.path();
+    std::fs::write(root.join("invalid.toml"), "invalid model config").unwrap();
+    let input=b"\xef\xbb\xbf{\"id\":\"0007\",\"n\":123456789012345678901234567890,\"note\":\"a,b\"}\r\n{\"note\":\"one\\r\\ntwo\",\"n\":1.2300E+400,\"id\":\"0008\"}\n";
+    std::fs::write(root.join("records.jsonl"), input).unwrap();
+    let expected=b"\"id\",\"n\",\"note\"\n\"0007\",\"123456789012345678901234567890\",\"a,b\"\n\"0008\",\"1.2300E+400\",\"one\r\ntwo\"\n";
+    let out = invoke(
+        root,
+        &[
+            "--config",
+            "invalid.toml",
+            "data",
+            "jsonl-to-csv",
+            "-i",
+            "records.jsonl",
+            "-o",
+            "table.csv",
+        ],
+        b"ignored",
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(out.stdout.is_empty());
+    assert_eq!(std::fs::read(root.join("table.csv")).unwrap(), expected);
+    let plan = invoke(
+        root,
+        &[
+            "data",
+            "--show-plan",
+            "--step",
+            "jsonl-to-csv",
+            "-o",
+            "export.toml",
+        ],
+        b"not data",
+    );
+    assert!(plan.status.success());
+    let out = invoke(
+        root,
+        &[
+            "--config",
+            "invalid.toml",
+            "data",
+            "--recipe",
+            "export.toml",
+            "-i",
+            "records.jsonl",
+        ],
+        b"",
+    );
+    assert!(out.status.success());
+    assert_eq!(out.stdout, expected);
+    assert!(out.stderr.is_empty());
+    let mut first = command(root)
+        .args(["data", "jsonl-to-csv", "-i", "records.jsonl"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let second = command(root)
+        .args([
+            "data",
+            "--step",
+            "csv-to-jsonl",
+            "--step",
+            "jsonl-select:/n",
+            "--step",
+            "jsonl-to-array",
+        ])
+        .stdin(Stdio::from(first.stdout.take().unwrap()))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let result = second.wait_with_output().unwrap();
+    assert!(first.wait().unwrap().success() && result.status.success());
+    assert_eq!(
+        result.stdout,
+        b"[\"123456789012345678901234567890\",\"1.2300E+400\"]\n"
+    );
+    assert!(result.stderr.is_empty());
+    assert_eq!(std::fs::read(root.join("records.jsonl")).unwrap(), input);
+    assert!(!root.join("config").exists());
+}
+
+#[test]
+fn csv_export_bad_late_records_and_options_protect_stdout_and_existing_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join("keep.csv"), b"KEEP").unwrap();
+    for bad in [
+        "",
+        "\n",
+        "{}",
+        "[]",
+        "\"PRIVATE\"",
+        "{\"PRIVATE\":[]}",
+        "{\"x\":1}\n{\"x\":\"ok\"}\n{\"other\":\"PRIVATE\"}\n",
+        "{\"x\":1}\n{\"x\":2,\"\\u0078\":3}",
+        "{\"x\":1}\n{\"x\":\"PRIVATE\"",
+    ] {
+        for args in [
+            vec!["data", "jsonl-to-csv"],
+            vec!["data", "jsonl-to-csv", "-o", "keep.csv", "--force"],
+        ] {
+            let out = invoke(root, &args, bad.as_bytes());
+            assert!(!out.status.success());
+            assert!(out.stdout.is_empty());
+            assert!(!String::from_utf8_lossy(&out.stderr).contains("PRIVATE"));
+            assert_eq!(std::fs::read(root.join("keep.csv")).unwrap(), b"KEEP");
+        }
+    }
+    let bad = invoke(
+        root,
+        &["data", "jsonl-to-csv"],
+        b"{\"x\":1}\n{\"x\":2}\n{\"y\":3}",
+    );
+    assert!(String::from_utf8_lossy(&bad.stderr).contains("record 3"));
+    for args in [
+        vec!["data", "jsonl-to-csv", "--reverse"],
+        vec!["data", "jsonl-to-csv", "--pointer", ""],
+        vec!["data", "--step", "jsonl-to-csv:reverse"],
+    ] {
+        let mut child = command(root)
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let held = child.stdin.take().unwrap();
+        let start = Instant::now();
+        loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                assert!(!status.success());
+                break;
+            }
+            assert!(
+                start.elapsed() < Duration::from_secs(5),
+                "invalid CSV options waited for stdin"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        drop(held);
+        let out = child.wait_with_output().unwrap();
+        assert!(out.stdout.is_empty());
+    }
+    assert!(!std::fs::read_dir(root).unwrap().any(|e| {
+        e.unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".zi-result-")
+    }));
+}
+
+#[test]
+fn csv_export_model_recovers_and_composes_from_original_input_in_every_protocol() {
+    for api in ["chat", "responses", "anthropic"] {
+        let dir = tempfile::tempdir().unwrap();
+        let input=b"{\"data\":[{\"id\":\"0007\",\"n\":123456789012345678901234567890},{\"n\":1.2300E+400,\"id\":\"0008\"}]}";
+        let steps = json!({"steps":[{"operation":"json-select","pointer":"/data"},{"operation":"array-to-jsonl"},{"operation":"jsonl-to-csv"}]});
+        let csv =
+            "\"id\",\"n\"\n\"0007\",\"123456789012345678901234567890\"\n\"0008\",\"1.2300E+400\"\n";
+        let (url, server) = model_turns(
+            api,
+            vec![
+                (json!({"operation":"jsonl-to-csv"}), Value::Null),
+                (steps.clone(), json!(csv)),
+                (
+                    json!({"operation":"jsonl-to-csv","pointer":""}),
+                    Value::Null,
+                ),
+                (steps, json!(csv)),
+            ],
+        );
+        let out = invoke(
+            dir.path(),
+            &[
+                "--api",
+                api,
+                "--base-url",
+                &url,
+                "--model",
+                "fixture",
+                "export records as CSV",
+            ],
+            input,
+        );
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(out.stdout, b"verified\n");
+        assert!(out.stderr.is_empty());
+        server.join().unwrap();
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+}
+
 fn model(api: &str, args: Value, expected: Value) -> (String, std::thread::JoinHandle<()>) {
     model_turns(api, vec![(args, expected)])
 }
@@ -640,6 +845,7 @@ fn model_turns(api: &str, calls: Vec<(Value, Value)>) -> (String, std::thread::J
                 assert!(ops.contains(&json!("json-select")));
                 assert!(ops.contains(&json!("jsonl-select")));
                 assert!(ops.contains(&json!("csv-to-jsonl")));
+                assert!(ops.contains(&json!("jsonl-to-csv")));
                 assert_eq!(schema["properties"]["pointer"]["type"], "string");
                 let steps = &schema["properties"]["steps"];
                 assert_eq!(steps["minItems"], 1);
