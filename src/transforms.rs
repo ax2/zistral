@@ -19,6 +19,10 @@ const TOOL_OUTPUT: usize = 64 * 1024;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Operation {
+    /// Keep the first explicit number of lines, preserving order and whitespace
+    LinesHead,
+    /// Keep the last explicit number of lines, preserving order and whitespace
+    LinesTail,
     /// Trim Unicode whitespace from each line; retain blank lines
     Trim,
     /// Keep the first occurrence of each exact line, preserving order
@@ -72,6 +76,12 @@ pub struct Step {
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_lines"
+    )]
+    pub lines: Option<usize>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
         deserialize_with = "projection_fields"
     )]
     pub fields: Option<Vec<crate::projection::Field>>,
@@ -89,12 +99,30 @@ fn optional_string<'de, D: serde::Deserializer<'de>>(
     String::deserialize(de).map(Some)
 }
 
+fn optional_lines<'de, D: serde::Deserializer<'de>>(
+    de: D,
+) -> std::result::Result<Option<usize>, D::Error> {
+    usize::deserialize(de).map(Some)
+}
+
 fn is_false(value: &bool) -> bool {
     !*value
 }
 
 impl Step {
     pub fn validate(&self) -> Result<()> {
+        match (self.lines, self.operation) {
+            (Some(n), Operation::LinesHead | Operation::LinesTail)
+                if (1..=MAX_ITEMS).contains(&n) => {}
+            (Some(_), Operation::LinesHead | Operation::LinesTail) => {
+                bail!("lines must be an integer from 1 to 100000")
+            }
+            (None, Operation::LinesHead | Operation::LinesTail) => bail!(
+                "line windows require explicit lines; use --lines N or step lines-head:N / lines-tail:N"
+            ),
+            (Some(_), _) => bail!("lines is only valid for lines-head or lines-tail"),
+            (None, _) => (),
+        }
         if self.reverse && self.operation != Operation::Sort {
             bail!("--reverse is only valid for sort");
         }
@@ -427,6 +455,7 @@ fn run(input: &str, operation: Operation, reverse: bool, limit: usize) -> Result
             operation,
             reverse,
             contains: None,
+            lines: None,
             pointer: None,
             fields: None,
         },
@@ -471,7 +500,9 @@ fn transform(input: &str, step: &Step, input_limit: usize, limit: usize) -> Resu
     let operation = step.operation;
     let mut out = Buffer::new(limit);
     match operation {
-        Operation::Trim
+        Operation::LinesHead
+        | Operation::LinesTail
+        | Operation::Trim
         | Operation::Dedupe
         | Operation::Sort
         | Operation::LinesInclude
@@ -481,6 +512,13 @@ fn transform(input: &str, step: &Step, input_limit: usize, limit: usize) -> Resu
                 bail!("line transformations accept at most 100000 lines");
             }
             match operation {
+                Operation::LinesHead => lines.truncate(step.lines.expect("validated lines")),
+                Operation::LinesTail => {
+                    let first = lines
+                        .len()
+                        .saturating_sub(step.lines.expect("validated lines"));
+                    lines.drain(..first);
+                }
                 Operation::Trim => lines.iter_mut().for_each(|line| *line = line.trim()),
                 Operation::Dedupe => {
                     let mut seen = HashSet::new();
@@ -562,7 +600,7 @@ pub fn execute(arguments: &str, input: &str) -> Result<String> {
     }
     let args: Args = serde_json::from_str(arguments).map_err(|_| {
         anyhow::anyhow!(
-            "transform_input requires either operation with optional reverse/pointer/fields/contains, or 1-16 steps of the same shape; do not combine them"
+            "transform_input requires either operation with optional reverse/pointer/fields/contains/lines, or 1-16 steps of the same shape; do not combine them"
         )
     })?;
     let output = match args {
@@ -621,6 +659,7 @@ mod tests {
             operation: Operation::JsonlProject,
             reverse: false,
             contains: None,
+            lines: None,
             pointer: None,
             fields: Some(vec![field.clone()]),
         };
@@ -710,6 +749,7 @@ mod tests {
             operation: Operation::JsonlToCsv,
             reverse: false,
             contains: None,
+            lines: None,
             pointer: None,
             fields: None,
         };
@@ -741,6 +781,7 @@ mod tests {
             operation: Operation::CsvToJsonl,
             reverse: false,
             contains: None,
+            lines: None,
             pointer: None,
             fields: None,
         };
@@ -773,6 +814,7 @@ mod tests {
             operation: Operation::JsonlSelect,
             reverse: false,
             contains: None,
+            lines: None,
             pointer: Some(String::new()),
             fields: None,
         };
@@ -1055,6 +1097,7 @@ mod tests {
             operation,
             reverse,
             contains: None,
+            lines: None,
             pointer: None,
             fields: None,
         };
@@ -1230,6 +1273,7 @@ mod tests {
             pointer: None,
             fields: None,
             contains: Some("x".into()),
+            lines: None,
         };
         let input = "x\n".repeat(MAX_ITEMS);
         assert_eq!(
@@ -1269,5 +1313,109 @@ mod tests {
             let error = format!("{:#}", execute(args, "PRIVATE_INPUT").unwrap_err());
             assert!(!error.contains("PRIVATE"), "{error}");
         }
+    }
+
+    #[test]
+    fn line_windows_preserve_order_spaces_duplicates_and_blank_lines() {
+        for (operation, count, expected) in [
+            ("lines-head", 1, " a \n"),
+            ("lines-head", 3, " a \n\n a \n"),
+            ("lines-tail", 2, " a \n尾\n"),
+            ("lines-tail", 1, "尾\n"),
+            ("lines-head", 20, " a \n\n a \n尾\n"),
+            ("lines-tail", 20, " a \n\n a \n尾\n"),
+        ] {
+            let args = serde_json::json!({"operation":operation,"lines":count}).to_string();
+            let result: serde_json::Value =
+                serde_json::from_str(&execute(&args, " a \r\n\r\n a \n尾").unwrap()).unwrap();
+            assert_eq!(result["output"], expected);
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(&execute(&args, "").unwrap()).unwrap()["output"],
+                ""
+            );
+        }
+        let args = r#"{"steps":[{"operation":"lines-include","contains":"ERROR"},{"operation":"lines-tail","lines":2}]}"#;
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(
+                &execute(args, "ERROR old\nINFO skip\nERROR repeat\nERROR repeat\n").unwrap()
+            )
+            .unwrap()["output"],
+            "ERROR repeat\nERROR repeat\n"
+        );
+        let tail_first = r#"{"steps":[{"operation":"lines-tail","lines":2},{"operation":"lines-include","contains":"ERROR"}]}"#;
+        let filter_first = r#"{"steps":[{"operation":"lines-include","contains":"ERROR"},{"operation":"lines-tail","lines":2}]}"#;
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(
+                &execute(tail_first, "ERROR old\nERROR mid\nINFO end\n").unwrap()
+            )
+            .unwrap()["output"],
+            "ERROR mid\n"
+        );
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(
+                &execute(filter_first, "ERROR old\nERROR mid\nINFO end\n").unwrap()
+            )
+            .unwrap()["output"],
+            "ERROR old\nERROR mid\n"
+        );
+    }
+
+    #[test]
+    fn line_window_definitions_are_explicit_strict_and_match_tool_schema() {
+        for args in [
+            r#"{"operation":"lines-head"}"#,
+            r#"{"operation":"lines-tail","lines":0}"#,
+            r#"{"operation":"lines-head","lines":100001}"#,
+            r#"{"operation":"lines-head","lines":null}"#,
+            r#"{"operation":"lines-head","lines":-1}"#,
+            r#"{"operation":"lines-head","lines":1.5}"#,
+            r#"{"operation":"lines-head","lines":"2"}"#,
+            r#"{"operation":"lines-head","lines":true}"#,
+            r#"{"operation":"lines-head","lines":2,"lines":3}"#,
+            r#"{"operation":"trim","lines":2}"#,
+            r#"{"operation":"lines-tail","lines":2,"contains":"x"}"#,
+            r#"{"operation":"lines-tail","lines":2,"reverse":true}"#,
+            r#"{"operation":"lines-head","lines":2,"pointer":""}"#,
+            r#"{"steps":[{"operation":"lines-tail","lines":2}],"lines":2}"#,
+        ] {
+            assert!(execute(args, "PRIVATE_INPUT").is_err(), "{args}");
+        }
+        let definitions = crate::data::tool_definitions();
+        let params = &definitions[2]["function"]["parameters"];
+        assert_eq!(params["properties"]["lines"]["minimum"], 1);
+        assert_eq!(
+            params["properties"]["steps"]["items"]["properties"]["lines"]["maximum"],
+            100000
+        );
+        assert!(
+            params["properties"]["operation"]["enum"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!("lines-tail"))
+        );
+    }
+
+    #[test]
+    fn line_windows_count_discarded_bytes_lines_and_final_envelope_limits() {
+        let args = r#"{"operation":"lines-head","lines":1}"#;
+        assert!(execute(args, &format!("ok\n{}", "x".repeat(MAX_INPUT))).is_err());
+        assert!(execute(args, &"x\n".repeat(MAX_ITEMS + 1)).is_err());
+        let tail = r#"{"operation":"lines-tail","lines":1}"#;
+        assert!(execute(tail, &"x\n".repeat(MAX_ITEMS + 1)).is_err());
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(
+                &execute(tail, &format!("{}end", "x\n".repeat(MAX_ITEMS - 1))).unwrap()
+            )
+            .unwrap()["output"],
+            "end\n"
+        );
+        assert!(execute(tail, &"x".repeat(TOOL_OUTPUT)).is_err());
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(
+                &execute(tail, &format!("{}\nend", "x".repeat(TOOL_OUTPUT))).unwrap()
+            )
+            .unwrap()["output"],
+            "end\n"
+        );
     }
 }

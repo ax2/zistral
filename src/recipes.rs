@@ -17,30 +17,9 @@ struct Recipe {
 pub struct Plan(Vec<Step>);
 
 impl Plan {
-    pub fn prepare(
-        operation: Option<Operation>,
-        reverse: bool,
-        pointer: Option<&str>,
-        fields: &[String],
-        contains: Option<&str>,
-        steps: &[String],
-        recipe: Option<&Path>,
-    ) -> Result<Self> {
-        if (reverse || pointer.is_some() || !fields.is_empty() || contains.is_some())
-            && operation.is_none()
-        {
-            bail!(
-                "--reverse/--pointer/--field/--contains require a single operation; put options in individual steps"
-            );
-        }
-        let plan = if let Some(operation) = operation {
-            vec![Step {
-                operation,
-                reverse,
-                pointer: pointer.map(str::to_owned),
-                fields: crate::projection::parse(fields)?,
-                contains: contains.map(str::to_owned),
-            }]
+    pub fn prepare(single: Option<Step>, steps: &[String], recipe: Option<&Path>) -> Result<Self> {
+        let plan = if let Some(step) = single {
+            vec![step]
         } else if let Some(path) = recipe {
             let mut bytes = Vec::new();
             std::fs::File::open(path)
@@ -63,14 +42,20 @@ impl Plan {
                 bail!("a data pipeline requires 1-16 steps");
             }
             steps.iter().map(|text| {
+                for (prefix, operation) in [("lines-head:", Operation::LinesHead), ("lines-tail:", Operation::LinesTail)] {
+                    if let Some(count) = text.strip_prefix(prefix) {
+                        let lines = count.parse::<usize>().map_err(|_| anyhow::anyhow!("line window count must be an integer from 1 to 100000"))?;
+                        return Ok(Step { operation, reverse: false, pointer: None, fields: None, contains: None, lines: Some(lines) });
+                    }
+                }
                 for (prefix, operation) in [("json-select:", Operation::JsonSelect), ("jsonl-select:", Operation::JsonlSelect)] {
                     if let Some(pointer) = text.strip_prefix(prefix) {
-                        return Ok(Step { operation, reverse: false, pointer: Some(pointer.to_owned()), fields: None, contains: None });
+                        return Ok(Step { operation, reverse: false, pointer: Some(pointer.to_owned()), fields: None, contains: None, lines: None });
                     }
                 }
                 for (prefix, operation) in [("lines-include:", Operation::LinesInclude), ("lines-exclude:", Operation::LinesExclude)] {
                     if let Some(contains) = text.strip_prefix(prefix) {
-                        return Ok(Step { operation, reverse: false, pointer: None, fields: None, contains: Some(contains.to_owned()) });
+                        return Ok(Step { operation, reverse: false, pointer: None, fields: None, contains: Some(contains.to_owned()), lines: None });
                     }
                 }
                 let (name, reverse) = text.strip_suffix(":reverse")
@@ -78,7 +63,7 @@ impl Plan {
                 let operation = Operation::from_str(name, false).map_err(|_| {
                     anyhow::anyhow!("unsupported --step; see zi data --help for native operations (sort:reverse is also supported)")
                 })?;
-                Ok(Step { operation, reverse, pointer: None, fields: None, contains: None })
+                Ok(Step { operation, reverse, pointer: None, fields: None, contains: None, lines: None })
             }).collect::<Result<Vec<_>>>()?
         };
         if plan.is_empty() || plan.len() > transforms::MAX_STEPS {

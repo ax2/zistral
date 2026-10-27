@@ -1941,3 +1941,99 @@ fn line_filter_tool_calls_share_schema_recover_and_restart_from_original_in_all_
         assert!(!dir.path().join("config").exists());
     }
 }
+
+#[test]
+fn offline_line_windows_are_exact_and_need_no_model_configuration() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join("invalid.toml"), "not model configuration").unwrap();
+    let input = " a \r\n\r\n a \n尾";
+    for (operation, n, expected) in [
+        ("lines-head", "3", " a \n\n a \n"),
+        ("lines-tail", "2", " a \n尾\n"),
+        ("lines-tail", "99", " a \n\n a \n尾\n"),
+    ] {
+        for flag in ["--lines", "-n"] {
+            let out = invoke(
+                root,
+                &["--config", "invalid.toml", "data", operation, flag, n],
+                input.as_bytes(),
+            );
+            assert!(
+                out.status.success(),
+                "{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            assert_eq!(out.stdout, expected.as_bytes());
+            assert!(out.stderr.is_empty());
+        }
+        assert!(
+            invoke(root, &["data", operation, "--lines", n], b"")
+                .stdout
+                .is_empty()
+        );
+    }
+    assert!(!root.join("config").exists());
+}
+
+#[test]
+fn invalid_line_windows_fail_before_data_or_output_access() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join("keep.txt"), b"keep").unwrap();
+    for mut args in [
+        vec!["data", "lines-head"],
+        vec!["data", "lines-tail", "--lines", "0"],
+        vec!["data", "lines-head", "--lines", "100001"],
+        vec!["data", "lines-head", "--lines", "1.2"],
+        vec!["data", "trim", "--lines", "2"],
+        vec!["data", "--step", "lines-tail:2", "--lines", "2"],
+        vec!["data", "--step", "lines-head:bad"],
+        vec!["data", "--step", "lines-tail:0"],
+        vec!["data", "--step", "lines-head:2:reverse"],
+    ] {
+        args.extend(["-i", "missing-input", "-o", "keep.txt", "--force"]);
+        let out = invoke(root, &args, b"ignored");
+        assert!(!out.status.success());
+        assert!(out.stdout.is_empty());
+        let error = String::from_utf8_lossy(&out.stderr);
+        assert!(!error.contains("cannot open missing-input"), "{error}");
+        assert_eq!(std::fs::read(root.join("keep.txt")).unwrap(), b"keep");
+    }
+    assert!(!std::fs::read_dir(root).unwrap().any(|p| {
+        p.unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".zi-result-")
+    }));
+}
+
+#[test]
+fn line_windows_compose_on_original_input_in_every_model_protocol() {
+    for api in ["chat", "responses", "anthropic"] {
+        let root = tempfile::tempdir().unwrap();
+        let args = json!({"steps":[{"operation":"lines-include","contains":"ERROR"},{"operation":"lines-tail","lines":2}]});
+        let (url, server) = model(api, args, json!("ERROR repeat\nERROR repeat\n"));
+        let out = invoke(
+            root.path(),
+            &[
+                "--api",
+                api,
+                "--base-url",
+                &url,
+                "--model",
+                "fixture",
+                "transform",
+            ],
+            b"ERROR old\nINFO middle\nERROR repeat\nERROR repeat\n",
+        );
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(out.stdout, b"verified\n");
+        assert!(out.stderr.is_empty());
+        server.join().unwrap();
+    }
+}

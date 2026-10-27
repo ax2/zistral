@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.26.0 — 2026-10-27
+
+- Add offline `lines-head --lines N` and `lines-tail --lines N` (`-n N`) for exact first/last
+  line windows. Require 1-100000 lines; preserve order, whitespace, duplicates and blank
+  lines, using existing LF output rules. Empty input succeeds without output.
+- Share line windows across ordered `--step` pipelines, version-1 recipes, plan export and
+  the existing transform_input tool. Compose filtering then tail selection for recent log
+  evidence; all original input bytes and discarded lines still count toward limits.
+- Reject missing, invalid or misplaced counts before input/output access. Keep complete-result
+  publication and file protection, original-input tool isolation, dependencies, tool names,
+  permissions, Agent loop, streaming and independent-task defaults.
+
 ## 0.25.2 — 2026-10-27
 
 - Preserve valid JSON string values and keys in direct terminal output: render literal

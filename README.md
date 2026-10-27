@@ -20,7 +20,7 @@ Download a native installer from [Releases](https://github.com/ax2/zistral/relea
 | Platform | Package | Installation |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | Per-user installer; adds PATH and a Start menu launcher; no administrator required |
-| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.25.2-linux-amd64.deb` |
+| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.26.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | Open the package; installs `/usr/local/bin/zi` |
 
 Then type `zi`. On first launch, choose an existing Codex, WorkBuddy or dsh configuration,
@@ -695,3 +695,7 @@ existing newline rules; see [terminal output boundaries](docs/terminal-output.md
 For `--json` model results, direct terminal output escapes literal DEL/C1 characters as
 JSON Unicode escapes so parsed values survive display. Pipes, explicit files and `/save`
 keep the existing compact JSON bytes; numeric and existing escape tokens are preserved.
+
+Select exact first/last lines offline with `zi data lines-head -n 20` or
+`zi data --step lines-include:ERROR --step lines-tail:20 -i app.log`. Counts are explicit;
+whitespace, duplicates and blank lines remain. See [line windows](docs/line-windows.md).

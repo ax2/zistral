@@ -148,3 +148,9 @@ control-sequence cleaner even when rich UI is disabled. This is a display bounda
 pipe/file text, retained /save results, valid JSON tokens, offline data operations and
 stream decoding keep their contracts. Agent/project tools and permissions are unchanged.
 See [terminal output](terminal-output.md).
+
+Since v0.26.0, lines-head/lines-tail select an explicit bounded first/last line window.
+Composing literal filtering then tail selection shortens log evidence for a focused model
+task across platforms, without a new tool name, permission, runtime or memory store.
+Counts are validated before IO and discarded lines still count toward resource limits.
+See [line windows](line-windows.md).

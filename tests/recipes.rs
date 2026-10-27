@@ -1159,3 +1159,103 @@ fn preview_validates_definition_without_claiming_data_execution_will_succeed() {
     );
     assert_eq!(std::fs::read_dir(root).unwrap().count(), 2);
 }
+
+#[test]
+fn line_window_plans_roundtrip_counts_and_preserve_pipeline_order() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let plan = invoke(
+        root,
+        &[
+            "data",
+            "--show-plan",
+            "--step",
+            "lines-include:ERROR",
+            "--step",
+            "lines-tail:2",
+            "-o",
+            "recent.toml",
+        ],
+        b"ignored",
+    );
+    assert!(
+        plan.status.success(),
+        "{}",
+        String::from_utf8_lossy(&plan.stderr)
+    );
+    assert!(plan.stdout.is_empty());
+    let text = std::fs::read_to_string(root.join("recent.toml")).unwrap();
+    assert!(text.contains("lines = 2") && text.contains("lines-tail"));
+    let out = invoke(
+        root,
+        &["data", "--recipe", "recent.toml"],
+        b"ERROR old\nINFO mid\nERROR a\nERROR b\n",
+    );
+    assert!(out.status.success());
+    assert_eq!(out.stdout, b"ERROR a\nERROR b\n");
+    let preview = invoke(
+        root,
+        &["data", "--show-plan", "--recipe", "recent.toml"],
+        b"ignored",
+    );
+    assert!(preview.status.success());
+    assert_eq!(preview.stdout, text.as_bytes());
+    let single = invoke(
+        root,
+        &["data", "lines-head", "--lines", "2", "--show-plan"],
+        b"ignored",
+    );
+    assert!(single.status.success());
+    assert!(String::from_utf8_lossy(&single.stdout).contains("lines = 2"));
+}
+
+#[test]
+fn line_window_limits_and_later_failures_preserve_existing_output() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join("keep.txt"), b"keep").unwrap();
+    for text in [
+        "version=1\n[[steps]]\noperation='lines-head'\n",
+        "version=1\n[[steps]]\noperation='lines-tail'\nlines=0\n",
+        "version=1\n[[steps]]\noperation='trim'\nlines=2\n",
+        "version=1\n[[steps]]\noperation='lines-tail'\nlines='2'\n",
+    ] {
+        std::fs::write(root.join("bad.toml"), text).unwrap();
+        let out = invoke(
+            root,
+            &[
+                "data",
+                "--recipe",
+                "bad.toml",
+                "-i",
+                "missing-input",
+                "-o",
+                "keep.txt",
+                "--force",
+            ],
+            b"",
+        );
+        assert!(!out.status.success() && out.stdout.is_empty());
+        assert!(!String::from_utf8_lossy(&out.stderr).contains("cannot open missing-input"));
+        assert_eq!(std::fs::read(root.join("keep.txt")).unwrap(), b"keep");
+    }
+    for input in [b"PRIVATE_INVALID_JSON\n".to_vec(), b"x\n".repeat(100001)] {
+        let out = invoke(
+            root,
+            &[
+                "data",
+                "--step",
+                "lines-head:1",
+                "--step",
+                "json-minify",
+                "-o",
+                "keep.txt",
+                "--force",
+            ],
+            &input,
+        );
+        assert!(!out.status.success() && out.stdout.is_empty());
+        assert_eq!(std::fs::read(root.join("keep.txt")).unwrap(), b"keep");
+        assert!(!String::from_utf8_lossy(&out.stderr).contains("PRIVATE_INVALID_JSON"));
+    }
+}

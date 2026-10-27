@@ -8,7 +8,7 @@ on:
       tag:
         description: Version tag to publish (must match Cargo.toml)
         required: true
-        default: v0.25.2
+        default: v0.26.0
 permissions:
   contents: read
 concurrency:
