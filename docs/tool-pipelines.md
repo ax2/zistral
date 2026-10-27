@@ -38,8 +38,8 @@ calls only. Unknown fields, null values, duplicated fields, mixed shapes and uns
 operations fail. Only sort accepts `reverse: true`; explicit false remains valid on any
 individual step. The complete plan is validated before transforming input.
 
-Allowed operations remain trim, dedupe, sort, json-format, json-minify, json-keys,
-jsonl-to-array, array-to-jsonl, json-select and jsonl-select. The last two require an explicit
+Allowed operations are trim, dedupe, sort, json-format, json-minify, json-keys,
+jsonl-to-array, array-to-jsonl, csv-to-jsonl, json-select and jsonl-select. The last two require an explicit
 string `pointer`; jsonl-select applies it to each record. No query/map/filter expressions, shell commands,
 file names, includes, variables or user-loaded code. JSON formatting/conversion retains
 numeric/string tokens, object order and repeated keys. Line operations use LF and their
@@ -59,7 +59,13 @@ A large intermediate may be reduced by later steps; the final step uses the smal
 budget. Over-limit results fail instead of being truncated. `--max-input` above 8 MiB does
 not raise this tool's cap. Each step is complete-buffered, not streaming.
 
-No new tool names, dependencies or project permissions. Default data mode still
+No new tool names or project permissions. CSV import adds csv/csv-core packages inside the executable. Default data mode still
 has only count_input, select_input and transform_input. `--no-tools` disables them; project
 read-only/no-exec controls are unchanged. The loop still owns model requests and observations;
 the shared native pipeline core owns deterministic computation.
+
+Since v0.20.0, `csv-to-jsonl` imports one explicit header-based comma CSV dialect into
+JSONL string-valued objects. A quote/record preflight precedes csv-reader decoding; unique
+headers and exact row widths are required. Shared pipelines/tools retain original-input
+and final-success-only output rules. It adds csv/csv-core packages, not tool names or rights.
+See [CSV import](csv-import.md).

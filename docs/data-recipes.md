@@ -96,3 +96,9 @@ selects the root. See [selection recipes](json-selection-recipes.md) for exact c
 Since v0.18.0, `jsonl-select` applies one explicit pointer to every JSONL record, with
 complete-result failure and original numeric/string tokens. It is shared by CLI plans
 and transform_input, adding no tool name or permission. See [record selection](jsonl-selection.md).
+
+Since v0.20.0, `csv-to-jsonl` imports one explicit header-based comma CSV dialect into
+JSONL string-valued objects. A quote/record preflight precedes csv-reader decoding; unique
+headers and exact row widths are required. Shared pipelines/tools retain original-input
+and final-success-only output rules. It adds csv/csv-core packages, not tool names or rights.
+See [CSV import](csv-import.md).

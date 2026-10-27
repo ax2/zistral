@@ -39,6 +39,8 @@ pub enum Operation {
     JsonSelect,
     /// Select one value from every JSONL record; emit compact JSON lines in input order
     JsonlSelect,
+    /// Convert header-based comma CSV to JSONL objects; keep every cell as a string
+    CsvToJsonl,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -419,6 +421,7 @@ fn transform(input: &str, step: &Step, input_limit: usize, limit: usize) -> Resu
         }
         Operation::JsonlToArray => jsonl_to_array(input, &mut out)?,
         Operation::ArrayToJsonl => array_to_jsonl(input, &mut out)?,
+        Operation::CsvToJsonl => crate::csv_input::to_jsonl(input, &mut out, MAX_ITEMS)?,
         Operation::JsonlSelect => jsonl_select(
             input,
             step.pointer.as_deref().expect("validated pointer"),
@@ -469,6 +472,28 @@ pub fn execute(arguments: &str, input: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn csv_limits_keep_record_counts_and_serialized_tool_envelope_bounded() {
+        let step = Step {
+            operation: Operation::CsvToJsonl,
+            reverse: false,
+            pointer: None,
+        };
+        let input = format!("h\n{}", "x\n".repeat(MAX_ITEMS));
+        assert_eq!(
+            transform(&input, &step, MAX_INPUT, CLI_OUTPUT)
+                .unwrap()
+                .lines()
+                .count(),
+            MAX_ITEMS
+        );
+        assert!(transform(&(input + "x\n"), &step, MAX_INPUT, CLI_OUTPUT).is_err());
+        assert!(transform("h\nx", &step, MAX_INPUT, 5).is_err());
+        let escaped = format!("h\n{}", "\\".repeat(20000));
+        let raw = transform(&escaped, &step, MAX_INPUT, TOOL_OUTPUT).unwrap();
+        assert!(raw.len() < TOOL_OUTPUT);
+        assert!(execute(r#"{"operation":"csv-to-jsonl"}"#, &escaped).is_err());
+    }
     #[test]
     fn jsonl_selection_preserves_values_and_enforces_shared_bounds() {
         let args = r#"{"operation":"jsonl-select","pointer":"/x"}"#;

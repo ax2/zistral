@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.20.0 — 2026-10-27
+
+- Add offline `csv-to-jsonl` for explicit comma CSV with a required unique nonempty header.
+  Preserve header/record order and every cell as a JSON string, including leading zeros,
+  numeric text, quoted commas, doubled quotes, whitespace and multiline contents.
+- Reject malformed quoting, blank records, duplicate/empty headers and inconsistent row
+  widths with value-free diagnostics; retain complete-result output and file protections.
+- Share CSV import with ordered steps, version-1 recipes and the existing transform_input
+  tool across all provider protocols. Add a CSV-to-unique-ID recipe and documented bounds.
+  Bundle csv/csv-core inside the executable; no script runtime, new tool names, rights or memory.
+
 ## 0.19.0 — 2026-10-27
 
 - Add offline `presets export NAME --name CUSTOM_NAME` to copy one builtin/custom task

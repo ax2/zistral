@@ -100,3 +100,9 @@ Since v0.19.0, `presets export` copies one explicit builtin/custom definition in
 version-1 TOML under a required custom name, optionally saving literal variable defaults.
 It shortens user customization without capturing input, model credentials, permissions or
 task history. Exported files are explicitly selected, not automatically installed or merged.
+
+Since v0.20.0, `csv-to-jsonl` imports one explicit header-based comma CSV dialect into
+JSONL string-valued objects. A quote/record preflight precedes csv-reader decoding; unique
+headers and exact row widths are required. Shared pipelines/tools retain original-input
+and final-success-only output rules. It adds csv/csv-core packages, not tool names or rights.
+See [CSV import](csv-import.md).

@@ -20,7 +20,7 @@ Download a native installer from [Releases](https://github.com/ax2/zistral/relea
 | Platform | Package | Installation |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | Per-user installer; adds PATH and a Start menu launcher; no administrator required |
-| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.19.0-linux-amd64.deb` |
+| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.20.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | Open the package; installs `/usr/local/bin/zi` |
 
 Then type `zi`. On first launch, choose an existing Codex, WorkBuddy or dsh configuration,
@@ -601,3 +601,17 @@ and JSON-output rules; `--var` saves literal new defaults. Export is offline and
 piped input or grant tools. Choose a non-builtin destination `--name`; `-o` defaults to no
 overwrite. Explicit `--force` replaces the whole target library, without merging.
 [Exact rules and export versus render](docs/preset-export.md).
+
+## Import a CSV table without changing cell types
+
+```sh
+zi data csv-to-jsonl -i table.csv
+zi data --step csv-to-jsonl --step jsonl-select:/id --step dedupe --step jsonl-to-array -i table.csv
+zi data --recipe docs/examples/csv-ids.toml -i table.csv -o ids.json
+```
+
+Comma CSV requires a unique nonempty header and consistent rows. Quoted commas, doubled
+quotes and multiline cells are supported. All cells become JSON strings, preserving leading
+zeros and large numeric text; no automatic trimming, type inference or skipped bad records.
+The same operation is available in `transform_input`, with existing result/permission limits.
+[Dialect, resource limits, errors and examples](docs/csv-import.md).

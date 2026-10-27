@@ -17,7 +17,7 @@ git diff | zi "生成一句简洁的提交说明"
 | 平台 | 安装包 | 安装方法 |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | 双击安装，无需管理员权限，自动添加用户 PATH 和开始菜单入口 |
-| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.19.0-linux-amd64.deb` |
+| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.20.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | 双击安装，命令放到 `/usr/local/bin/zi` |
 
 安装后直接运行 `zi`。Windows 安装结束可立即启动，或在开始菜单打开 zi；
@@ -434,3 +434,16 @@ zi --presets team-presets.toml -s translate-ja -i notes.txt
 `--var` 保存新的字面默认值；导出离线执行，不读取管道数据或授予工具权限。`--name` 必须
 是新的自定义名称，不能占用内置名称。文件默认不覆盖；`--force` 替换整个目标库，不做合并。
 [导出与预览的区别、示例和限制](docs/preset-export.md)。
+
+## 将 CSV 表格接入 JSONL 流程
+
+```sh
+zi data csv-to-jsonl -i table.csv
+zi data --step csv-to-jsonl --step jsonl-select:/id --step dedupe --step jsonl-to-array -i table.csv
+zi data --recipe docs/examples/csv-ids.toml -i table.csv -o ids.json
+```
+
+需要唯一、非空的表头和列数一致的逗号 CSV，支持引用逗号、双引号转义与多行单元格。
+所有单元格保留为 JSON 字符串，不猜测数字或空值；前导零和大整数文本不变。引号错误、
+空记录或列数不齐会整批失败，不输出半成品。现有 `transform_input` 也可调用，无新工具权限。
+[格式约定、资源限制、错误与示例](docs/csv-import.md)。

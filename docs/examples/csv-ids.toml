@@ -1,0 +1,14 @@
+version = 1
+
+[[steps]]
+operation = "csv-to-jsonl"
+
+[[steps]]
+operation = "jsonl-select"
+pointer = "/id"
+
+[[steps]]
+operation = "dedupe"
+
+[[steps]]
+operation = "jsonl-to-array"
