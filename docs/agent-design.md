@@ -45,7 +45,7 @@ The full project mode has 15 tools. Data mode exposes count/select/transform; re
 excludes file mutation and arbitrary shell execution, including enforcement if a provider
 requests tools that were not advertised. `--no-tools` disables project capabilities too.
 
-`transforms.rs` implements fifteen deterministic operations on explicit input, shared by the
+`transforms.rs` implements bounded deterministic operations on explicit input, shared by the
 offline `zi data` command and the `transform_input` tool. They do not access a model,
 filesystem or shell. JSON syntax is checked with serde's IgnoredAny; a lexical formatter
 changes only insignificant whitespace, preserving number/string tokens, key order and
@@ -210,3 +210,11 @@ control-sequence cleaner even when rich UI is disabled. This is a display bounda
 pipe/file text, retained /save results, valid JSON tokens, offline data operations and
 stream decoding keep their contracts. Agent/project tools and permissions are unchanged.
 See [terminal output](terminal-output.md).
+
+Since v0.27.0, opt-in --exact returns one successful native data result directly from
+each protocol handler, without a final model rewrite. Observation success carries an
+optional exact result separately from error text, preserving error-shaped data and
+lexical numeric tokens. Full protocol validation precedes exact one-call/data-only
+validation and dispatch; native errors remain correlated observations for bounded repair.
+Streaming and project modes are rejected; empty native success has zero-byte delivery.
+Normal model-result handling and task independence remain. See [exact results](exact-results.md).

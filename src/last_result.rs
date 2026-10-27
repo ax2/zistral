@@ -29,7 +29,8 @@ impl LastResult {
         if path.as_os_str() == "-" {
             bail!("/save requires a file path, not stdout '-'");
         }
-        crate::output::Prepared::new(path, force)?.save(text, !text.ends_with('\n'))
+        crate::output::Prepared::new(path, force)?
+            .save(text, !text.is_empty() && !text.ends_with('\n'))
     }
 }
 
@@ -48,5 +49,17 @@ mod tests {
         assert!(result.retain("x".repeat(MAX_RETAINED + 1)).is_err());
         assert!(result.save(&path, false).is_err());
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn completed_empty_native_result_is_saveable_as_zero_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("empty.txt");
+        let mut result = LastResult::default();
+        result.retain(String::new()).unwrap();
+        assert_eq!(result.save(&path, false).unwrap(), 0);
+        assert!(std::fs::read(&path).unwrap().is_empty());
+        result.clear();
+        assert!(result.save(&dir.path().join("stale.txt"), false).is_err());
     }
 }

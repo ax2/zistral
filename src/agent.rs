@@ -75,7 +75,20 @@ fn prepare_calls<'a>(
 }
 
 pub fn run(settings: &Settings, cli: &Cli, input: &str) -> Result<Answer> {
-    let streaming = cli.output.is_none()
+    if cli.exact
+        && (cli.no_tools
+            || cli.stream
+            || cli.agent
+            || cli.cwd.is_some()
+            || cli.read_only
+            || cli.no_exec)
+    {
+        bail!(
+            "--exact requires native data tools and is incompatible with streaming/project modes"
+        );
+    }
+    let streaming = !cli.exact
+        && cli.output.is_none()
         && !cli.no_stream
         && !cli.json
         && (cli.stream || (!cli.plain && io::stdout().is_terminal()));
@@ -96,6 +109,9 @@ pub fn run(settings: &Settings, cli: &Cli, input: &str) -> Result<Answer> {
     system.push_str(&session.context()?);
     if cli.json {
         system.push_str(" Return exactly one valid JSON value, with no markdown fences.");
+    }
+    if cli.exact {
+        system.push_str(" Exact mode: request exactly one count_input, select_input or transform_input call per turn. A successful native result becomes the final output directly, without another model turn or free-text rewrite. Use ordered steps inside one transform_input for compound transformations. Native argument errors may be corrected within the turn budget. A text-only answer or multiple calls is an error. For JSON output, choose native output that is valid JSON; use transform_input json-select for quoted strings rather than decoded select_input text.");
     }
     let prompt = cli.prompt.join(" ");
     // A separate message marks input as data; the instruction always follows it.
@@ -302,15 +318,19 @@ fn handle_anthropic(
     if (result["stop_reason"] == "tool_use") == calls.is_empty() {
         bail!("Anthropic stop reason does not match its tool calls");
     }
+    validate_exact_calls(cli, &calls)?;
     if !calls.is_empty() {
         messages.push(json!({"role":"assistant","content":content}));
         let mut results = Vec::new();
+        let mut exact = None;
         for call in calls {
             let result = tool_result(cli, call.name, &call.arguments, input, activity, session)?;
-            results.push(json!({"type":"tool_result","tool_use_id":call.id,"content":result}));
+            exact = result.exact;
+            results
+                .push(json!({"type":"tool_result","tool_use_id":call.id,"content":result.content}));
         }
         messages.push(json!({"role":"user","content":results}));
-        return Ok(None);
+        return Ok(exact);
     }
     let text: String = content
         .iter()
@@ -323,6 +343,51 @@ fn handle_anthropic(
     Ok(Some(text))
 }
 
+struct Observation {
+    content: String,
+    exact: Option<String>,
+}
+
+fn validate_exact_calls(cli: &Cli, calls: &[ToolCall<'_>]) -> Result<()> {
+    if cli.exact
+        && (calls.len() != 1
+            || !matches!(
+                calls[0].name,
+                "count_input" | "select_input" | "transform_input"
+            ))
+    {
+        bail!(
+            "--exact requires exactly one native data tool call; model text and tool batches are not exact results"
+        );
+    }
+    Ok(())
+}
+
+fn exact_text(name: &str, value: &str, json_output: bool) -> Result<String> {
+    let text = if name == "transform_input" {
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Transformed {
+            output: String,
+        }
+        serde_json::from_str::<Transformed>(value)
+            .context("invalid native transform result")?
+            .output
+    } else if matches!(name, "count_input" | "select_input") {
+        // Selection can contain arbitrarily large numeric tokens or error-shaped data.
+        // Native execution success, not the value's shape, determines success.
+        value.to_owned()
+    } else {
+        bail!("--exact only accepts native data tools");
+    };
+    if json_output {
+        crate::transforms::compact_json(&text, crate::data::RESULT_LIMIT)
+            .context("native result is not JSON; choose a JSON-preserving native operation")
+    } else {
+        Ok(text)
+    }
+}
+
 fn tool_result(
     cli: &Cli,
     name: &str,
@@ -330,7 +395,7 @@ fn tool_result(
     input: &str,
     activity: &Activity,
     session: &mut Session,
-) -> Result<String> {
+) -> Result<Observation> {
     if cli.no_tools {
         bail!("provider requested a tool even though --no-tools is set");
     }
@@ -340,9 +405,21 @@ fn tool_result(
             activity.detail(detail);
         }
     }
-    Ok(match session.execute(name, arguments, input) {
-        Ok(value) => {
-            if let Ok(result) = serde_json::from_str::<Value>(&value) {
+    let execution = session.execute(name, arguments, input).and_then(|value| {
+        let exact = if cli.exact {
+            Some(exact_text(name, &value, cli.json)?)
+        } else {
+            None
+        };
+        Ok(Observation {
+            content: value,
+            exact,
+        })
+    });
+    Ok(match execution {
+        Ok(observation) => {
+            let value = &observation.content;
+            if let Ok(result) = serde_json::from_str::<Value>(value) {
                 if result.get("exit_code").is_some() {
                     activity.detail(&format!(
                         "exit {} · {} ms · timed out: {}",
@@ -353,11 +430,14 @@ fn tool_result(
                     activity.detail(error);
                 }
             }
-            value
+            observation
         }
         Err(error) => {
             activity.detail(&format!("Tool error: {error}"));
-            json!({"error":error.to_string()}).to_string()
+            Observation {
+                content: json!({"error":error.to_string()}).to_string(),
+                exact: None,
+            }
         }
     })
 }
@@ -400,13 +480,16 @@ fn handle_chat(
     if (choice["finish_reason"] == "tool_calls") == calls.is_empty() {
         bail!("Chat finish reason does not match its tool calls");
     }
+    validate_exact_calls(cli, &calls)?;
     if !calls.is_empty() {
         messages.push(json!({"role":"assistant","content":message.get("content").cloned().unwrap_or(Value::Null),"tool_calls":raw_calls}));
+        let mut exact = None;
         for call in calls {
-            let content = tool_result(cli, call.name, &call.arguments, input, activity, session)?;
-            messages.push(json!({"role":"tool","tool_call_id":call.id,"content":content}));
+            let result = tool_result(cli, call.name, &call.arguments, input, activity, session)?;
+            exact = result.exact;
+            messages.push(json!({"role":"tool","tool_call_id":call.id,"content":result.content}));
         }
-        Ok(None)
+        Ok(exact)
     } else {
         let content = message["content"]
             .as_str()
@@ -454,17 +537,90 @@ fn handle_responses(
         "responses",
     )?;
     // Retain complete output (including reasoning/final text) for plan continuations.
+    validate_exact_calls(cli, &calls)?;
     messages.extend(output.iter().cloned());
     if !calls.is_empty() {
+        let mut exact = None;
         for call in calls {
-            let content = tool_result(cli, call.name, &call.arguments, input, activity, session)?;
-            messages
-                .push(json!({"type":"function_call_output","call_id":call.id,"output":content}));
+            let result = tool_result(cli, call.name, &call.arguments, input, activity, session)?;
+            exact = result.exact;
+            messages.push(
+                json!({"type":"function_call_output","call_id":call.id,"output":result.content}),
+            );
         }
-        Ok(None)
+        Ok(exact)
     } else if text.is_empty() {
         bail!("provider returned neither text nor tool calls")
     } else {
         Ok(Some(text))
+    }
+}
+
+#[cfg(test)]
+mod exact_tests {
+    use super::*;
+    use clap::Parser;
+    #[test]
+    fn exact_selection_is_not_parsed_or_confused_with_error_shaped_data() {
+        for text in [
+            "1.2300E+400",
+            r#"{"error":"data","n":1.2300E+400}"#,
+            " leading and trailing ",
+            "",
+        ] {
+            assert_eq!(exact_text("select_input", text, false).unwrap(), text);
+        }
+        assert_eq!(
+            exact_text("select_input", "1.2300E+400", true).unwrap(),
+            "1.2300E+400"
+        );
+        assert!(exact_text("select_input", "not JSON", true).is_err());
+    }
+    #[test]
+    fn exact_transform_decodes_only_outer_envelope_and_keeps_native_tokens() {
+        let text = r#"{"n":1.2300E+400,"n":-0,"s":"\u4E2D"}"#;
+        let envelope = json!({"output":text}).to_string();
+        assert_eq!(
+            exact_text("transform_input", &envelope, true).unwrap(),
+            text
+        );
+        assert_eq!(
+            exact_text("transform_input", r#"{"output":""}"#, false).unwrap(),
+            ""
+        );
+        assert!(exact_text("transform_input", r#"{"output":3}"#, false).is_err());
+        assert!(exact_text("write_file", "{}", false).is_err());
+    }
+    #[test]
+    fn exact_batch_contract_is_checked_before_dispatch_without_changing_normal_mode() {
+        let exact = Cli::parse_from(["zi", "--exact", "task"]);
+        let normal = Cli::parse_from(["zi", "task"]);
+        let one = ToolCall {
+            id: "one",
+            name: "count_input",
+            arguments: Cow::Borrowed("{}"),
+        };
+        assert!(validate_exact_calls(&exact, &[]).is_err());
+        assert!(validate_exact_calls(&exact, &[one]).is_ok());
+        let unknown = ToolCall {
+            id: "one",
+            name: "write_file",
+            arguments: Cow::Borrowed("{}"),
+        };
+        assert!(validate_exact_calls(&exact, &[unknown]).is_err());
+        let batch = [
+            ToolCall {
+                id: "one",
+                name: "count_input",
+                arguments: Cow::Borrowed("{}"),
+            },
+            ToolCall {
+                id: "two",
+                name: "select_input",
+                arguments: Cow::Borrowed("{}"),
+            },
+        ];
+        assert!(validate_exact_calls(&exact, &batch).is_err());
+        assert!(validate_exact_calls(&normal, &batch).is_ok());
     }
 }

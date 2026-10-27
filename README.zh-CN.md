@@ -17,7 +17,7 @@ git diff | zi "生成一句简洁的提交说明"
 | 平台 | 安装包 | 安装方法 |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | 双击安装，无需管理员权限，自动添加用户 PATH 和开始菜单入口 |
-| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.26.0-linux-amd64.deb` |
+| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.27.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | 双击安装，命令放到 `/usr/local/bin/zi` |
 
 安装后直接运行 `zi`。Windows 安装结束可立即启动，或在开始菜单打开 zi；
@@ -520,3 +520,7 @@ zi data --step lines-include:ERROR --step lines-exclude:healthcheck -i app.log |
 离线精确取首尾行：`zi data lines-head -n 20`，或用
 `zi data --step lines-include:ERROR --step lines-tail:20 -i app.log` 取最近匹配日志。
 必须指定行数，保留空白与重复行；见 [首尾行窗口](docs/line-windows.md)。
+
+`cat app.log | zi --exact "取包含 ERROR 的最后两行，保留空格"` 让模型选择原生操作或流水线，
+zi 直接交付成功的工具结果，不再让模型复述。它保证所选操作的原生执行，不保证模型永远理解正确；
+见 [精确数据结果](docs/exact-results.md)。

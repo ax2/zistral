@@ -44,6 +44,7 @@ pub fn run(cli: &Cli, probe: bool) -> Result<()> {
     if probe {
         let mut test = cli.clone();
         test.prompt = vec!["Reply with OK.".into()];
+        test.exact = false;
         test.no_tools = true;
         test.no_stream = true;
         test.stream = false;

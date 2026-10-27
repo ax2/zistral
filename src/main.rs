@@ -83,6 +83,9 @@ pub struct Cli {
     /// Require valid JSON output and emit compact JSON
     #[arg(long)]
     json: bool,
+    /// Return one successful native data tool result without a model rewrite
+    #[arg(long, conflicts_with_all = ["no_tools", "stream", "count", "select", "config_example", "agent", "cwd", "read_only", "no_exec"])]
+    exact: bool,
     /// Disable built-in agent tools (for text-only models)
     #[arg(long)]
     no_tools: bool,
@@ -241,6 +244,9 @@ fn read_input(cli: &Cli) -> Result<String> {
 }
 
 fn run(mut cli: Cli) -> Result<()> {
+    if cli.exact && cli.command.is_some() {
+        bail!("--exact is for model data tasks, not offline or management commands");
+    }
     // Validate requested modes even when --no-tools disables effective project capabilities.
     if (cli.command.is_some() || cli.count || cli.select.is_some() || cli.config_example)
         && (cli.agent || cli.cwd.is_some() || cli.read_only || cli.no_exec)
@@ -472,7 +478,12 @@ fn run(mut cli: Cli) -> Result<()> {
         output
     };
     if let Some(target) = target {
-        return save_output(&output, target, &cli, !output.ends_with('\n'));
+        return save_output(
+            &output,
+            target,
+            &cli,
+            !output.ends_with('\n') && (!cli.exact || !output.is_empty()),
+        );
     }
     emit(&output, &cli)
 }
@@ -505,7 +516,10 @@ fn save_output(
 }
 
 fn emit(output: &str, cli: &Cli) -> Result<()> {
-    if ui::enabled(cli) && !cli.count && cli.select.is_none() {
+    if cli.exact && output.is_empty() {
+        return Ok(());
+    }
+    if ui::enabled(cli) && !cli.exact && !cli.count && cli.select.is_none() {
         ui::result(output, cli)
     } else if !cli.count && cli.select.is_none() && io::stdout().is_terminal() {
         let shown = if cli.json {

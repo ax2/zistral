@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.27.0 — 2026-10-27
+
+- Add explicit `--exact` model data mode: a model chooses one native count/select/transform
+  call, and zi returns its successful result directly without a final model rewrite.
+  Compound transformations use ordered steps inside one call; native errors can be corrected
+  within the existing turn budget. Plain model text, multiple calls and nondata tools fail.
+- Keep exact results buffered and use existing pipe/file/newline/JSON validation protections.
+  Empty successful results emit/save zero bytes, including interactive `/save`. Terminal
+  display retains control cleanup without rich answer reformatting; activity stays on stderr.
+- Reject streaming, disabled tools, project selectors, offline and management modes before IO.
+  Preserve normal Agent behavior, native limits and independent tasks; no new dependencies,
+  tool names, permissions or history. Add all-protocol direct-result/recovery/empty-output tests.
+
 ## 0.26.0 — 2026-10-27
 
 - Add offline `lines-head --lines N` and `lines-tail --lines N` (`-n N`) for exact first/last

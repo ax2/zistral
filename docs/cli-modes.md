@@ -49,3 +49,9 @@ Since v0.19.0, only `presets export NAME --name CUSTOM_NAME` also supports the s
 `-o/--output` writer. It produces reusable TOML after validating names/defaults, ignores
 piped stdin and rejects explicit input/model instructions, JSON/stream flags and project
 selectors. Other management actions still reject output files. See [preset export](preset-export.md).
+
+Since v0.27.0, --exact is an explicit model-data delivery mode, compatible with --json,
+presets, file output and normal request/turn limits. It rejects --stream, --no-tools,
+project selectors, --count, --select, --config-example, offline and management commands
+before configuration/input/output. It never silently becomes a text-only or project task.
+See [exact data results](exact-results.md).

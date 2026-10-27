@@ -631,3 +631,68 @@ fn json_terminal_display_escapes_controls_without_losing_values_or_saved_bytes()
         }
     }
 }
+
+#[test]
+fn exact_terminal_tasks_buffer_native_results_and_export_empty_success_without_stale_data() {
+    for api in ["chat", "responses", "anthropic"] {
+        let reply = |id: &str, name: &str, args: Value| {
+            let body = match api {
+                "chat" => {
+                    json!({"choices":[{"finish_reason":"tool_calls","message":{"content":"MODEL_REWRITE_SENTINEL","tool_calls":[{"id":id,"type":"function","function":{"name":name,"arguments":args.to_string()}}]}}]})
+                }
+                "responses" => {
+                    json!({"status":"completed","output":[{"type":"function_call","call_id":id,"name":name,"arguments":args.to_string()}]})
+                }
+                _ => {
+                    json!({"stop_reason":"tool_use","content":[{"type":"tool_use","id":id,"name":name,"input":args}]})
+                }
+            };
+            (200, body.to_string(), "application/json")
+        };
+        let home = tempfile::tempdir().unwrap();
+        let (url, server) = export_server(vec![
+            reply("count", "count_input", json!({})),
+            reply(
+                "empty",
+                "transform_input",
+                json!({"operation":"lines-head","lines":1}),
+            ),
+            (401, "ignored".into(), "application/json"),
+        ]);
+        export_config(home.path(), &url, api);
+        let text = terminal(
+            &["--exact"],
+            home.path(),
+            false,
+            &[
+                ("›", "count empty input"),
+                ("\"bytes\":0", "/save counted.json"),
+                ("Saved counted.json", "empty result"),
+                ("Done", "/save empty.txt"),
+                ("Saved empty.txt", "fail task"),
+                ("HTTP 401", "/save stale.txt"),
+                ("no completed result", "/exit"),
+                ("Goodbye.", ""),
+            ],
+        );
+        assert!(!text.contains("MODEL_REWRITE_SENTINEL"));
+        assert!(
+            std::fs::read(home.path().join("empty.txt"))
+                .unwrap()
+                .is_empty()
+        );
+        assert!(!home.path().join("stale.txt").exists());
+        let counts: Value =
+            serde_json::from_slice(&std::fs::read(home.path().join("counted.json")).unwrap())
+                .unwrap();
+        assert_eq!(counts["bytes"], 0);
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 3);
+        assert!(requests.iter().all(|r| r["stream"] == false));
+        assert_independent_export_requests(
+            api,
+            &requests,
+            &["count empty input", "empty result", "fail task"],
+        );
+    }
+}

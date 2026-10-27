@@ -154,3 +154,9 @@ Composing literal filtering then tail selection shortens log evidence for a focu
 task across platforms, without a new tool name, permission, runtime or memory store.
 Counts are validated before IO and discarded lines still count toward resource limits.
 See [line windows](line-windows.md).
+
+Since v0.27.0, explicit --exact routes one successful native data result directly to
+output, avoiding a model rewrite. It fits natural-language selection of bounded native
+operations, not open-ended analysis or project automation. Multiple calls/free text are
+errors; native argument errors may be corrected within the existing turn budget.
+No new tool, dependency, permission, persistent history or hidden task context is added.
