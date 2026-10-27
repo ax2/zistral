@@ -11,6 +11,8 @@
 - Preserve independent model tasks and pipe behavior: retained results are never sent as
   conversation context. No new dependencies, model tools, permissions, Agent-loop changes
   or persistent history. Add real-terminal coverage for all three protocols and export rules.
+- Match visible terminal prompts across interleaved Windows ConPTY cursor controls while
+  preserving raw transcripts for security assertions; document failed unpublished candidate recovery.
 
 ## 0.24.0 — 2026-10-27
 

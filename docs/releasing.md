@@ -59,8 +59,8 @@ tags/assets are not a way to move a release to newer fixes: use a new patch vers
 
 Normal CI success does not itself enforce this sequence through branch protection. A
 maintainer can still deliberately create a release entry before CI finishes; the Release
-workflow independently repeats checks before publishing. Keep a release branch fixed after
-creating it. Concurrent release requests share the existing release concurrency group;
+workflow independently repeats checks before publishing. Keep a release branch fixed while it is building or publishing. The failed-before-publication
+recovery below is the only exception. Concurrent release requests share the existing release concurrency group;
 avoid launching a different version while another is publishing. No repository security or
 credential settings are changed by this workflow update.
 
@@ -71,3 +71,21 @@ the next version. No recurring automation or background service is needed.
 
 GitHub references: [branch/tag trigger filters](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onpushbranchestagsbranches-ignoretags-ignore)
 and [workflow triggers](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow).
+
+## Recover an unpublished failed candidate
+
+A failed build/test attempt does not publish a release. Preserve its run, failing SHA and
+diagnosis, fix the problem on main, and repeat local checks plus all exact-SHA CI gates.
+Do not move a published tag or replace published assets. An already successful/released
+version needs a new version instead.
+
+If both the version Release and version tag are still absent, a maintainer may explicitly
+fast-forward the existing release/vVERSION branch to the corrected reviewed commit, using
+an expected-old-SHA lease and no force. First verify the old attempt is terminal, save a
+fresh successful CI/zero-Release snapshot for the corrected SHA, and verify absence of both
+published objects. This deliberate branch update starts a new Release run; it is not a
+retry of different code under an old run. Keep the failed attempt in delivery evidence.
+
+The successful branch, main, local checkout and eventual version tag must all point to
+the corrected commit. A branch mismatch, a nonterminal attempt, an existing tag/release,
+or a failed corrected CI gate requires inspection before any publication action.

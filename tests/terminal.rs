@@ -71,8 +71,10 @@ fn terminal(
     for (prompt, answer) in answers {
         let deadline = Instant::now() + Duration::from_secs(20);
         loop {
-            if let Some(i) = transcript[offset..].find(prompt) {
-                offset += i + prompt.len();
+            if console::strip_ansi_codes(&transcript[offset..]).contains(prompt) {
+                // ConPTY may insert cursor controls inside a visible message.
+                // Keep raw output for security assertions; match only displayed text.
+                offset = transcript.len();
                 break;
             }
             match rx.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
