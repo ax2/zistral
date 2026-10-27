@@ -20,7 +20,7 @@ Download a native installer from [Releases](https://github.com/ax2/zistral/relea
 | Platform | Package | Installation |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | Per-user installer; adds PATH and a Start menu launcher; no administrator required |
-| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.22.0-linux-amd64.deb` |
+| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.23.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | Open the package; installs `/usr/local/bin/zi` |
 
 Then type `zi`. On first launch, choose an existing Codex, WorkBuddy or dsh configuration,
@@ -354,7 +354,7 @@ zi presets render translate --var language=Chinese  # Offline prompt preview
 ```
 
 Builtins: `summarize`, `translate` (Chinese by default), `extract`, `explain`, `review`,
-`commit`, and `rewrite`. Additional instruction words refine the selected task; piped input
+`commit`, `rewrite`, `builtin:triage`, and `builtin:release-notes`. Additional instruction words refine the selected task; piped input
 remains a separate data message. `extract` enables whole-answer JSON validation automatically
 and conflicts with `--stream`. Presets use the selected model and existing pipe/stream rules.
 They never enable project, file or command capabilities; add project flags explicitly when
@@ -642,3 +642,17 @@ values and exact number/string tokens. Missing or ambiguous paths fail; no row s
 inferred defaults or expressions. Use a version-1 recipe for compound projection and CSV.
 `--show-plan` can save a reusable definition without reading data.
 See [JSONL projection](docs/jsonl-projection.md) for field/pointer/output limits.
+
+## Triage logs or draft release notes
+
+```sh
+zi -s builtin:triage -i app.log 'Separate evidence, hypotheses and next checks'
+git log --oneline v0.22.0..HEAD | zi -s builtin:release-notes --var audience=users
+zi presets render builtin:release-notes --var audience=operators
+```
+
+Two more bundled instructions bring the catalogue to nine. The new qualified names leave
+custom `triage`/`release-notes` entries untouched. Existing builtins also accept `builtin:NAME`;
+these references never select an unrelated custom definition. Preview and export are offline,
+while model tasks still need configuration and factual review. No new tools or memory.
+See [task scenarios](docs/task-scenarios.md) for lookup, export and quality boundaries.

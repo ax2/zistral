@@ -45,6 +45,8 @@ fn builtins() -> BTreeMap<String, Preset> {
         ("review", "Review a supplied diff with concrete evidence", "Review the supplied diff or code. Prioritize correctness, behavior regressions and missing verification; cite file names and line numbers only when present. Report actionable findings with evidence and state any limits. Do not invent repository context or claim tests were run.", false, None),
         ("commit", "Write a concise commit message from a diff", "Write a concise commit message for the supplied diff. Describe the actual behavioral change and its purpose. Return the message only; do not claim tests passed unless the input provides that evidence.", false, None),
         ("rewrite", "Rewrite text while preserving facts and intent", "Rewrite the supplied text to be clear, concise and natural. Preserve its facts, intent and language unless the user's additional instruction requests a change. Return the rewritten text only.", false, None),
+        ("builtin:triage", "Triage supplied logs with evidence, hypotheses and next checks", "Triage the supplied logs or diagnostic text.\nObservations: cite only failures, snippets and timestamps actually present in the input.\nHypotheses: distinguish possible causes from evidence; identify what remains unknown.\nNext checks: prioritize concrete ways to verify the hypotheses, not unverified fixes.\nDo not invent events, files, metrics or successful tests, or claim checks were run.\nIf evidence is insufficient, say what is missing. Use the requested language, otherwise the input language.", false, None),
+        ("builtin:release-notes", "Write evidence-based release notes for --var audience=VALUE", "Write concise release notes for {{audience}} from the supplied diff or change list.\nDescribe user-visible behavior and supported breaking changes; preserve identifiers.\nUse only the explicit target change range; do not mix in historical changelog sections.\nOmit versions, dates, issue links and testing/deployment claims not supported by input.\nIf the target range is unclear, state the missing scope rather than invent it.\nReturn the notes only, in the requested language, otherwise the input language.", false, Some(("audience", "users"))),
     ].into_iter().map(|(name, description, prompt, json, default)| (name.into(), Preset {
         description: description.into(), prompt: prompt.into(), json,
         defaults: default.into_iter().map(|(k,v)| (k.into(),v.into())).collect(),
@@ -230,9 +232,23 @@ fn load(cli: &Cli) -> Result<BTreeMap<String, Preset>> {
 }
 
 fn get(cli: &Cli, name: &str) -> Result<Preset> {
-    config::validate_name(name).context("invalid preset name")?;
+    let key = if let Some(short) = name.strip_prefix("builtin:") {
+        config::validate_name(short).context("invalid builtin preset reference")?;
+        let builtin = builtins();
+        if builtin.contains_key(name) {
+            name
+        } else if builtin.contains_key(short) {
+            short // The seven existing builtin names also have explicit qualified references.
+        } else {
+            bail!("unknown builtin preset; run zi presets");
+        }
+    } else {
+        config::validate_name(name).context("invalid preset name")?;
+        name
+    };
+    // A qualified reference does not bypass validation of an explicitly selected library.
     load(cli)?
-        .remove(name)
+        .remove(key)
         .with_context(|| format!("unknown preset {name}; run zi presets"))
 }
 
@@ -435,7 +451,7 @@ mod tests {
     #[test]
     fn all_builtin_prompts_validate_without_external_configuration() {
         let all = builtins();
-        assert_eq!(all.len(), 7);
+        assert_eq!(all.len(), 9);
         for p in all.values() {
             p.validate().unwrap();
             p.render(&[]).unwrap();

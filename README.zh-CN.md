@@ -17,7 +17,7 @@ git diff | zi "生成一句简洁的提交说明"
 | 平台 | 安装包 | 安装方法 |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | 双击安装，无需管理员权限，自动添加用户 PATH 和开始菜单入口 |
-| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.22.0-linux-amd64.deb` |
+| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.23.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | 双击安装，命令放到 `/usr/local/bin/zi` |
 
 安装后直接运行 `zi`。Windows 安装结束可立即启动，或在开始菜单打开 zi；
@@ -271,7 +271,7 @@ zi presets show translate
 zi presets render translate --var language=Chinese  # 只预览提示词，不调用模型
 ```
 
-内置 `summarize`、`translate`、`extract`、`explain`、`review`、`commit`、`rewrite` 七个场景。
+保留 `summarize`、`translate`、`extract`、`explain`、`review`、`commit`、`rewrite` 七个短名，另提供 `builtin:triage` 和 `builtin:release-notes`，共九个场景。
 翻译默认目标为中文；后面的自然语言可补充要求。输入仍单独作为数据发送，不拼进提示词模板。
 `extract` 自动开启完整 JSON 校验，不能搭配 `--stream`。模型选择、终端和管道规则沿用原有设置。
 场景不会自动授权读写文件或运行命令；审查管道 diff 无需项目权限，要读项目时可明确搭配
@@ -470,3 +470,15 @@ zi data --recipe docs/examples/project-csv.toml -i events.jsonl -o table.csv
 按明确字段定义的顺序，为每条记录生成新对象，保留选中 JSON 值及数字、字符串原表达。
 缺失或歧义路径会失败，不跳行、不补值、不执行表达式。复合投影和 CSV 流程使用 version=1
 配方；`--show-plan` 可在不读取数据时保存定义。边界与示例见 [JSONL 字段投影](docs/jsonl-projection.md)。
+
+## 排查日志与起草发版说明
+
+```sh
+zi -s builtin:triage -i app.log '用中文区分证据、假设与验证步骤'
+git log --oneline v0.22.0..HEAD | zi -s builtin:release-notes --var audience=users '只写本次变更'
+zi presets render builtin:release-notes --var audience=operators
+```
+
+内置场景扩展到九个。新场景使用限定名，已有自定义 `triage`、`release-notes` 不受影响；
+原有七个短名也接受 `builtin:NAME` 明确引用。限定引用不回退到任意用户定义。预览和导出
+离线运行，实际模型任务仍需配置并审核结果，不增加工具或记忆。见 [常用任务场景](docs/task-scenarios.md)。

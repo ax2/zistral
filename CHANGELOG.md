@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.23.0 — 2026-10-27
+
+- Add bundled `builtin:triage` for evidence-led log analysis and `builtin:release-notes`
+  for audience-specific notes from an explicit change range. Inspect, preview and export
+  these instructions through the existing preset commands.
+- Add explicit `builtin:NAME` references for the original seven scenarios too, preserving
+  JSON rules and original name protection. New qualified names do not reserve existing
+  custom `triage`/`release-notes` names or fall back to user definitions.
+- Keep user-library validation, literal defaults, model input separation and capability/file
+  boundaries. Add scenario and compatibility guidance; no new dependencies, tools or memory.
+
 ## 0.22.0 — 2026-10-27
 
 - Add offline `jsonl-project --field NAME=POINTER` to select/rename 1-64 values from each

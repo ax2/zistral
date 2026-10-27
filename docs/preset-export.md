@@ -13,7 +13,7 @@ zi --presets team-presets.toml -s translate-ja -i notes.txt
 Only the final model task needs model configuration. Export/show/render are offline; they
 do not read piped input, send requests, import model credentials or create model configuration.
 Use `--presets SOURCE.toml` before the command to choose a source library. Otherwise the
-existing default library beside the selected config is used, together with the seven builtins.
+existing default library beside the selected config is used, together with the nine builtin definitions.
 
 The source name is positional. The required `--name CUSTOM_NAME` gives the exported entry
 an explicit name: 1–64 ASCII letters/digits/underscores/hyphens, using the existing naming
@@ -80,3 +80,7 @@ Existing limits apply: 256 KiB library/export, 64 custom entries on loading, 16 
 instructions. Existing libraries remain valid; the exported version-1 definition can be
 loaded by earlier zi releases that support custom presets. The export command itself
 requires v0.19.0 or later. No dependencies, tools, permissions, model protocols or memory added.
+
+Since v0.23.0, a source may be a qualified `builtin:NAME`. New triage/release-note
+definitions use this namespace without reserving those short custom names. Destinations
+still use ordinary custom names; see [scenario lookup](task-scenarios.md).

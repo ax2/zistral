@@ -58,7 +58,8 @@ they should not require a shell, network service or a desktop installation.
 ## Customization and scenarios
 
 The first customization layer is a local, versioned TOML preset library. Builtin scenarios
-cover summarize, translate, extract-as-JSON, explain, diff review, commit messages and rewrite.
+cover summarize, translate, extract-as-JSON, explain, diff review, commit messages, rewrite,
+and qualified log-triage/release-note instructions.
 Additional instructions and literal variables adapt them. The selected model and the user's
 explicit flags still control execution. There is no implicit project preset discovery.
 
@@ -121,3 +122,11 @@ and subtree order remain exact, missing/ambiguous references fail, and the added
 counts toward depth128. Projection can feed CSV without expressions or hidden state.
 No new dependencies, tool names, permissions, Agent loop or memory.
 See [JSONL projection](jsonl-projection.md).
+
+Since v0.23.0, the nine bundled scenarios include qualified `builtin:triage` and
+`builtin:release-notes` for log evidence and change-range writing. Existing short user names
+remain available; the original seven protected builtin names also accept explicit qualified
+references. Lookup never falls back to arbitrary custom entries, nor bypasses selected-library
+validation. The shared preset flow keeps JSON/capability/independent-task boundaries.
+No new dependencies, model tools, loop logic, permissions or memory.
+See [task scenarios](task-scenarios.md).

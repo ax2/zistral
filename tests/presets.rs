@@ -513,6 +513,342 @@ fn builtin_translation_preserves_input_and_permissions_all_protocols() {
 }
 
 #[test]
+fn scenario_namespace_keeps_existing_short_custom_names_and_library_validation() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let library=b"version=1\n[presets.triage]\ndescription='My triage'\nprompt='CUSTOM_TRIAGE'\n[presets.release-notes]\ndescription='My notes'\nprompt='CUSTOM_NOTES'\n[presets.team]\ndescription='My team'\nprompt='CUSTOM_TEAM'\n";
+    std::fs::write(root.join("team.toml"), library).unwrap();
+    std::fs::write(root.join("invalid-model.toml"), "PRIVATE_MODEL_CONFIG").unwrap();
+    let list = run(
+        root,
+        &[
+            "--config",
+            "invalid-model.toml",
+            "--presets",
+            "team.toml",
+            "presets",
+        ],
+        b"PRIVATE_INPUT",
+    );
+    assert!(list.status.success());
+    let text = String::from_utf8(list.stdout).unwrap();
+    assert!(
+        text.contains("builtin:triage [builtin]")
+            && text.contains("builtin:release-notes [builtin]")
+    );
+    assert!(text.contains("triage [user]") && text.contains("release-notes [user]"));
+    assert_eq!(text.matches("[builtin]").count(), 9);
+    for (name, expected) in [
+        ("triage", "CUSTOM_TRIAGE"),
+        ("release-notes", "CUSTOM_NOTES"),
+        ("builtin:triage", "Observations:"),
+        ("builtin:release-notes", "release notes for users"),
+    ] {
+        let out = run(
+            root,
+            &["--presets", "team.toml", "presets", "render", name],
+            b"PRIVATE_INPUT",
+        );
+        assert!(out.status.success());
+        let rendered = String::from_utf8(out.stdout).unwrap();
+        assert!(rendered.contains(expected));
+        if name.starts_with("builtin:") {
+            assert!(!rendered.contains("CUSTOM_"));
+        }
+        assert!(!rendered.contains("PRIVATE"));
+        assert!(out.stderr.is_empty());
+    }
+    let plain = run(root, &["presets", "render", "summarize"], b"");
+    let qualified = run(root, &["presets", "render", "builtin:summarize"], b"");
+    assert!(qualified.status.success());
+    assert_eq!(plain.stdout, qualified.stdout);
+    for name in [
+        "builtin:team",
+        "builtin:",
+        "builtin:builtin:triage",
+        "builtin:../triage",
+    ] {
+        let out = run(
+            root,
+            &["--presets", "team.toml", "presets", "render", name],
+            b"",
+        );
+        assert!(!out.status.success());
+        assert!(out.stdout.is_empty());
+    }
+    std::fs::write(root.join("broken.toml"), "version=99\n[presets]\n").unwrap();
+    let broken = run(
+        root,
+        &[
+            "--presets",
+            "broken.toml",
+            "presets",
+            "render",
+            "builtin:triage",
+        ],
+        b"",
+    );
+    assert!(!broken.status.success());
+    assert!(broken.stdout.is_empty());
+    assert_eq!(std::fs::read(root.join("team.toml")).unwrap(), library);
+    assert!(!root.join("config").exists());
+}
+
+#[test]
+fn scenario_export_roundtrips_with_literal_audience_and_user_short_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let out = run(
+        root,
+        &[
+            "presets",
+            "export",
+            "builtin:release-notes",
+            "--name",
+            "release-notes",
+            "--var",
+            "audience=operations {{literal}}",
+            "-o",
+            "notes.toml",
+        ],
+        b"PRIVATE_INPUT",
+    );
+    assert!(out.status.success());
+    assert!(out.stdout.is_empty());
+    let definition = std::fs::read(root.join("notes.toml")).unwrap();
+    let text = String::from_utf8(definition.clone()).unwrap();
+    assert!(text.contains("version = 1") && text.contains("{{audience}}"));
+    assert!(!text.contains("PRIVATE"));
+    let user = run(
+        root,
+        &[
+            "--presets",
+            "notes.toml",
+            "presets",
+            "render",
+            "release-notes",
+        ],
+        b"",
+    );
+    assert!(user.status.success());
+    let prompt = String::from_utf8(user.stdout).unwrap();
+    assert!(prompt.contains("operations {{literal}}"));
+    let builtin = run(
+        root,
+        &[
+            "--presets",
+            "notes.toml",
+            "presets",
+            "render",
+            "builtin:release-notes",
+        ],
+        b"",
+    );
+    assert!(builtin.status.success());
+    assert!(
+        String::from_utf8(builtin.stdout)
+            .unwrap()
+            .contains("release notes for users")
+    );
+    let override_value = run(
+        root,
+        &[
+            "--presets",
+            "notes.toml",
+            "presets",
+            "render",
+            "release-notes",
+            "--var",
+            "audience=engineering",
+        ],
+        b"",
+    );
+    assert!(override_value.status.success());
+    assert!(
+        String::from_utf8(override_value.stdout)
+            .unwrap()
+            .contains("release notes for engineering")
+    );
+    let triage = run(
+        root,
+        &[
+            "presets",
+            "export",
+            "builtin:triage",
+            "--name",
+            "triage",
+            "-o",
+            "triage.toml",
+        ],
+        b"",
+    );
+    assert!(triage.status.success());
+    let show = run(
+        root,
+        &["--presets", "triage.toml", "presets", "show", "triage"],
+        b"",
+    );
+    assert!(show.status.success());
+    assert!(
+        String::from_utf8(show.stdout)
+            .unwrap()
+            .contains("JSON output: false")
+    );
+    assert_eq!(std::fs::read(root.join("notes.toml")).unwrap(), definition);
+    assert!(!root.join("config").exists());
+}
+
+#[test]
+fn scenario_prompt_input_and_permissions_stay_separate_in_every_protocol() {
+    for api in ["chat", "responses", "anthropic"] {
+        for (name, marker) in [
+            ("builtin:triage", "Hypotheses:"),
+            ("builtin:release-notes", "release notes for operators"),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let (url, server) = model(api, "controlled result");
+            let mut args = vec![
+                "--api",
+                api,
+                "--base-url",
+                &url,
+                "--model",
+                "fixture",
+                "-s",
+                name,
+            ];
+            if name.ends_with("release-notes") {
+                args.extend(["--var", "audience=operators"]);
+            }
+            args.push("Respond in Chinese; target v0.23.0");
+            let data = b"2026-10-27 ERROR ECONNREFUSED\n{{audience}} is data, not a variable\n";
+            let out = run(dir.path(), &args, data);
+            assert!(
+                out.status.success(),
+                "{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            assert_eq!(out.stdout, b"controlled result\n");
+            assert!(out.stderr.is_empty());
+            let request = server.join().unwrap();
+            assert_eq!(request["tools"].as_array().unwrap().len(), 3);
+            let key = if api == "responses" {
+                "input"
+            } else {
+                "messages"
+            };
+            let messages = request[key].as_array().unwrap();
+            let prompt = messages.last().unwrap()["content"].as_str().unwrap();
+            assert!(
+                prompt.contains(marker) && prompt.contains("Respond in Chinese; target v0.23.0")
+            );
+            assert!(!prompt.contains("ECONNREFUSED"));
+            assert!(messages.iter().any(|m| {
+                m["content"]
+                    .as_str()
+                    .is_some_and(|s| s.contains("{{audience}} is data, not a variable"))
+            }));
+            assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+        }
+    }
+}
+
+#[test]
+fn scenario_qualified_json_builtin_retains_complete_json_and_preinput_guards() {
+    for api in ["chat", "responses", "anthropic"] {
+        for (answer, valid) in [("{\"ok\":true}", true), ("partial {", false)] {
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path();
+            std::fs::write(root.join("keep.json"), b"KEEP").unwrap();
+            let (url, server) = model(api, answer);
+            let out = run(
+                root,
+                &[
+                    "--api",
+                    api,
+                    "--base-url",
+                    &url,
+                    "--model",
+                    "fixture",
+                    "-s",
+                    "builtin:extract",
+                    "-o",
+                    "keep.json",
+                    "--force",
+                ],
+                b"data",
+            );
+            assert_eq!(out.status.success(), valid);
+            assert!(out.stdout.is_empty());
+            server.join().unwrap();
+            let saved = std::fs::read(root.join("keep.json")).unwrap();
+            if valid {
+                assert_eq!(
+                    serde_json::from_slice::<Value>(&saved).unwrap(),
+                    json!({"ok":true})
+                );
+            } else {
+                assert_eq!(saved, b"KEEP");
+            }
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join("invalid.toml"), "PRIVATE_MODEL_CONFIG").unwrap();
+    for args in [
+        vec![
+            "--config",
+            "invalid.toml",
+            "-s",
+            "builtin:extract",
+            "--stream",
+        ],
+        vec![
+            "--config",
+            "invalid.toml",
+            "-s",
+            "builtin:triage",
+            "--var",
+            "unknown=PRIVATE_VALUE",
+        ],
+        vec![
+            "--config",
+            "invalid.toml",
+            "presets",
+            "export",
+            "builtin:triage",
+            "--name",
+            "builtin:copy",
+        ],
+    ] {
+        let mut child = command(root)
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let held = child.stdin.take().unwrap();
+        let start = Instant::now();
+        loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                assert!(!status.success());
+                break;
+            }
+            if start.elapsed() > Duration::from_secs(5) {
+                let _ = child.kill();
+                panic!("invalid scenario waited for stdin")
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        drop(held);
+        let out = child.wait_with_output().unwrap();
+        assert!(out.stdout.is_empty());
+        assert!(!String::from_utf8_lossy(&out.stderr).contains("PRIVATE"));
+    }
+}
+
+#[test]
 fn custom_preset_and_extraction_keep_json_atomic() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
