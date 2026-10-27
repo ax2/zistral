@@ -1132,6 +1132,13 @@ fn model_turns(api: &str, calls: Vec<(Value, Value)>) -> (String, std::thread::J
                 assert!(ops.contains(&json!("csv-to-jsonl")));
                 assert!(ops.contains(&json!("jsonl-to-csv")));
                 assert!(ops.contains(&json!("jsonl-project")));
+                assert!(ops.contains(&json!("lines-include")));
+                assert!(ops.contains(&json!("lines-exclude")));
+                assert_eq!(schema["properties"]["contains"]["type"], "string");
+                assert_eq!(
+                    schema["properties"]["steps"]["items"]["properties"]["contains"],
+                    schema["properties"]["contains"]
+                );
                 assert_eq!(schema["properties"]["fields"]["maxItems"], 64);
                 assert_eq!(
                     schema["properties"]["fields"]["items"]["required"],
@@ -1601,4 +1608,336 @@ fn rich_terminal_names_native_transform_correctly() {
     assert!(transcript.contains("Transform input"), "{transcript}");
     assert!(!transcript.contains("Unknown tool"), "{transcript}");
     assert!(transcript.contains("verified"), "{transcript}");
+}
+
+#[test]
+fn literal_line_filters_work_offline_and_chain_through_real_process_pipes() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join("broken.toml"), "broken model configuration").unwrap();
+    let source =
+        "\u{feff}ERROR a.* 中\r\ninfo ok\r\nERROR a.* 中\nerror a.*\n\nERROR healthcheck\nlast\r";
+    std::fs::write(root.join("app.log"), source).unwrap();
+    let out = invoke(
+        root,
+        &[
+            "--config",
+            "broken.toml",
+            "data",
+            "lines-include",
+            "--contains",
+            "a.*",
+            "-i",
+            "app.log",
+        ],
+        b"ignored",
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        out.stdout,
+        "ERROR a.* 中\nERROR a.* 中\nerror a.*\n".as_bytes()
+    );
+    assert!(out.stderr.is_empty());
+    let mut first = command(root)
+        .args([
+            "data",
+            "--step",
+            "lines-include:ERROR",
+            "--step",
+            "lines-exclude:healthcheck",
+            "-i",
+            "app.log",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let out = command(root)
+        .args(["data", "dedupe"])
+        .stdin(Stdio::from(first.stdout.take().unwrap()))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap()
+        .wait_with_output()
+        .unwrap();
+    assert!(first.wait().unwrap().success() && out.status.success());
+    assert_eq!(out.stdout, "ERROR a.* 中\n".as_bytes());
+    assert!(out.stderr.is_empty());
+    let out = invoke(
+        root,
+        &[
+            "data",
+            "lines-exclude",
+            "--contains",
+            "ERROR",
+            "-i",
+            "app.log",
+        ],
+        b"",
+    );
+    assert!(out.status.success());
+    assert_eq!(out.stdout, b"info ok\nerror a.*\n\nlast\r\n");
+    let out = invoke(
+        root,
+        &["data", "lines-include", "--contains", "not present"],
+        b"some input",
+    );
+    assert!(out.status.success() && out.stdout.is_empty() && out.stderr.is_empty());
+    assert_eq!(
+        std::fs::read(root.join("app.log")).unwrap(),
+        source.as_bytes()
+    );
+    assert!(!root.join("config").exists());
+}
+
+#[test]
+fn line_filter_recipes_export_literals_and_preserve_results_on_later_failure() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let needle = "中:reverse.*\t\"\\";
+    let step = format!("lines-include:{needle}");
+    let plan = invoke(
+        root,
+        &[
+            "data",
+            "--show-plan",
+            "--step",
+            &step,
+            "--step",
+            "dedupe",
+            "-o",
+            "filter.toml",
+        ],
+        b"PRIVATE_DATA",
+    );
+    assert!(
+        plan.status.success(),
+        "{}",
+        String::from_utf8_lossy(&plan.stderr)
+    );
+    assert!(plan.stdout.is_empty() && plan.stderr.is_empty());
+    let definition = std::fs::read_to_string(root.join("filter.toml")).unwrap();
+    let value: toml::Value = toml::from_str(&definition).unwrap();
+    assert_eq!(value["steps"][0]["contains"].as_str(), Some(needle));
+    assert!(!definition.contains("PRIVATE_DATA"));
+    let input = format!("skip\r\n{needle}\r\n{needle}\n");
+    let out = invoke(root, &["data", "--recipe", "filter.toml"], input.as_bytes());
+    assert!(out.status.success());
+    assert_eq!(out.stdout, format!("{needle}\n").as_bytes());
+    let again = invoke(
+        root,
+        &["data", "--show-plan", "--recipe", "filter.toml"],
+        b"ignored",
+    );
+    assert!(again.status.success());
+    assert_eq!(again.stdout, definition.as_bytes());
+    let out = invoke(
+        root,
+        &["data", "--step", "lines-include:x:reverse"],
+        b"x:reverse\nx\n",
+    );
+    assert!(out.status.success());
+    assert_eq!(out.stdout, b"x:reverse\n");
+    std::fs::write(root.join("result.txt"), b"keep original\r\n").unwrap();
+    let out = invoke(
+        root,
+        &[
+            "data",
+            "--step",
+            "lines-include:PRIVATE",
+            "--step",
+            "json-minify",
+            "-o",
+            "result.txt",
+            "--force",
+        ],
+        b"PRIVATE_NOT_JSON\n",
+    );
+    assert!(!out.status.success() && out.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("step 2 failed"));
+    assert!(!String::from_utf8_lossy(&out.stderr).contains("PRIVATE"));
+    assert_eq!(
+        std::fs::read(root.join("result.txt")).unwrap(),
+        b"keep original\r\n"
+    );
+    let out = invoke(
+        root,
+        &[
+            "data",
+            "lines-exclude",
+            "--contains",
+            "original",
+            "-i",
+            "result.txt",
+            "-o",
+            "result.txt",
+            "--force",
+        ],
+        b"",
+    );
+    assert!(out.status.success());
+    assert!(std::fs::read(root.join("result.txt")).unwrap().is_empty());
+    assert!(!std::fs::read_dir(root).unwrap().any(|p| {
+        p.unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".zi-result-")
+    }));
+}
+
+#[test]
+fn invalid_line_filters_fail_and_preview_finishes_while_stdin_stays_open() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join("keep.txt"), b"original").unwrap();
+    let long = "界".repeat(1366);
+    let mut cases = vec![
+        vec!["data", "lines-include"],
+        vec!["data", "lines-exclude", "--contains", ""],
+        vec!["data", "lines-include", "--contains", "a\nb"],
+        vec!["data", "lines-include", "--contains", "a\rb"],
+        vec!["data", "lines-include", "--contains", &long],
+        vec!["data", "trim", "--contains", "x"],
+        vec!["data", "lines-include", "--contains", "x", "--reverse"],
+        vec!["data", "lines-exclude", "--contains", "x", "--pointer", ""],
+        vec!["data", "--step", "lines-include:"],
+        vec!["data", "--step", "trim", "--contains", "x"],
+    ];
+    for (index, definition) in [
+        "version=1\n[[steps]]\noperation='lines-include'\ncontains=7\n",
+        "version=1\n[[steps]]\noperation='lines-exclude'\ncontains=''\n",
+        "version=1\n[[steps]]\noperation='trim'\ncontains='x'\n",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        std::fs::write(root.join(format!("bad{index}.toml")), definition).unwrap();
+    }
+    cases.extend([
+        vec!["data", "--recipe", "bad0.toml"],
+        vec!["data", "--recipe", "bad1.toml"],
+        vec!["data", "--recipe", "bad2.toml"],
+    ]);
+    for args in cases {
+        let mut child = command(root)
+            .args(&args)
+            .args(["-o", "keep.txt", "--force"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let held = child.stdin.take().unwrap();
+        let end = Instant::now() + Duration::from_secs(3);
+        while child.try_wait().unwrap().is_none() {
+            if Instant::now() > end {
+                child.kill().ok();
+                panic!("invalid filter waited for stdin");
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        drop(held);
+        let out = child.wait_with_output().unwrap();
+        assert!(!out.status.success() && out.stdout.is_empty());
+        assert_eq!(std::fs::read(root.join("keep.txt")).unwrap(), b"original");
+    }
+    let mut child = command(root)
+        .args(["data", "--show-plan", "--step", "lines-exclude:healthcheck"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let held = child.stdin.take().unwrap();
+    let end = Instant::now() + Duration::from_secs(3);
+    while child.try_wait().unwrap().is_none() {
+        if Instant::now() > end {
+            child.kill().ok();
+            panic!("filter preview waited for stdin");
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    drop(held);
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success() && out.stderr.is_empty());
+    assert!(String::from_utf8_lossy(&out.stdout).contains("contains = \"healthcheck\""));
+    let source = "x\n".repeat(100001);
+    let out = invoke(
+        root,
+        &[
+            "data",
+            "lines-include",
+            "--contains",
+            "absent",
+            "-o",
+            "keep.txt",
+            "--force",
+        ],
+        source.as_bytes(),
+    );
+    assert!(!out.status.success() && out.stdout.is_empty());
+    assert_eq!(std::fs::read(root.join("keep.txt")).unwrap(), b"original");
+    assert!(!root.join("config").exists());
+}
+
+#[test]
+fn line_filter_tool_calls_share_schema_recover_and_restart_from_original_in_all_protocols() {
+    let input = "ERROR keep\nINFO original\nERROR healthcheck\nERROR keep\n";
+    for api in ["chat", "responses", "anthropic"] {
+        let dir = tempfile::tempdir().unwrap();
+        let calls = vec![
+            (
+                json!({"steps":[{"operation":"lines-include","contains":"ERROR"},{"operation":"lines-exclude","contains":"healthcheck"},{"operation":"dedupe"}]}),
+                json!("ERROR keep\n"),
+            ),
+            (
+                json!({"operation":"lines-include","contains":"absent"}),
+                json!(""),
+            ),
+            (
+                json!({"operation":"lines-include","contains":null}),
+                Value::Null,
+            ),
+            (
+                json!({"operation":"trim","contains":"PRIVATE"}),
+                Value::Null,
+            ),
+            (
+                json!({"steps":[{"operation":"lines-include","contains":"ERROR"},{"operation":"json-minify"}]}),
+                Value::Null,
+            ),
+            (
+                json!({"operation":"lines-exclude","contains":"ERROR"}),
+                json!("INFO original\n"),
+            ),
+        ];
+        let (url, server) = model_turns(api, calls);
+        let out = invoke(
+            dir.path(),
+            &[
+                "--api",
+                api,
+                "--base-url",
+                &url,
+                "--model",
+                "fixture",
+                "filter logs",
+            ],
+            input.as_bytes(),
+        );
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(out.stdout, b"verified\n");
+        assert!(out.stderr.is_empty());
+        server.join().unwrap();
+        assert!(!dir.path().join("config").exists());
+    }
 }

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.24.0 — 2026-10-27
+
+- Add offline `lines-include --contains TEXT` and `lines-exclude --contains TEXT` for
+  case-sensitive literal line filtering. Keep order, duplicates and whitespace; no regex,
+  glob, field predicate or Unicode normalization. No matches succeeds with empty output.
+- Share strict `contains` definitions across single operations, `--step`, version-1 recipes,
+  plan export and transform_input. Compose reusable log filtering with cleanup or model tasks.
+- Validate all options before input, count discarded lines against existing limits, and retain
+  complete-result/file protections and original-input tool isolation. No new dependencies,
+  tool names, permissions, Agent-loop changes or task memory.
+
 ## 0.23.0 — 2026-10-27
 
 - Add bundled `builtin:triage` for evidence-led log analysis and `builtin:release-notes`

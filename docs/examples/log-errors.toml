@@ -1,0 +1,12 @@
+version = 1
+
+[[steps]]
+operation = "lines-include"
+contains = "ERROR"
+
+[[steps]]
+operation = "lines-exclude"
+contains = "healthcheck"
+
+[[steps]]
+operation = "dedupe"

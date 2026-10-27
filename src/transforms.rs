@@ -25,6 +25,10 @@ pub enum Operation {
     Dedupe,
     /// Sort lines by case-sensitive Unicode order; retain duplicates
     Sort,
+    /// Keep lines containing an explicit case-sensitive literal substring
+    LinesInclude,
+    /// Keep lines not containing an explicit case-sensitive literal substring
+    LinesExclude,
     /// Pretty-print JSON without changing number/string tokens or key order
     JsonFormat,
     /// Remove only insignificant JSON whitespace
@@ -56,9 +60,15 @@ pub struct Step {
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
-        deserialize_with = "pointer_string"
+        deserialize_with = "optional_string"
     )]
     pub pointer: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_string"
+    )]
+    pub contains: Option<String>,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
@@ -73,7 +83,7 @@ fn projection_fields<'de, D: serde::Deserializer<'de>>(
     Vec::<crate::projection::Field>::deserialize(de).map(Some)
 }
 
-fn pointer_string<'de, D: serde::Deserializer<'de>>(
+fn optional_string<'de, D: serde::Deserializer<'de>>(
     de: D,
 ) -> std::result::Result<Option<String>, D::Error> {
     String::deserialize(de).map(Some)
@@ -87,6 +97,20 @@ impl Step {
     pub fn validate(&self) -> Result<()> {
         if self.reverse && self.operation != Operation::Sort {
             bail!("--reverse is only valid for sort");
+        }
+        match (&self.contains, self.operation) {
+            (Some(needle), Operation::LinesInclude | Operation::LinesExclude) => {
+                if needle.is_empty() || needle.len() > 4096 || needle.contains(['\r', '\n']) {
+                    bail!("contains requires 1-4096 UTF-8 bytes without CR or LF");
+                }
+            }
+            (None, Operation::LinesInclude | Operation::LinesExclude) => {
+                bail!(
+                    "line filtering requires explicit contains text; use --contains TEXT or recipe contains"
+                );
+            }
+            (Some(_), _) => bail!("contains is only valid for lines-include or lines-exclude"),
+            (None, _) => (),
         }
         match (&self.fields, self.operation) {
             (Some(fields), Operation::JsonlProject) => crate::projection::validate(fields)?,
@@ -402,6 +426,7 @@ fn run(input: &str, operation: Operation, reverse: bool, limit: usize) -> Result
         &Step {
             operation,
             reverse,
+            contains: None,
             pointer: None,
             fields: None,
         },
@@ -446,7 +471,11 @@ fn transform(input: &str, step: &Step, input_limit: usize, limit: usize) -> Resu
     let operation = step.operation;
     let mut out = Buffer::new(limit);
     match operation {
-        Operation::Trim | Operation::Dedupe | Operation::Sort => {
+        Operation::Trim
+        | Operation::Dedupe
+        | Operation::Sort
+        | Operation::LinesInclude
+        | Operation::LinesExclude => {
             let mut lines: Vec<_> = input.lines().take(MAX_ITEMS + 1).collect();
             if lines.len() > MAX_ITEMS {
                 bail!("line transformations accept at most 100000 lines");
@@ -456,6 +485,12 @@ fn transform(input: &str, step: &Step, input_limit: usize, limit: usize) -> Resu
                 Operation::Dedupe => {
                     let mut seen = HashSet::new();
                     lines.retain(|line| seen.insert(*line));
+                }
+                Operation::LinesInclude | Operation::LinesExclude => {
+                    let needle = step.contains.as_deref().expect("validated contains text");
+                    lines.retain(|line| {
+                        line.contains(needle) == (operation == Operation::LinesInclude)
+                    });
                 }
                 Operation::Sort => {
                     lines.sort_unstable();
@@ -527,7 +562,7 @@ pub fn execute(arguments: &str, input: &str) -> Result<String> {
     }
     let args: Args = serde_json::from_str(arguments).map_err(|_| {
         anyhow::anyhow!(
-            "transform_input requires either operation with optional reverse/pointer/fields, or 1-16 steps of the same shape; do not combine them"
+            "transform_input requires either operation with optional reverse/pointer/fields/contains, or 1-16 steps of the same shape; do not combine them"
         )
     })?;
     let output = match args {
@@ -585,6 +620,7 @@ mod tests {
         let step = Step {
             operation: Operation::JsonlProject,
             reverse: false,
+            contains: None,
             pointer: None,
             fields: Some(vec![field.clone()]),
         };
@@ -673,6 +709,7 @@ mod tests {
         let step = Step {
             operation: Operation::JsonlToCsv,
             reverse: false,
+            contains: None,
             pointer: None,
             fields: None,
         };
@@ -703,6 +740,7 @@ mod tests {
         let step = Step {
             operation: Operation::CsvToJsonl,
             reverse: false,
+            contains: None,
             pointer: None,
             fields: None,
         };
@@ -734,6 +772,7 @@ mod tests {
         let step = Step {
             operation: Operation::JsonlSelect,
             reverse: false,
+            contains: None,
             pointer: Some(String::new()),
             fields: None,
         };
@@ -1015,6 +1054,7 @@ mod tests {
         let step = |operation, reverse| Step {
             operation,
             reverse,
+            contains: None,
             pointer: None,
             fields: None,
         };
@@ -1150,5 +1190,84 @@ mod tests {
             "]".repeat(127)
         );
         assert!(run(&growing, Operation::JsonFormat, false, CLI_OUTPUT).is_err());
+    }
+
+    #[test]
+    fn line_filters_are_literal_ordered_and_preserve_line_contents() {
+        let run_filter = |operation: &str, needle: &str, input: &str| {
+            let args = serde_json::json!({"operation":operation,"contains":needle}).to_string();
+            let result: serde_json::Value =
+                serde_json::from_str(&execute(&args, input).unwrap()).unwrap();
+            result["output"].as_str().unwrap().to_owned()
+        };
+        let input =
+            "  ERROR a.* 中\r\nerror a.*\n  ERROR a.* 中\n\nERROR e\u{301}\nERROR é\nlast\r";
+        assert_eq!(
+            run_filter("lines-include", "ERROR", input),
+            "  ERROR a.* 中\n  ERROR a.* 中\nERROR e\u{301}\nERROR é\n"
+        );
+        assert_eq!(
+            run_filter("lines-exclude", "ERROR", input),
+            "error a.*\n\nlast\r\n"
+        );
+        assert_eq!(
+            run_filter("lines-include", "a.*", input),
+            "  ERROR a.* 中\nerror a.*\n  ERROR a.* 中\n"
+        );
+        assert_eq!(run_filter("lines-include", "é", input), "ERROR é\n");
+        assert_eq!(run_filter("lines-include", "\t", "a\tb\n a b\n"), "a\tb\n");
+        for operation in ["lines-include", "lines-exclude"] {
+            assert_eq!(run_filter(operation, "x", ""), "");
+        }
+        assert_eq!(run_filter("lines-include", "missing", input), "");
+    }
+
+    #[test]
+    fn line_filter_limits_apply_before_discarding_and_to_serialized_tool_output() {
+        let mut step = Step {
+            operation: Operation::LinesInclude,
+            reverse: false,
+            pointer: None,
+            fields: None,
+            contains: Some("x".into()),
+        };
+        let input = "x\n".repeat(MAX_ITEMS);
+        assert_eq!(
+            transform(&input, &step, MAX_INPUT, CLI_OUTPUT)
+                .unwrap()
+                .lines()
+                .count(),
+            MAX_ITEMS
+        );
+        step.contains = Some("absent".into());
+        assert!(transform(&(input + "x\n"), &step, MAX_INPUT, CLI_OUTPUT).is_err());
+        assert!(transform(&"x".repeat(MAX_INPUT + 1), &step, MAX_INPUT, CLI_OUTPUT).is_err());
+        step.contains = Some("界".repeat(1365) + "x");
+        assert!(step.validate().is_ok());
+        step.contains.as_mut().unwrap().push('x');
+        assert!(step.validate().is_err());
+        step.contains = Some("x".into());
+        assert!(transform("x", &step, MAX_INPUT, 1).is_err());
+        let escaped = "\"".repeat(40000);
+        step.contains = Some("\"".into());
+        assert!(transform(&escaped, &step, MAX_INPUT, TOOL_OUTPUT).is_ok());
+        assert!(execute(r#"{"operation":"lines-include","contains":"\""}"#, &escaped).is_err());
+        for args in [
+            r#"{"operation":"lines-include"}"#,
+            r#"{"operation":"lines-exclude","contains":""}"#,
+            r#"{"operation":"lines-include","contains":null}"#,
+            r#"{"operation":"lines-include","contains":true}"#,
+            r#"{"operation":"lines-include","contains":"PRIVATE\n"}"#,
+            r#"{"operation":"lines-exclude","contains":"PRIVATE\r"}"#,
+            r#"{"operation":"trim","contains":""}"#,
+            r#"{"operation":"trim","contains":null}"#,
+            r#"{"operation":"lines-include","contains":"x","reverse":true}"#,
+            r#"{"operation":"lines-include","contains":"x","pointer":""}"#,
+            r#"{"operation":"lines-include","contains":"x","fields":[]}"#,
+            r#"{"steps":[{"operation":"trim"}],"contains":"x"}"#,
+        ] {
+            let error = format!("{:#}", execute(args, "PRIVATE_INPUT").unwrap_err());
+            assert!(!error.contains("PRIVATE"), "{error}");
+        }
     }
 }

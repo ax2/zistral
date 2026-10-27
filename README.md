@@ -20,7 +20,7 @@ Download a native installer from [Releases](https://github.com/ax2/zistral/relea
 | Platform | Package | Installation |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | Per-user installer; adds PATH and a Start menu launcher; no administrator required |
-| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.23.0-linux-amd64.deb` |
+| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.24.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | Open the package; installs `/usr/local/bin/zi` |
 
 Then type `zi`. On first launch, choose an existing Codex, WorkBuddy or dsh configuration,
@@ -656,3 +656,18 @@ custom `triage`/`release-notes` entries untouched. Existing builtins also accept
 these references never select an unrelated custom definition. Preview and export are offline,
 while model tasks still need configuration and factual review. No new tools or memory.
 See [task scenarios](docs/task-scenarios.md) for lookup, export and quality boundaries.
+
+## Filter log lines before a task
+
+```sh
+zi data lines-include --contains ERROR -i app.log
+zi data --recipe docs/examples/log-errors.toml -i app.log -o errors.log
+zi data --step lines-include:ERROR --step lines-exclude:healthcheck -i app.log | zi -s builtin:triage
+```
+
+Keep or exclude whole lines by an explicit case-sensitive literal substring, without a model.
+Matching is not regex, JSON-field filtering or secret detection. Order and duplicates stay;
+no matches succeeds with empty output. The same `contains` definition can be previewed,
+exported and used by transform_input. Filtering inside a model tool does not undo disclosure
+of the task's original input; filter locally before piping to a model when you want to choose
+its input. See [line filtering](docs/line-filtering.md) for limits and newline semantics.

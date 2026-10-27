@@ -45,7 +45,7 @@ The full project mode has 15 tools. Data mode exposes count/select/transform; re
 excludes file mutation and arbitrary shell execution, including enforcement if a provider
 requests tools that were not advertised. `--no-tools` disables project capabilities too.
 
-`transforms.rs` implements thirteen deterministic operations on explicit input, shared by the
+`transforms.rs` implements fifteen deterministic operations on explicit input, shared by the
 offline `zi data` command and the `transform_input` tool. They do not access a model,
 filesystem or shell. JSON syntax is checked with serde's IgnoredAny; a lexical formatter
 changes only insignificant whitespace, preserving number/string tokens, key order and
@@ -184,3 +184,10 @@ references. Lookup never falls back to arbitrary custom entries, nor bypasses se
 validation. The shared preset flow keeps JSON/capability/independent-task boundaries.
 No new dependencies, model tools, loop logic, permissions or memory.
 See [task scenarios](task-scenarios.md).
+
+Since v0.24.0, `lines-include`/`lines-exclude` filter whole lines by explicit bounded
+`contains` literals. CLI, saved plans and transform_input share definition validation and
+complete-result behavior; discarded lines still count toward the 100000-line cap. This is
+case-sensitive raw-line matching, not regex, structured predicates or implicit redaction.
+It adds no dependencies, model tool names, permissions, Agent-loop logic or memory.
+See [line filtering](line-filtering.md).

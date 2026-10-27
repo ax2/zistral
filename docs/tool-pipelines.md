@@ -84,3 +84,10 @@ and subtree order remain exact, missing/ambiguous references fail, and the added
 counts toward depth128. Projection can feed CSV without expressions or hidden state.
 No new dependencies, tool names, permissions, Agent loop or memory.
 See [JSONL projection](jsonl-projection.md).
+
+Since v0.24.0, `lines-include`/`lines-exclude` filter whole lines by explicit bounded
+`contains` literals. CLI, saved plans and transform_input share definition validation and
+complete-result behavior; discarded lines still count toward the 100000-line cap. This is
+case-sensitive raw-line matching, not regex, structured predicates or implicit redaction.
+It adds no dependencies, model tool names, permissions, Agent-loop logic or memory.
+See [line filtering](line-filtering.md).

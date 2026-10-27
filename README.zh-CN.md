@@ -17,7 +17,7 @@ git diff | zi "生成一句简洁的提交说明"
 | 平台 | 安装包 | 安装方法 |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | 双击安装，无需管理员权限，自动添加用户 PATH 和开始菜单入口 |
-| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.23.0-linux-amd64.deb` |
+| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.24.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | 双击安装，命令放到 `/usr/local/bin/zi` |
 
 安装后直接运行 `zi`。Windows 安装结束可立即启动，或在开始菜单打开 zi；
@@ -482,3 +482,16 @@ zi presets render builtin:release-notes --var audience=operators
 内置场景扩展到九个。新场景使用限定名，已有自定义 `triage`、`release-notes` 不受影响；
 原有七个短名也接受 `builtin:NAME` 明确引用。限定引用不回退到任意用户定义。预览和导出
 离线运行，实际模型任务仍需配置并审核结果，不增加工具或记忆。见 [常用任务场景](docs/task-scenarios.md)。
+
+## 先筛选日志，再执行任务
+
+```sh
+zi data lines-include --contains ERROR -i app.log
+zi data --recipe docs/examples/log-errors.toml -i app.log -o errors.log
+zi data --step lines-include:ERROR --step lines-exclude:healthcheck -i app.log | zi -s builtin:triage
+```
+
+按明确的字面子串保留或排除整行，离线执行，区分大小写。保留原顺序、重复行与行内空白，
+没有匹配时成功输出零字节；不执行正则、JSON 字段条件或敏感信息识别。相同的 contains 定义
+可预览、导出、保存为配方或用于现有 transform_input。模型工具内的筛选不会撤回原任务已提供
+给模型的数据；需要先选输入时，先离线处理再通过管道交给模型。见 [字面行筛选](docs/line-filtering.md)。
