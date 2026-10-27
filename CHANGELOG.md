@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.25.2 — 2026-10-27
+
+- Preserve valid JSON string values and keys in direct terminal output: render literal
+  DEL/C1 characters as JSON Unicode escapes instead of deleting them as plain-text controls.
+  Keep numeric spellings, duplicate keys, existing escape tokens and ordinary Unicode intact.
+- Keep validated compact JSON byte-exact under existing rules in pipes, explicit files and
+  interactive `/save`; terminal escaping affects only model JSON display. No new dependencies,
+  model tools, requests, permissions, streaming changes or task history.
+- Add host-independent all-DEL/C1 value/token regression coverage and all-protocol terminal,
+  saved-result and raw pipe/file tests. Document the distinction between JSON escaping and
+  ordinary model-text terminal cleanup.
+
 ## 0.25.1 — 2026-10-27
 
 - Sanitize complete model answers sent directly to a terminal even when rich display is

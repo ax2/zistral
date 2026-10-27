@@ -500,7 +500,12 @@ fn emit(output: &str, cli: &Cli) -> Result<()> {
     if ui::enabled(cli) && !cli.count && cli.select.is_none() {
         ui::result(output, cli)
     } else if !cli.count && cli.select.is_none() && io::stdout().is_terminal() {
-        write_output(&ui::clean(output))
+        let shown = if cli.json {
+            ui::json_display(output)
+        } else {
+            ui::clean(output)
+        };
+        write_output(&shown)
     } else {
         write_output(output)
     }

@@ -507,3 +507,52 @@ fn terminal_control_cleanup_never_rewrites_redirected_or_explicit_file_results()
         }
     }
 }
+
+#[test]
+fn json_control_display_escaping_leaves_pipes_and_files_byte_exact() {
+    let payload = " { \"s\":\"L\u{007f}\u{0080}\u{009b}\u{009f}R\", \"n\":1.2300E+400, \"escaped\":\"\\u0080\" } ";
+    let expected = "{\"s\":\"L\u{007f}\u{0080}\u{009b}\u{009f}R\",\"n\":1.2300E+400,\"escaped\":\"\\u0080\"}\n";
+    for api in ["chat", "responses", "anthropic"] {
+        for plain in [false, true] {
+            for file in [false, true] {
+                let dir = tempfile::tempdir().unwrap();
+                let root = dir.path();
+                let (url, server) = model(api, payload, 200, None);
+                let mut args = vec![
+                    "--api",
+                    api,
+                    "--base-url",
+                    &url,
+                    "--model",
+                    "fixture",
+                    "--json",
+                ];
+                if plain {
+                    args.push("--plain");
+                }
+                if file {
+                    args.extend(["-o", "result.json"]);
+                }
+                args.push("return json");
+                let out = invoke(root, &args, b"");
+                assert!(
+                    out.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&out.stderr)
+                );
+                if file {
+                    assert!(out.stdout.is_empty());
+                    assert_eq!(
+                        std::fs::read(root.join("result.json")).unwrap(),
+                        expected.as_bytes()
+                    );
+                } else {
+                    assert_eq!(out.stdout, expected.as_bytes());
+                }
+                assert!(out.stderr.is_empty());
+                server.join().unwrap();
+                no_temporary_files(root);
+            }
+        }
+    }
+}

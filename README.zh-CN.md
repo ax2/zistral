@@ -17,7 +17,7 @@ git diff | zi "生成一句简洁的提交说明"
 | 平台 | 安装包 | 安装方法 |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | 双击安装，无需管理员权限，自动添加用户 PATH 和开始菜单入口 |
-| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.25.1-linux-amd64.deb` |
+| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.25.2-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | 双击安装，命令放到 `/usr/local/bin/zi` |
 
 安装后直接运行 `zi`。Windows 安装结束可立即启动，或在开始菜单打开 zi；
@@ -513,3 +513,6 @@ zi data --step lines-include:ERROR --step lines-exclude:healthcheck -i app.log |
 
 完整模型回答直接显示到终端时，`--plain` 或 `TERM=dumb` 也会清理模型返回的终端控制序列。
 管道、显式文件和 `/save` 保留原始内容与既有换行规则；见 [终端输出边界](docs/terminal-output.md)。
+
+`--json` 模型结果直接显示到终端时，字面 DEL/C1 字符改为 JSON Unicode 转义，解析后的键和值不丢失。
+管道、显式文件与 `/save` 保留既有紧凑 JSON 字节；数字写法和已有转义均保留。

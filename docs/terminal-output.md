@@ -36,9 +36,20 @@ stream can still have displayed partial text under the existing explicit streami
 
 Interactive result retention stays separate: display borrows the answer, while `/save`
 keeps the original successful text. It does not capture the sanitized screen transcript.
-JSON tasks still validate and compact before display/export. Valid JSON escape tokens such
-as `\u001b` remain escaped JSON text; this patch does not decode them into terminal commands
-or change numeric/string precision.
+JSON tasks still validate and compact before display/export. Since v0.25.2, model JSON
+sent directly to a terminal uses JSON escaping instead of the ordinary text cleaner:
+literal DEL/C1 characters in strings and keys become `\u007f` through `\u009f`.
+The displayed JSON parses to the same values, without sending those literal controls to
+the terminal host. Existing escape tokens, numeric spelling (including large exponents),
+duplicate keys and ordinary Unicode pass through without parsing/reserializing the result.
+Pipe/file output and retained `/save` results keep the validated compact original bytes.
+This applies in default, `--plain` and `TERM=dumb` display modes; JSON remains buffered and
+fully validated before anything is displayed.
+
+A host-independent regression checks every DEL/C1 character in both string keys and values,
+separately from the operating system's terminal renderer. Real terminals verify all three
+model protocols, escaped display and original saved bytes. Separate pipe/file tests compare
+literal controls and original number/escape tokens byte for byte. No live model is needed.
 
 Offline count/select/data operations, configuration export and management commands retain
 their existing contracts. This fix is for model-answer display, not a general rewrite of

@@ -593,3 +593,41 @@ fn terminal_controls_in_complete_model_answers_are_removed_when_rich_display_is_
         }
     }
 }
+
+#[test]
+fn json_terminal_display_escapes_controls_without_losing_values_or_saved_bytes() {
+    let payload = " { \"s\":\"L\u{0080}\u{009b}R\", \"n\":1.2300E+400, \"escaped\":\"\\u0080\", \"text\":\"中文\" } ";
+    let compact = "{\"s\":\"L\u{0080}\u{009b}R\",\"n\":1.2300E+400,\"escaped\":\"\\u0080\",\"text\":\"中文\"}\n";
+    for api in ["chat", "responses", "anthropic"] {
+        for mode in ["default", "plain", "dumb"] {
+            let home = tempfile::tempdir().unwrap();
+            let (url, server) = export_server(vec![export_reply(api, payload, false, true)]);
+            export_config(home.path(), &url, api);
+            let output = terminal_with_environment(
+                &["--json"],
+                home.path(),
+                mode == "plain",
+                &[
+                    ("zi>", "json controls"),
+                    (r#""s":"L\u0080\u009bR""#, "/save result.json"),
+                    ("Saved result.json", "/exit"),
+                    ("Goodbye.", ""),
+                ],
+                if mode == "dumb" {
+                    &[("TERM", "dumb")]
+                } else {
+                    &[]
+                },
+            );
+            let visible = console::strip_ansi_codes(&output).replace(['\r', '\n'], "");
+            assert!(visible.contains(r#""n":1.2300E+400"#), "{output}");
+            assert!(visible.contains(r#""escaped":"\u0080""#), "{output}");
+            assert!(!output.contains(['\u{0080}', '\u{009b}']), "{output}");
+            assert_eq!(
+                std::fs::read(home.path().join("result.json")).unwrap(),
+                compact.as_bytes()
+            );
+            assert_independent_export_requests(api, &server.join().unwrap(), &["json controls"]);
+        }
+    }
+}

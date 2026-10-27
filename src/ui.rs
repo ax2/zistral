@@ -48,6 +48,21 @@ pub fn clean(text: &str) -> String {
     out
 }
 
+// Only for already validated, compact JSON sent to a terminal. Escaping keeps
+// literal DEL/C1 string values and keys intact without parsing/reserializing
+// numbers, duplicate keys, or existing escape tokens. Raw pipe/file text bypasses it.
+pub fn json_display(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        if c.is_control() {
+            out.push_str(&format!("\\u{:04x}", u32::from(c)));
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
 pub fn heading(title: &str) {
     eprintln!("\n  {} {}", style("◆").cyan(), style(title).bold());
 }
@@ -404,5 +419,27 @@ mod tests {
             "abcd\n"
         );
         assert_eq!(super::clean("你好\tworld"), "你好\tworld");
+    }
+
+    #[test]
+    fn json_display_preserves_values_and_original_tokens() {
+        // Validate before display, as main::emit does. Assert application text,
+        // independently of whether a terminal host consumes literal C1 bytes.
+        let controls: String = (0x7f..=0x9f).map(|c| char::from_u32(c).unwrap()).collect();
+        let text =
+            format!(r#"{{"{controls}":"LEFT{controls}RIGHT","escaped":"\u0080","text":"中文"}}"#);
+        crate::transforms::validate_json(&text).unwrap();
+        let shown = super::json_display(&text);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&shown).unwrap(),
+            serde_json::from_str::<serde_json::Value>(&text).unwrap(),
+            "JSON display changed a string value or key"
+        );
+        assert!(!shown.chars().any(char::is_control));
+        assert!(shown.contains(r#"\u007f\u0080"#));
+        assert!(shown.contains(r#""escaped":"\u0080""#));
+        let tokens = r#"{"n":1.2300E+400,"n":-0.00,"s":"\u4E2D","a":[true,null]}"#;
+        crate::transforms::validate_json(tokens).unwrap();
+        assert_eq!(super::json_display(tokens), tokens);
     }
 }
