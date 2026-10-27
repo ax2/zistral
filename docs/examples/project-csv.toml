@@ -1,0 +1,15 @@
+version = 1
+
+[[steps]]
+operation = "jsonl-project"
+
+[[steps.fields]]
+name = "id"
+pointer = "/payload/id"
+
+[[steps.fields]]
+name = "amount"
+pointer = "/payload/n"
+
+[[steps]]
+operation = "jsonl-to-csv"

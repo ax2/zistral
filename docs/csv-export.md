@@ -39,8 +39,8 @@ line"
 - Numbers retain their original token spelling, including huge integers, exponent case,
   trailing fractional zeros and negative zero. They are never parsed as floating point.
   Booleans and null become the text `true`, `false` or `null`.
-- Nested objects/arrays are rejected instead of stringified implicitly. Use existing
-  JSON selection or reshape the data explicitly first. Root arrays can use `array-to-jsonl`.
+- Nested objects/arrays are rejected instead of stringified implicitly. Use [JSONL projection](jsonl-projection.md) for several explicit scalar paths,
+  or existing single JSON selection first. Root arrays can use `array-to-jsonl`.
 - Empty input fails because there is no object from which to infer a header. Empty objects,
   blank JSONL records, nonobject records and invalid JSON also fail. JSONL accepts LF/CRLF
   record endings; a field's line break must be encoded within its JSON string.

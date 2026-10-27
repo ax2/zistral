@@ -17,7 +17,7 @@ git diff | zi "生成一句简洁的提交说明"
 | 平台 | 安装包 | 安装方法 |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | 双击安装，无需管理员权限，自动添加用户 PATH 和开始菜单入口 |
-| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.21.0-linux-amd64.deb` |
+| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.22.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | 双击安装，命令放到 `/usr/local/bin/zi` |
 
 安装后直接运行 `zi`。Windows 安装结束可立即启动，或在开始菜单打开 zi；
@@ -459,3 +459,14 @@ zi data --recipe docs/examples/api-csv.toml -i response.json
 数字原文本、布尔和 null 输出为单元格文本；统一引用全部字段，使用 LF 记录结束符且无 BOM。
 缺列、多列、重复键、嵌套值和坏记录会失败，不交付半份结果。CSV 不保存 JSON 类型，
 引用也不能控制电子表格的类型推断或净化公式内容。规则和限制见 [CSV 导出](docs/csv-export.md)。
+
+## 同时选择并重命名多个 JSONL 字段
+
+```sh
+zi data jsonl-project --field id=/payload/id --field amount=/payload/n -i events.jsonl
+zi data --recipe docs/examples/project-csv.toml -i events.jsonl -o table.csv
+```
+
+按明确字段定义的顺序，为每条记录生成新对象，保留选中 JSON 值及数字、字符串原表达。
+缺失或歧义路径会失败，不跳行、不补值、不执行表达式。复合投影和 CSV 流程使用 version=1
+配方；`--show-plan` 可在不读取数据时保存定义。边界与示例见 [JSONL 字段投影](docs/jsonl-projection.md)。

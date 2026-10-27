@@ -33,14 +33,14 @@ The previous form remains compatible:
 ```
 
 Exactly one of `operation` or `steps` is required. A pipeline has 1–16 objects, each with
-`operation` and optional boolean `reverse`. Top-level `reverse` is for single-operation
+`operation` and operation-specific `reverse`, `pointer` or `fields`. Top-level options are for single-operation
 calls only. Unknown fields, null values, duplicated fields, mixed shapes and unsupported
 operations fail. Only sort accepts `reverse: true`; explicit false remains valid on any
 individual step. The complete plan is validated before transforming input.
 
 Allowed operations are trim, dedupe, sort, json-format, json-minify, json-keys,
-jsonl-to-array, array-to-jsonl, csv-to-jsonl, jsonl-to-csv, json-select and jsonl-select. The last two require an explicit
-string `pointer`; jsonl-select applies it to each record. No query/map/filter expressions, shell commands,
+jsonl-to-array, array-to-jsonl, csv-to-jsonl, jsonl-to-csv, jsonl-project, json-select and jsonl-select. The last two require an explicit
+string `pointer`; jsonl-select applies it to each record. No query/filter expressions, shell commands,
 file names, includes, variables or user-loaded code. JSON formatting/conversion retains
 numeric/string tokens, object order and repeated keys. Line operations use LF and their
 existing whitespace/order semantics; this is not arithmetic, numeric sorting or schema validation.
@@ -76,3 +76,11 @@ decode, every CSV field is quoted. Nested values and ambiguous columns fail; CSV
 JSON type metadata or spreadsheet formula sanitization. The shared bounded pipeline and
 original-input tools gain no new names, dependencies, permissions or memory.
 See [CSV export](csv-export.md).
+
+Since v0.22.0, `jsonl-project` selects/renames 1-64 explicit JSON pointers into each new
+ordered record object. Literal unique names and typed field definitions are shared by the
+single CLI command, version-1 recipe/plan and existing transform_input. Selected JSON tokens
+and subtree order remain exact, missing/ambiguous references fail, and the added object
+counts toward depth128. Projection can feed CSV without expressions or hidden state.
+No new dependencies, tool names, permissions, Agent loop or memory.
+See [JSONL projection](jsonl-projection.md).

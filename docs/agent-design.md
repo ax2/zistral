@@ -45,7 +45,7 @@ The full project mode has 15 tools. Data mode exposes count/select/transform; re
 excludes file mutation and arbitrary shell execution, including enforcement if a provider
 requests tools that were not advertised. `--no-tools` disables project capabilities too.
 
-`transforms.rs` implements twelve deterministic operations on explicit input, shared by the
+`transforms.rs` implements thirteen deterministic operations on explicit input, shared by the
 offline `zi data` command and the `transform_input` tool. They do not access a model,
 filesystem or shell. JSON syntax is checked with serde's IgnoredAny; a lexical formatter
 changes only insignificant whitespace, preserving number/string tokens, key order and
@@ -168,3 +168,11 @@ decode, every CSV field is quoted. Nested values and ambiguous columns fail; CSV
 JSON type metadata or spreadsheet formula sanitization. The shared bounded pipeline and
 original-input tools gain no new names, dependencies, permissions or memory.
 See [CSV export](csv-export.md).
+
+Since v0.22.0, `jsonl-project` selects/renames 1-64 explicit JSON pointers into each new
+ordered record object. Literal unique names and typed field definitions are shared by the
+single CLI command, version-1 recipe/plan and existing transform_input. Selected JSON tokens
+and subtree order remain exact, missing/ambiguous references fail, and the added object
+counts toward depth128. Projection can feed CSV without expressions or hidden state.
+No new dependencies, tool names, permissions, Agent loop or memory.
+See [JSONL projection](jsonl-projection.md).

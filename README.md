@@ -20,7 +20,7 @@ Download a native installer from [Releases](https://github.com/ax2/zistral/relea
 | Platform | Package | Installation |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | Per-user installer; adds PATH and a Start menu launcher; no administrator required |
-| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.21.0-linux-amd64.deb` |
+| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.22.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | Open the package; installs `/usr/local/bin/zi` |
 
 Then type `zi`. On first launch, choose an existing Codex, WorkBuddy or dsh configuration,
@@ -629,3 +629,16 @@ All fields are quoted, with LF terminators and no BOM. Missing/extra/duplicate k
 values or bad records fail without partial results. CSV has no JSON type metadata; quoting
 does not control spreadsheet inference or sanitize formula-like content.
 See [CSV export](docs/csv-export.md) for limits, typing and consumer boundaries.
+
+## Select and rename multiple JSONL fields
+
+```sh
+zi data jsonl-project --field id=/payload/id --field amount=/payload/n -i events.jsonl
+zi data --recipe docs/examples/project-csv.toml -i events.jsonl -o table.csv
+```
+
+Ordered literal field definitions build one new object per record, retaining selected JSON
+values and exact number/string tokens. Missing or ambiguous paths fail; no row skipping,
+inferred defaults or expressions. Use a version-1 recipe for compound projection and CSV.
+`--show-plan` can save a reusable definition without reading data.
+See [JSONL projection](docs/jsonl-projection.md) for field/pointer/output limits.

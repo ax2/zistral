@@ -86,3 +86,6 @@ the target after the whole pipeline succeeds. Shell `>` truncation, concurrent w
 file-metadata limits remain as documented for [result saving](../README.md#save-complete-results-without-truncating-a-file-first).
 
 No dependencies, tool names, network calls, project capabilities or persistent history added.
+
+For several output fields with literal aliases, use [jsonl-project](jsonl-projection.md)
+in v0.22.0 or later; single-value selection retains its existing behavior.

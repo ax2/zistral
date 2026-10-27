@@ -43,6 +43,8 @@ pub enum Operation {
     CsvToJsonl,
     /// Export flat scalar JSONL objects as quoted CSV; first object defines column order
     JsonlToCsv,
+    /// Select and rename multiple values into one ordered JSON object per JSONL record
+    JsonlProject,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -57,6 +59,18 @@ pub struct Step {
         deserialize_with = "pointer_string"
     )]
     pub pointer: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "projection_fields"
+    )]
+    pub fields: Option<Vec<crate::projection::Field>>,
+}
+
+fn projection_fields<'de, D: serde::Deserializer<'de>>(
+    de: D,
+) -> std::result::Result<Option<Vec<crate::projection::Field>>, D::Error> {
+    Vec::<crate::projection::Field>::deserialize(de).map(Some)
 }
 
 fn pointer_string<'de, D: serde::Deserializer<'de>>(
@@ -73,6 +87,14 @@ impl Step {
     pub fn validate(&self) -> Result<()> {
         if self.reverse && self.operation != Operation::Sort {
             bail!("--reverse is only valid for sort");
+        }
+        match (&self.fields, self.operation) {
+            (Some(fields), Operation::JsonlProject) => crate::projection::validate(fields)?,
+            (None, Operation::JsonlProject) => bail!(
+                "jsonl-project requires explicit fields; use --field NAME=POINTER or recipe fields"
+            ),
+            (Some(_), _) => bail!("fields are only valid for jsonl-project"),
+            (None, _) => (),
         }
         match (&self.pointer, self.operation) {
             (Some(pointer), Operation::JsonSelect | Operation::JsonlSelect) => {
@@ -267,6 +289,47 @@ fn jsonl_select(input: &str, pointer: &str, out: &mut Buffer) -> Result<()> {
     Ok(())
 }
 
+fn jsonl_project(input: &str, fields: &[crate::projection::Field], out: &mut Buffer) -> Result<()> {
+    for (index, line) in input.lines().enumerate() {
+        if index == MAX_ITEMS {
+            bail!("JSONL projection accepts at most 100000 records");
+        }
+        let start = out.bytes.len();
+        out.write_all(b"{")?;
+        for (position, field) in fields.iter().enumerate() {
+            if position != 0 {
+                out.write_all(b",")?;
+            }
+            serde_json::to_writer(&mut *out, &field.name)
+                .context("cannot encode projection name within output limit")?;
+            out.write_all(b":")?;
+            let selected = crate::selection::select_json(
+                line,
+                &field.pointer,
+                out.limit.saturating_sub(out.bytes.len()),
+            )
+            .with_context(|| {
+                format!(
+                    "cannot project JSONL record {}, field {}",
+                    index + 1,
+                    position + 1
+                )
+            })?;
+            out.write_all(selected.as_bytes())?;
+        }
+        out.write_all(b"}\n")?;
+        // The new object adds one container even when a pointer selects the whole record.
+        validate_json(std::str::from_utf8(&out.bytes[start..]).expect("UTF-8 JSON formatting"))
+            .with_context(|| {
+                format!(
+                    "projected JSONL record {} exceeds supported nesting",
+                    index + 1
+                )
+            })?;
+    }
+    Ok(())
+}
+
 fn array_to_jsonl(input: &str, out: &mut Buffer) -> Result<()> {
     validate_json(input)?;
     let input = input.trim();
@@ -340,6 +403,7 @@ fn run(input: &str, operation: Operation, reverse: bool, limit: usize) -> Result
             operation,
             reverse,
             pointer: None,
+            fields: None,
         },
         MAX_INPUT,
         limit,
@@ -425,6 +489,11 @@ fn transform(input: &str, step: &Step, input_limit: usize, limit: usize) -> Resu
         Operation::ArrayToJsonl => array_to_jsonl(input, &mut out)?,
         Operation::CsvToJsonl => crate::csv_input::to_jsonl(input, &mut out, MAX_ITEMS)?,
         Operation::JsonlToCsv => crate::csv_output::from_jsonl(input, &mut out, MAX_ITEMS)?,
+        Operation::JsonlProject => jsonl_project(
+            input,
+            step.fields.as_deref().expect("validated fields"),
+            &mut out,
+        )?,
         Operation::JsonlSelect => jsonl_select(
             input,
             step.pointer.as_deref().expect("validated pointer"),
@@ -458,7 +527,7 @@ pub fn execute(arguments: &str, input: &str) -> Result<String> {
     }
     let args: Args = serde_json::from_str(arguments).map_err(|_| {
         anyhow::anyhow!(
-            "transform_input requires either operation with optional reverse/pointer, or 1-16 steps of the same shape; do not combine them"
+            "transform_input requires either operation with optional reverse/pointer/fields, or 1-16 steps of the same shape; do not combine them"
         )
     })?;
     let output = match args {
@@ -476,11 +545,136 @@ pub fn execute(arguments: &str, input: &str) -> Result<String> {
 mod tests {
     use super::*;
     #[test]
+    fn projection_preserves_selected_values_and_literal_ordered_names() {
+        let args = r#"{"operation":"jsonl-project","fields":[{"name":"编号","pointer":"/payload/id"},{"name":"a\"\\","pointer":"/text"},{"name":"nested","pointer":"/obj"},{"name":"nullable","pointer":"/nil"}]}"#;
+        let input = r#"{"obj":{"z":1,"a":2,"z":3},"payload":{"id":1.2300E+400},"text":"\u4e2d\n","nil":null}"#;
+        let result: serde_json::Value =
+            serde_json::from_str(&execute(args, input).unwrap()).unwrap();
+        assert_eq!(
+            result["output"],
+            "{\"编号\":1.2300E+400,\"a\\\"\\\\\":\"\\u4e2d\\n\",\"nested\":{\"z\":1,\"a\":2,\"z\":3},\"nullable\":null}\n"
+        );
+        let root = r#"{"operation":"jsonl-project","fields":[{"name":"whole","pointer":""}]}"#;
+        let values: serde_json::Value =
+            serde_json::from_str(&execute(root, "-0\r\n\"\\u4e2d\"\nnull\n").unwrap()).unwrap();
+        assert_eq!(
+            values["output"],
+            "{\"whole\":-0}\n{\"whole\":\"\\u4e2d\"}\n{\"whole\":null}\n"
+        );
+        let dependent = r#"{"operation":"jsonl-project","fields":[{"name":"id","pointer":"/payload/id"},{"name":"copy","pointer":"/id"}]}"#;
+        let error = format!(
+            "{:#}",
+            execute(dependent, r#"{"payload":{"id":1}}"#).unwrap_err()
+        );
+        assert!(error.contains("record 1, field 2"));
+        for bad in [
+            r#"{"payload":{"id":1,"id":2},"text":"PRIVATE"}"#,
+            r#"{"payload":{"id":1},"text":"PRIVATE","bad":[1,]}"#,
+        ] {
+            let error = format!("{:#}", execute(args, bad).unwrap_err());
+            assert!(!error.contains("PRIVATE"));
+            assert!(error.contains("record 1"));
+        }
+    }
+    #[test]
+    fn projection_enforces_definition_record_depth_and_output_bounds() {
+        let field = crate::projection::Field {
+            name: "x".into(),
+            pointer: "".into(),
+        };
+        let step = Step {
+            operation: Operation::JsonlProject,
+            reverse: false,
+            pointer: None,
+            fields: Some(vec![field.clone()]),
+        };
+        assert_eq!(transform("", &step, MAX_INPUT, CLI_OUTPUT).unwrap(), "");
+        assert_eq!(
+            transform(&"0\n".repeat(MAX_ITEMS), &step, MAX_INPUT, CLI_OUTPUT)
+                .unwrap()
+                .lines()
+                .count(),
+            MAX_ITEMS
+        );
+        assert!(transform(&"0\n".repeat(MAX_ITEMS + 1), &step, MAX_INPUT, CLI_OUTPUT).is_err());
+        assert!(transform("1", &step, MAX_INPUT, 4).is_err());
+        let nested = |depth| format!("{}0{}", "[".repeat(depth), "]".repeat(depth));
+        assert!(transform(&nested(127), &step, MAX_INPUT, CLI_OUTPUT).is_ok());
+        assert!(transform(&nested(128), &step, MAX_INPUT, CLI_OUTPUT).is_err());
+        let long = serde_json::to_string(&"\\".repeat(20000)).unwrap();
+        assert!(
+            transform(&long, &step, MAX_INPUT, TOOL_OUTPUT)
+                .unwrap()
+                .len()
+                < TOOL_OUTPUT
+        );
+        assert!(
+            execute(
+                r#"{"operation":"jsonl-project","fields":[{"name":"x","pointer":""}]}"#,
+                &long
+            )
+            .is_err()
+        );
+        let mut many = step.clone();
+        many.fields = Some(
+            (0..64)
+                .map(|i| crate::projection::Field {
+                    name: format!("f{i}"),
+                    ..field.clone()
+                })
+                .collect(),
+        );
+        assert!(many.validate().is_ok());
+        many.fields
+            .as_mut()
+            .unwrap()
+            .push(crate::projection::Field {
+                name: "extra".into(),
+                ..field.clone()
+            });
+        assert!(many.validate().is_err());
+        for fields in [
+            vec![],
+            vec![field.clone(), field.clone()],
+            vec![crate::projection::Field {
+                name: "界".repeat(86),
+                ..field.clone()
+            }],
+            vec![crate::projection::Field {
+                name: "PRIVATE\n".into(),
+                ..field.clone()
+            }],
+            vec![crate::projection::Field {
+                pointer: "/PRIVATE~2".into(),
+                ..field.clone()
+            }],
+        ] {
+            let mut bad = step.clone();
+            bad.fields = Some(fields);
+            let error = format!("{:#}", bad.validate().unwrap_err());
+            assert!(!error.contains("PRIVATE"));
+        }
+        let mut boundary = step.clone();
+        boundary.fields.as_mut().unwrap()[0].name = "界".repeat(85) + "x";
+        assert!(boundary.validate().is_ok());
+        for args in [
+            r#"{"operation":"trim","fields":[]}"#,
+            r#"{"operation":"trim","fields":null}"#,
+            r#"{"operation":"jsonl-project","fields":null}"#,
+            r#"{"operation":"jsonl-project","fields":[{"name":"x"}]}"#,
+            r#"{"operation":"jsonl-project","pointer":"","fields":[{"name":"x","pointer":""}]}"#,
+            r#"{"steps":[{"operation":"trim"}],"fields":[]}"#,
+        ] {
+            assert!(execute(args, "").is_err());
+        }
+    }
+    #[test]
     fn csv_export_enforces_record_depth_output_and_serialized_envelope_bounds() {
         let step = Step {
             operation: Operation::JsonlToCsv,
             reverse: false,
             pointer: None,
+            fields: None,
         };
         let input = "{\"x\":0}\n".repeat(MAX_ITEMS);
         let output = transform(&input, &step, MAX_INPUT, CLI_OUTPUT).unwrap();
@@ -510,6 +704,7 @@ mod tests {
             operation: Operation::CsvToJsonl,
             reverse: false,
             pointer: None,
+            fields: None,
         };
         let input = format!("h\n{}", "x\n".repeat(MAX_ITEMS));
         assert_eq!(
@@ -540,6 +735,7 @@ mod tests {
             operation: Operation::JsonlSelect,
             reverse: false,
             pointer: Some(String::new()),
+            fields: None,
         };
         assert_eq!(transform("", &step, MAX_INPUT, CLI_OUTPUT).unwrap(), "");
         assert_eq!(
@@ -820,6 +1016,7 @@ mod tests {
             operation,
             reverse,
             pointer: None,
+            fields: None,
         };
         let source = format!(
             "{}{}-0{}",

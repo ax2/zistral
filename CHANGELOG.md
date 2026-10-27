@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.22.0 — 2026-10-27
+
+- Add offline `jsonl-project --field NAME=POINTER` to select/rename 1-64 values from each
+  JSONL record into an ordered object. Keep original numeric/string tokens and selected
+  subtree key order/repeated keys, with explicit pointers and literal unique output names.
+- Share typed field definitions across version-1 recipes, plan export and transform_input.
+  Compose projection with CSV output; add a nested-record-to-CSV example. Reject missing,
+  ambiguous or invalid references, unsupported options and oversized definitions/results.
+- Preserve fail-before-input argument validation and final-success-only stdout/file delivery,
+  including nested-output depth limits. No new dependencies, tool names, permissions or memory.
+
 ## 0.21.0 — 2026-10-27
 
 - Add offline `jsonl-to-csv` for nonempty flat scalar JSONL objects. The first object

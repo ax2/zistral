@@ -726,6 +726,291 @@ fn csv_export_model_recovers_and_composes_from_original_input_in_every_protocol(
     }
 }
 
+#[test]
+fn projection_offline_fields_recipe_and_real_pipe_keep_values_and_order() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join("invalid.toml"), "not a model config").unwrap();
+    let input=b"\xef\xbb\xbf{\"payload\":{\"id\":\"0007\",\"n\":123456789012345678901234567890},\"unused\":\"PRIVATE_INPUT\"}\r\n{\"payload\":{\"n\":1.2300E+400,\"id\":\"0008\"}}\n";
+    std::fs::write(root.join("events.jsonl"), input).unwrap();
+    let expected=b"{\"id\":\"0007\",\"amount\":123456789012345678901234567890}\n{\"id\":\"0008\",\"amount\":1.2300E+400}\n";
+    let out = invoke(
+        root,
+        &[
+            "--config",
+            "invalid.toml",
+            "data",
+            "jsonl-project",
+            "--field",
+            "id=/payload/id",
+            "--field",
+            "amount=/payload/n",
+            "-i",
+            "events.jsonl",
+        ],
+        b"",
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(out.stdout, expected);
+    assert!(out.stderr.is_empty());
+    let plan = invoke(
+        root,
+        &[
+            "--config",
+            "invalid.toml",
+            "data",
+            "jsonl-project",
+            "--field",
+            "id=/payload/id",
+            "--field",
+            "amount=/payload/n",
+            "--show-plan",
+            "-o",
+            "project.toml",
+        ],
+        b"PRIVATE_IGNORED",
+    );
+    assert!(plan.status.success());
+    assert!(plan.stdout.is_empty());
+    let definition = std::fs::read_to_string(root.join("project.toml")).unwrap();
+    assert!(!definition.contains("PRIVATE"));
+    assert!(definition.contains("[[steps.fields]]"));
+    let replay = invoke(
+        root,
+        &["data", "--recipe", "project.toml", "-i", "events.jsonl"],
+        b"",
+    );
+    assert!(replay.status.success());
+    assert_eq!(replay.stdout, expected);
+    std::fs::write(
+        root.join("csv.toml"),
+        definition + "\n[[steps]]\noperation = \"jsonl-to-csv\"\n",
+    )
+    .unwrap();
+    let csv=b"\"id\",\"amount\"\n\"0007\",\"123456789012345678901234567890\"\n\"0008\",\"1.2300E+400\"\n";
+    let replay = invoke(
+        root,
+        &[
+            "data",
+            "--recipe",
+            "csv.toml",
+            "-i",
+            "events.jsonl",
+            "-o",
+            "table.csv",
+        ],
+        b"",
+    );
+    assert!(replay.status.success());
+    assert!(replay.stdout.is_empty());
+    assert_eq!(std::fs::read(root.join("table.csv")).unwrap(), csv);
+    let mut first = command(root)
+        .args([
+            "data",
+            "jsonl-project",
+            "--field",
+            "id=/payload/id",
+            "--field",
+            "amount=/payload/n",
+            "-i",
+            "events.jsonl",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let out = command(root)
+        .args(["data", "jsonl-to-csv"])
+        .stdin(Stdio::from(first.stdout.take().unwrap()))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap()
+        .wait_with_output()
+        .unwrap();
+    assert!(first.wait().unwrap().success() && out.status.success());
+    assert_eq!(out.stdout, csv);
+    assert!(out.stderr.is_empty());
+    let literal = invoke(
+        root,
+        &[
+            "data",
+            "jsonl-project",
+            "--field",
+            "copy=/a=b",
+            "--field",
+            "whole=",
+        ],
+        b"{\"a=b\":-0}",
+    );
+    assert!(literal.status.success());
+    assert_eq!(literal.stdout, b"{\"copy\":-0,\"whole\":{\"a=b\":-0}}\n");
+    assert_eq!(std::fs::read(root.join("events.jsonl")).unwrap(), input);
+    assert!(!root.join("config").exists());
+}
+
+#[test]
+fn projection_bad_records_never_publish_prefixes_or_replace_existing_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join("keep.jsonl"), b"KEEP").unwrap();
+    let prefix = "{\"payload\":{\"id\":1,\"n\":-0}}\n{\"payload\":{\"n\":null,\"id\":2}}\n";
+    for bad in [
+        "\n",
+        "{\"payload\":{\"id\":\"PRIVATE\"}}",
+        "{\"payload\":{\"id\":3,\"n\":1,\"n\":2}}",
+        "{\"payload\":{\"id\":3,\"n\":\"PRIVATE\"},\"bad\":[1,]}",
+        "\"PRIVATE\"",
+        "{\"payload\":{\"id\":3,\"n\":\"PRIVATE\"",
+    ] {
+        for file in [false, true] {
+            let mut args = vec![
+                "data",
+                "jsonl-project",
+                "--field",
+                "id=/payload/id",
+                "--field",
+                "amount=/payload/n",
+            ];
+            if file {
+                args.extend(["-o", "keep.jsonl", "--force"]);
+            }
+            let out = invoke(root, &args, (prefix.to_owned() + bad).as_bytes());
+            assert!(!out.status.success());
+            assert!(out.stdout.is_empty());
+            let error = String::from_utf8_lossy(&out.stderr);
+            assert!(error.contains("record 3"), "{error}");
+            assert!(!error.contains("PRIVATE"));
+            assert_eq!(std::fs::read(root.join("keep.jsonl")).unwrap(), b"KEEP");
+        }
+    }
+    let out = invoke(root, &["data", "jsonl-project", "--field", "whole="], b"");
+    assert!(out.status.success());
+    assert!(out.stdout.is_empty() && out.stderr.is_empty());
+    assert!(!std::fs::read_dir(root).unwrap().any(|e| {
+        e.unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".zi-result-")
+    }));
+}
+
+#[test]
+fn projection_invalid_definitions_fail_before_stdin_or_output_mutation() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join("keep.toml"), b"KEEP").unwrap();
+    std::fs::write(
+        root.join("bad.toml"),
+        "version = 1\n[[steps]]\noperation = \"trim\"\nfields = []\n",
+    )
+    .unwrap();
+    let cases = vec![
+        vec!["data", "jsonl-project"],
+        vec!["data", "jsonl-project", "--field", "PRIVATE"],
+        vec!["data", "jsonl-project", "--field", "=/a"],
+        vec![
+            "data",
+            "jsonl-project",
+            "--field",
+            "id=/a",
+            "--field",
+            "id=/b",
+        ],
+        vec!["data", "trim", "--field", "id=/PRIVATE"],
+        vec!["data", "jsonl-project", "--field", "id=/PRIVATE~2"],
+        vec!["data", "jsonl-project", "--field", "id=/a", "--pointer", ""],
+        vec!["data", "jsonl-project", "--field", "id=/a", "--reverse"],
+        vec!["data", "--step", "jsonl-project", "--field", "id=/a"],
+        vec!["data", "--recipe", "bad.toml"],
+        vec!["data", "--recipe", "bad.toml", "--show-plan"],
+    ];
+    for mut args in cases {
+        args.extend(["-o", "keep.toml", "--force"]);
+        let mut child = command(root)
+            .args(&args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let held = child.stdin.take().unwrap();
+        let started = Instant::now();
+        loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                assert!(!status.success(), "{args:?}");
+                break;
+            }
+            if started.elapsed() > Duration::from_secs(5) {
+                let _ = child.kill();
+                panic!("invalid projection waited for stdin: {args:?}")
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        drop(held);
+        let out = child.wait_with_output().unwrap();
+        assert!(out.stdout.is_empty());
+        assert!(!String::from_utf8_lossy(&out.stderr).contains("PRIVATE"));
+        assert_eq!(std::fs::read(root.join("keep.toml")).unwrap(), b"KEEP");
+    }
+    assert!(!std::fs::read_dir(root).unwrap().any(|e| {
+        e.unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".zi-result-")
+    }));
+}
+
+#[test]
+fn projection_model_tool_recovers_and_composes_in_every_protocol() {
+    for api in ["chat", "responses", "anthropic"] {
+        let dir = tempfile::tempdir().unwrap();
+        let input=b"{\"data\":[{\"payload\":{\"id\":\"0007\",\"n\":123456789012345678901234567890}},{\"payload\":{\"n\":1.2300E+400,\"id\":\"0008\"}}]}";
+        let fields =
+            json!([{"name":"id","pointer":"/payload/id"},{"name":"amount","pointer":"/payload/n"}]);
+        let steps = json!({"steps":[{"operation":"json-select","pointer":"/data"},{"operation":"array-to-jsonl"},{"operation":"jsonl-project","fields":fields},{"operation":"jsonl-to-csv"}]});
+        let csv = "\"id\",\"amount\"\n\"0007\",\"123456789012345678901234567890\"\n\"0008\",\"1.2300E+400\"\n";
+        let (url, server) = model_turns(
+            api,
+            vec![
+                (
+                    json!({"operation":"jsonl-project","fields":[{"name":"id","pointer":"/data/0/PRIVATE"}]}),
+                    Value::Null,
+                ),
+                (steps.clone(), json!(csv)),
+                (json!({"operation":"trim","fields":[]}), Value::Null),
+                (steps, json!(csv)),
+            ],
+        );
+        let out = invoke(
+            dir.path(),
+            &[
+                "--api",
+                api,
+                "--base-url",
+                &url,
+                "--model",
+                "fixture",
+                "project nested records and export CSV",
+            ],
+            input,
+        );
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(out.stdout, b"verified\n");
+        assert!(out.stderr.is_empty());
+        server.join().unwrap();
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+}
+
 fn model(api: &str, args: Value, expected: Value) -> (String, std::thread::JoinHandle<()>) {
     model_turns(api, vec![(args, expected)])
 }
@@ -846,6 +1131,12 @@ fn model_turns(api: &str, calls: Vec<(Value, Value)>) -> (String, std::thread::J
                 assert!(ops.contains(&json!("jsonl-select")));
                 assert!(ops.contains(&json!("csv-to-jsonl")));
                 assert!(ops.contains(&json!("jsonl-to-csv")));
+                assert!(ops.contains(&json!("jsonl-project")));
+                assert_eq!(schema["properties"]["fields"]["maxItems"], 64);
+                assert_eq!(
+                    schema["properties"]["fields"]["items"]["required"],
+                    json!(["name", "pointer"])
+                );
                 assert_eq!(schema["properties"]["pointer"]["type"], "string");
                 let steps = &schema["properties"]["steps"];
                 assert_eq!(steps["minItems"], 1);
@@ -857,6 +1148,10 @@ fn model_turns(api: &str, calls: Vec<(Value, Value)>) -> (String, std::thread::J
                     ops
                 );
                 assert_eq!(steps["items"]["additionalProperties"], false);
+                assert_eq!(
+                    steps["items"]["properties"]["fields"],
+                    schema["properties"]["fields"]
+                );
                 assert_eq!(steps["items"]["properties"]["pointer"]["type"], "string");
             }
             if turn > 0 {
