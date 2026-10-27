@@ -1,0 +1,11 @@
+version = 1
+
+[[steps]]
+operation = "jsonl-select"
+pointer = "/payload/id"
+
+[[steps]]
+operation = "dedupe"
+
+[[steps]]
+operation = "jsonl-to-array"

@@ -91,3 +91,7 @@ JSON selection inside a recipe shortens nested API-response processing. An expli
 RFC 6901 pointer selects from the current intermediate; values stay JSON, not display text.
 The same Step validation is shared by saved plans and transform_input. This reuses the
 existing lexical selector, adds no tool names or permissions, and stores no data/history.
+
+Since v0.18.0, `jsonl-select` applies one explicit pointer to every JSONL record, with
+complete-result failure and original numeric/string tokens. It is shared by CLI plans
+and transform_input, adding no tool name or permission. See [record selection](jsonl-selection.md).

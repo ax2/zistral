@@ -92,3 +92,7 @@ execute embedded shell text.
 `--pointer` in single-operation mode, or `--step json-select:/path`. It returns compact
 JSON, including quoted strings, from the current intermediate. An explicit empty pointer
 selects the root. See [selection recipes](json-selection-recipes.md) for exact contracts.
+
+Since v0.18.0, `jsonl-select` applies one explicit pointer to every JSONL record, with
+complete-result failure and original numeric/string tokens. It is shared by CLI plans
+and transform_input, adding no tool name or permission. See [record selection](jsonl-selection.md).

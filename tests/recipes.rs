@@ -91,6 +91,218 @@ fn json_selection_plan_roundtrips_nested_pointer_and_exact_records() {
 }
 
 #[test]
+fn jsonl_selection_exports_reusable_plans_and_pipes_exact_values_offline() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(
+        root.path().join("invalid-model-config.toml"),
+        "broken config",
+    )
+    .unwrap();
+    let source = "\u{feff}{\"a/b\":{\"~id:reverse\":123456789012345678901234567890}}\r\n{\"a/b\":{\"~id:reverse\":1.2300E+400}}\n{\"a/b\":{\"~id:reverse\":123456789012345678901234567890}}";
+    std::fs::write(root.path().join("records.jsonl"), source).unwrap();
+    let plan = invoke(
+        root.path(),
+        &[
+            "data",
+            "--show-plan",
+            "--step",
+            "jsonl-select:/a~1b/~0id:reverse",
+            "--step",
+            "dedupe",
+            "--step",
+            "jsonl-to-array",
+            "-o",
+            "ids.toml",
+        ],
+        b"not input data",
+    );
+    assert!(
+        plan.status.success(),
+        "{}",
+        String::from_utf8_lossy(&plan.stderr)
+    );
+    assert!(plan.stdout.is_empty() && plan.stderr.is_empty());
+    let recipe = std::fs::read(root.path().join("ids.toml")).unwrap();
+    let out = invoke(
+        root.path(),
+        &["data", "--show-plan", "--recipe", "ids.toml"],
+        b"ignored",
+    );
+    assert!(out.status.success());
+    assert_eq!(out.stdout, recipe);
+    let out = invoke(
+        root.path(),
+        &[
+            "data",
+            "--recipe",
+            "ids.toml",
+            "-i",
+            "records.jsonl",
+            "-o",
+            "ids.json",
+        ],
+        b"ignored",
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(out.stdout.is_empty() && out.stderr.is_empty());
+    assert_eq!(
+        std::fs::read(root.path().join("ids.json")).unwrap(),
+        b"[123456789012345678901234567890,1.2300E+400]\n"
+    );
+    assert_eq!(
+        std::fs::read(root.path().join("records.jsonl")).unwrap(),
+        source.as_bytes()
+    );
+    let mut first = command(root.path())
+        .args([
+            "data",
+            "jsonl-select",
+            "--pointer",
+            "/a~1b/~0id:reverse",
+            "-i",
+            "records.jsonl",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let second = command(root.path())
+        .args(["data", "jsonl-to-array"])
+        .stdin(Stdio::from(first.stdout.take().unwrap()))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let out = second.wait_with_output().unwrap();
+    assert!(first.wait().unwrap().success() && out.status.success());
+    assert_eq!(
+        out.stdout,
+        b"[123456789012345678901234567890,1.2300E+400,123456789012345678901234567890]\n"
+    );
+    let out = invoke(
+        root.path(),
+        &[
+            "data",
+            "--step",
+            "json-select:/items",
+            "--step",
+            "array-to-jsonl",
+            "--step",
+            "jsonl-select:/id",
+            "--step",
+            "jsonl-to-array",
+        ],
+        br#"{"items":[{"id":-0},{"id":"\u4e2d\n"}]}"#,
+    );
+    assert!(out.status.success());
+    assert_eq!(out.stdout, b"[-0,\"\\u4e2d\\n\"]\n");
+    for (input, expected) in [("", ""), ("null\r\nfalse\n[ 1,2 ]", "null\nfalse\n[1,2]\n")] {
+        let out = invoke(
+            root.path(),
+            &["data", "--step", "jsonl-select:"],
+            input.as_bytes(),
+        );
+        assert!(out.status.success());
+        assert_eq!(out.stdout, expected.as_bytes());
+    }
+    assert!(!root.path().join("config").exists());
+}
+
+#[test]
+fn jsonl_selection_late_errors_never_publish_a_prefix_or_replace_files() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join("keep.jsonl"), b"original\r\n").unwrap();
+    for second in [
+        "{}",
+        "{\"x\":1,\"x\":2}",
+        "PRIVATE_RECORD",
+        "",
+        "{\"x\":1} trailing",
+        "\u{feff}{\"x\":1}",
+        "{\"x\":1,\"hidden\":INVALID}",
+    ] {
+        let input = format!("{{\"x\":\"PRIVATE_VALUE\"}}\n{second}\n");
+        for save in [false, true] {
+            let mut args = vec![
+                "data",
+                "--step",
+                "jsonl-select:/x",
+                "--step",
+                "jsonl-to-array",
+            ];
+            if save {
+                args.extend(["-o", "keep.jsonl", "--force"]);
+            }
+            let out = invoke(root.path(), &args, input.as_bytes());
+            assert!(!out.status.success() && out.stdout.is_empty());
+            let error = String::from_utf8_lossy(&out.stderr);
+            assert!(
+                error.contains("step 1 failed") && error.contains("record 2"),
+                "{error}"
+            );
+            assert!(!error.contains("PRIVATE"));
+            assert_eq!(
+                std::fs::read(root.path().join("keep.jsonl")).unwrap(),
+                b"original\r\n"
+            );
+        }
+    }
+    for pointer in ["/01", "/-", "/9"] {
+        let out = invoke(
+            root.path(),
+            &["data", "jsonl-select", "--pointer", pointer],
+            b"[1,2]\n",
+        );
+        assert!(!out.status.success() && out.stdout.is_empty());
+    }
+    assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
+}
+
+#[test]
+fn jsonl_selection_invalid_definitions_fail_without_waiting_for_stdin() {
+    use std::time::{Duration, Instant};
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join("keep.txt"), b"original").unwrap();
+    for spec in [
+        vec!["data", "jsonl-select"],
+        vec!["data", "--step", "jsonl-select"],
+        vec!["data", "jsonl-select", "--pointer", "bad"],
+        vec!["data", "--step", "jsonl-select:/x~2"],
+        vec!["data", "jsonl-select", "--pointer", "", "--reverse"],
+    ] {
+        let mut child = command(root.path())
+            .args(spec)
+            .args(["-o", "keep.txt", "--force"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let stdin = child.stdin.take().unwrap();
+        let end = Instant::now() + Duration::from_secs(3);
+        while child.try_wait().unwrap().is_none() {
+            if Instant::now() > end {
+                child.kill().ok();
+                panic!("invalid JSONL plan waited for input");
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        drop(stdin);
+        let out = child.wait_with_output().unwrap();
+        assert!(!out.status.success() && out.stdout.is_empty());
+        assert_eq!(
+            std::fs::read(root.path().join("keep.txt")).unwrap(),
+            b"original"
+        );
+    }
+    assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
+}
+
+#[test]
 fn pipeline_json_selection_keeps_strings_quoted_and_empty_pointer_explicit() {
     let root = tempfile::tempdir().unwrap();
     for (args, input, expected) in [

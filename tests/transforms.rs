@@ -279,6 +279,55 @@ fn model(api: &str, args: Value, expected: Value) -> (String, std::thread::JoinH
     model_turns(api, vec![(args, expected)])
 }
 
+#[test]
+fn jsonl_selection_recovers_and_composes_in_every_provider_protocol() {
+    for api in ["chat", "responses", "anthropic"] {
+        let root = tempfile::tempdir().unwrap();
+        let input = "{\"payload\":{\"id\":123456789012345678901234567890}}\n{\"payload\":{\"id\":1.2300E+400}}\n{\"payload\":{\"id\":123456789012345678901234567890}}\n";
+        let (url, server) = model_turns(
+            api,
+            vec![
+                (
+                    json!({"operation":"jsonl-select","pointer":"/missing/PRIVATE_POINTER"}),
+                    Value::Null,
+                ),
+                (
+                    json!({"operation":"jsonl-select","pointer":"/payload/id"}),
+                    json!(
+                        "123456789012345678901234567890\n1.2300E+400\n123456789012345678901234567890\n"
+                    ),
+                ),
+                (
+                    json!({"steps":[{"operation":"jsonl-select","pointer":"/payload/id"},{"operation":"dedupe"},{"operation":"jsonl-to-array"}]}),
+                    json!("[123456789012345678901234567890,1.2300E+400]"),
+                ),
+            ],
+        );
+        let out = invoke(
+            root.path(),
+            &[
+                "--api",
+                api,
+                "--base-url",
+                &url,
+                "--model",
+                "fixture",
+                "extract ids",
+            ],
+            input.as_bytes(),
+        );
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(out.stdout, b"verified\n");
+        assert!(out.stderr.is_empty());
+        server.join().unwrap();
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
+    }
+}
+
 fn model_turns(api: &str, calls: Vec<(Value, Value)>) -> (String, std::thread::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     listener.set_nonblocking(true).unwrap();
@@ -343,6 +392,7 @@ fn model_turns(api: &str, calls: Vec<(Value, Value)>) -> (String, std::thread::J
                 assert!(ops.contains(&json!("jsonl-to-array")));
                 assert!(ops.contains(&json!("array-to-jsonl")));
                 assert!(ops.contains(&json!("json-select")));
+                assert!(ops.contains(&json!("jsonl-select")));
                 assert_eq!(schema["properties"]["pointer"]["type"], "string");
                 let steps = &schema["properties"]["steps"];
                 assert_eq!(steps["minItems"], 1);

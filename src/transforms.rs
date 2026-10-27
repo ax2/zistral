@@ -37,6 +37,8 @@ pub enum Operation {
     ArrayToJsonl,
     /// Select a JSON value using an explicit RFC 6901 pointer; retain quoted strings
     JsonSelect,
+    /// Select one value from every JSONL record; emit compact JSON lines in input order
+    JsonlSelect,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -69,11 +71,18 @@ impl Step {
             bail!("--reverse is only valid for sort");
         }
         match (&self.pointer, self.operation) {
-            (Some(pointer), Operation::JsonSelect) => crate::selection::validate_pointer(pointer),
-            (None, Operation::JsonSelect) => bail!(
-                "json-select requires an explicit pointer; use an empty pointer to select the root"
+            (Some(pointer), Operation::JsonSelect | Operation::JsonlSelect) => {
+                crate::selection::validate_pointer(pointer)
+            }
+            (None, Operation::JsonSelect | Operation::JsonlSelect) => bail!(
+                "{} requires an explicit pointer; use an empty pointer to select the root",
+                if self.operation == Operation::JsonSelect {
+                    "json-select"
+                } else {
+                    "jsonl-select"
+                }
             ),
-            (Some(_), _) => bail!("pointer is only valid for json-select"),
+            (Some(_), _) => bail!("pointer is only valid for json-select or jsonl-select"),
             (None, _) => Ok(()),
         }
     }
@@ -240,6 +249,20 @@ fn jsonl_to_array(input: &str, out: &mut Buffer) -> Result<()> {
         .context("collected JSON array exceeds supported nesting")
 }
 
+fn jsonl_select(input: &str, pointer: &str, out: &mut Buffer) -> Result<()> {
+    for (index, line) in input.lines().enumerate() {
+        if index == MAX_ITEMS {
+            bail!("JSONL selection accepts at most 100000 records");
+        }
+        let remaining = out.limit.saturating_sub(out.bytes.len()).saturating_sub(1);
+        let selected = crate::selection::select_json(line, pointer, remaining)
+            .with_context(|| format!("cannot select JSONL record {}", index + 1))?;
+        out.write_all(selected.as_bytes())?;
+        out.write_all(b"\n")?;
+    }
+    Ok(())
+}
+
 fn array_to_jsonl(input: &str, out: &mut Buffer) -> Result<()> {
     validate_json(input)?;
     let input = input.trim();
@@ -396,6 +419,11 @@ fn transform(input: &str, step: &Step, input_limit: usize, limit: usize) -> Resu
         }
         Operation::JsonlToArray => jsonl_to_array(input, &mut out)?,
         Operation::ArrayToJsonl => array_to_jsonl(input, &mut out)?,
+        Operation::JsonlSelect => jsonl_select(
+            input,
+            step.pointer.as_deref().expect("validated pointer"),
+            &mut out,
+        )?,
         Operation::JsonSelect => {
             return crate::selection::select_json(
                 input,
@@ -441,6 +469,75 @@ pub fn execute(arguments: &str, input: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn jsonl_selection_preserves_values_and_enforces_shared_bounds() {
+        let args = r#"{"operation":"jsonl-select","pointer":"/x"}"#;
+        let input = "{\"x\":123456789012345678901234567890}\r\n{\"x\":1.2300E+400}\n{\"x\":-0}\n{\"x\":\"\\u4e2d\\n\"}\n{\"x\":{\"z\":1,\"a\":2,\"z\":3}}";
+        let result: serde_json::Value =
+            serde_json::from_str(&execute(args, input).unwrap()).unwrap();
+        assert_eq!(
+            result["output"],
+            "123456789012345678901234567890\n1.2300E+400\n-0\n\"\\u4e2d\\n\"\n{\"z\":1,\"a\":2,\"z\":3}\n"
+        );
+        let step = Step {
+            operation: Operation::JsonlSelect,
+            reverse: false,
+            pointer: Some(String::new()),
+        };
+        assert_eq!(transform("", &step, MAX_INPUT, CLI_OUTPUT).unwrap(), "");
+        assert_eq!(
+            transform("null\nfalse\n[1,2]\n", &step, MAX_INPUT, CLI_OUTPUT).unwrap(),
+            "null\nfalse\n[1,2]\n"
+        );
+        let depth128 = format!("{}0{}", "[".repeat(128), "]".repeat(128));
+        assert!(transform(&depth128, &step, MAX_INPUT, CLI_OUTPUT).is_ok());
+        assert!(transform(&format!("[{depth128}]"), &step, MAX_INPUT, CLI_OUTPUT).is_err());
+        let records = "null\n".repeat(MAX_ITEMS);
+        assert_eq!(
+            transform(&records, &step, MAX_INPUT, CLI_OUTPUT).unwrap(),
+            records
+        );
+        assert!(transform(&(records + "null"), &step, MAX_INPUT, CLI_OUTPUT).is_err());
+        assert!(transform("null\n", &step, MAX_INPUT, 4).is_err());
+        assert_eq!(transform("null", &step, MAX_INPUT, 5).unwrap(), "null\n");
+        let escaped = serde_json::json!({"x":"\\".repeat(17000)}).to_string();
+        assert!(execute(args, &escaped).is_err()); // Serialized envelope also counts.
+    }
+
+    #[test]
+    fn jsonl_selection_errors_identify_records_without_echoing_data_or_pointers() {
+        for record in [
+            "{}",
+            "{\"x\":1,\"x\":2}",
+            "PRIVATE_RECORD",
+            "{\"x\":1} trailing",
+            "",
+            "\u{feff}{\"x\":1}",
+        ] {
+            let error = format!(
+                "{:#}",
+                execute(
+                    r#"{"operation":"jsonl-select","pointer":"/x"}"#,
+                    &format!("{{\"x\":\"PRIVATE_VALUE\"}}\n{record}\n")
+                )
+                .unwrap_err()
+            );
+            assert!(error.contains("record 2"), "{error}");
+            assert!(!error.contains("PRIVATE"), "{error}");
+        }
+        for args in [
+            r#"{"operation":"jsonl-select"}"#,
+            r#"{"operation":"jsonl-select","pointer":null}"#,
+            r#"{"operation":"jsonl-select","pointer":"PRIVATE_POINTER"}"#,
+            r#"{"operation":"jsonl-select","pointer":"/x~2"}"#,
+            r#"{"operation":"jsonl-select","pointer":"","reverse":true}"#,
+        ] {
+            assert!(
+                !format!("{:#}", execute(args, "PRIVATE_INPUT").unwrap_err()).contains("PRIVATE")
+            );
+        }
+    }
+
     #[test]
     fn selection_steps_validate_before_data_and_retain_tool_output_limits() {
         for args in [

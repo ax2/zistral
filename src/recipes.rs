@@ -57,8 +57,10 @@ impl Plan {
                 bail!("a data pipeline requires 1-16 steps");
             }
             steps.iter().map(|text| {
-                if let Some(pointer) = text.strip_prefix("json-select:") {
-                    return Ok(Step { operation: Operation::JsonSelect, reverse: false, pointer: Some(pointer.to_owned()) });
+                for (prefix, operation) in [("json-select:", Operation::JsonSelect), ("jsonl-select:", Operation::JsonlSelect)] {
+                    if let Some(pointer) = text.strip_prefix(prefix) {
+                        return Ok(Step { operation, reverse: false, pointer: Some(pointer.to_owned()) });
+                    }
                 }
                 let (name, reverse) = text.strip_suffix(":reverse")
                     .map_or((text.as_str(), false), |name| (name, true));

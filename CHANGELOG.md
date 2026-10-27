@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.18.0 — 2026-10-27
+
+- Add offline `jsonl-select` to extract one value from every JSONL record using an explicit
+  JSON pointer. Preserve record order, numeric/string tokens and selected subtree keys;
+  reject missing/ambiguous paths or invalid records with a one-based record position.
+- Compose record selection with existing data steps, version-1 recipes, plan preview/export
+  and the existing `transform_input` tool across all three provider protocols. Ship an event-ID
+  extraction recipe; retain normal native error recovery and original-input-per-call behavior.
+- Keep fully buffered success-only output, file replacement protections and existing limits.
+  No new dependencies, tool names, model calls for offline commands, permissions or memory.
+
 ## 0.17.0 — 2026-10-26
 
 - Validate supported provider turns before dispatching tools. Reject missing/unknown Chat

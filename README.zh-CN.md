@@ -17,7 +17,7 @@ git diff | zi "生成一句简洁的提交说明"
 | 平台 | 安装包 | 安装方法 |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | 双击安装，无需管理员权限，自动添加用户 PATH 和开始菜单入口 |
-| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.17.0-linux-amd64.deb` |
+| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.18.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | 双击安装，命令放到 `/usr/local/bin/zi` |
 
 安装后直接运行 `zi`。Windows 安装结束可立即启动，或在开始菜单打开 zi；
@@ -408,3 +408,16 @@ zi data --recipe records.toml -i response.json -o records.jsonl
 模型回合先校验再执行工具：未完成的 Chat 回答会失败，工具批次后面的关联信息出错，
 不会先执行前面的有效调用。正常工具参数错误仍反馈给模型修正。
 见[响应校验与流式边界](docs/provider-turns.md)。
+
+## 从每条 JSONL 记录提取字段
+
+```sh
+zi data jsonl-select --pointer /payload/id -i events.jsonl
+cat events.jsonl | zi data --step jsonl-select:/payload/id --step dedupe --step jsonl-to-array
+zi data --recipe docs/examples/event-ids.toml -i events.jsonl -o ids.json
+```
+
+按记录顺序输出精确 JSON 值，字符串保留引号，数字保持原始文本。字段缺失、引用的键重复
+或后续记录格式错误时整批失败，报告记录位置，不输出半成品，也不替换已有 `-o` 目标。
+同样可由现有 `transform_input` 工具调用；离线 `zi data` 不需要模型配置。
+[规则、配方导出、限制与示例](docs/jsonl-selection.md)。

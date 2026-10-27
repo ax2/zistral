@@ -39,7 +39,7 @@ the empty object key, not the root. `json-select:/a:reverse` selects the literal
 pointer, and all its colons belong to that pointer. Quote the whole step when necessary.
 It does not evaluate JSONPath, wildcards, filters, URI fragments, variables or shell text.
 
-`pointer` is required only for `json-select`; even `pointer = ""` on another operation is
+`pointer` is required for `json-select` and, since v0.18.0, `jsonl-select`; `pointer = ""` on any other operation is
 rejected. `reverse = true` remains sort-only. JSON tool `pointer: null` is rejected.
 Existing version-1 recipes without pointers remain valid. Older zi versions cannot run
 the new operation; use v0.16.0 or later. No format-version migration is required.

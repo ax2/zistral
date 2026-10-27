@@ -51,3 +51,7 @@ exact line, then collects them back into an array. Object key order and string e
 are retained, so textually different objects can remain distinct even if an application
 would interpret them as equivalent. Use a model to interpret meaning, not to estimate
 exact structural conversion results.
+
+Since v0.18.0, `jsonl-select` applies one explicit pointer to every JSONL record, with
+complete-result failure and original numeric/string tokens. It is shared by CLI plans
+and transform_input, adding no tool name or permission. See [record selection](jsonl-selection.md).

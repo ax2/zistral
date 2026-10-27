@@ -45,7 +45,7 @@ The full project mode has 15 tools. Data mode exposes count/select/transform; re
 excludes file mutation and arbitrary shell execution, including enforcement if a provider
 requests tools that were not advertised. `--no-tools` disables project capabilities too.
 
-`transforms.rs` implements nine deterministic operations on explicit input, shared by the
+`transforms.rs` implements ten deterministic operations on explicit input, shared by the
 offline `zi data` command and the `transform_input` tool. They do not access a model,
 filesystem or shell. JSON syntax is checked with serde's IgnoredAny; a lexical formatter
 changes only insignificant whitespace, preserving number/string tokens, key order and
@@ -146,3 +146,7 @@ empty strings remain tool arguments and can return normal recoverable JSON/schem
 Known malformed text/metadata fields fail before tools, including a later Responses refusal.
 Explicit streaming can already have displayed text; it does not commit tool side effects
 before a completed, validated turn. See [provider-turn contract](provider-turns.md).
+
+Since v0.18.0, `jsonl-select` applies one explicit pointer to every JSONL record, with
+complete-result failure and original numeric/string tokens. It is shared by CLI plans
+and transform_input, adding no tool name or permission. See [record selection](jsonl-selection.md).
