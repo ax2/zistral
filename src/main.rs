@@ -5,6 +5,7 @@ mod csv_output;
 mod data;
 mod doctor;
 mod imports;
+mod last_result;
 mod output;
 mod presets;
 mod process;
@@ -511,6 +512,7 @@ fn session(cli: &mut Cli) -> Result<()> {
     }
     let mut settings = config::Settings::load(cli)?;
     ui::model(&settings, cli);
+    let mut last_result = last_result::LastResult::default();
     loop {
         if ui::enabled(cli) {
             eprint!("\n  {} ", console::style("›").cyan().bold());
@@ -539,8 +541,29 @@ fn session(cli: &mut Cli) -> Result<()> {
             }
             "/help" => {
                 eprintln!(
-                    "Ask a question, or use /presets, /run NAME [instruction], /models, /use NAME, /doctor, /config, /clear, /exit. Each prompt is an independent task; no chat history is sent or saved.\nFor files/pipes: cat file.txt | zi 'summarize' or zi -i file.txt 'summarize'."
+                    "Ask a question, or use /presets, /run NAME [instruction], /models, /use NAME, /doctor, /config, /save PATH, /save! PATH, /clear, /exit. Each prompt is an independent task; no chat history is sent or saved. /save exports only the latest completed result; /save! permits replacement. New tasks, model changes and /clear discard that result.\nFor files/pipes: cat file.txt | zi 'summarize' or zi -i file.txt 'summarize'."
                 );
+                continue;
+            }
+            "/save" | "/save!" => {
+                eprintln!(
+                    "Usage: /save PATH (new file), /save! PATH (explicit replacement). Use the unquoted path; spaces are literal."
+                );
+                continue;
+            }
+            _ if prompt.starts_with("/save ") || prompt.starts_with("/save! ") => {
+                let (force, path) = if let Some(path) = prompt.strip_prefix("/save! ") {
+                    (true, path.trim())
+                } else {
+                    (false, prompt[6..].trim())
+                };
+                match last_result.save(std::path::Path::new(path), force) {
+                    Ok(bytes) => eprintln!("Saved {} ({} bytes).", ui::clean(path), bytes),
+                    Err(error) => eprintln!(
+                        "zi: {}",
+                        ui::clean(&format!("{error:#}")).replace("use --force", "use /save! PATH")
+                    ),
+                }
                 continue;
             }
             "/presets" => {
@@ -563,6 +586,7 @@ fn session(cli: &mut Cli) -> Result<()> {
             _ if prompt.starts_with("/use ") => {
                 match config::use_profile(cli, prompt[5..].trim()) {
                     Ok(()) => {
+                        last_result.clear();
                         cli.profile = Some(prompt[5..].trim().into());
                         settings = config::Settings::load(cli)?;
                         ui::model(&settings, cli);
@@ -578,12 +602,14 @@ fn session(cli: &mut Cli) -> Result<()> {
                 continue;
             }
             "/config" => {
+                last_result.clear();
                 config::configure(cli, false)?;
                 settings = config::Settings::load(cli)?;
                 ui::model(&settings, cli);
                 continue;
             }
             "/clear" => {
+                last_result.clear();
                 console::Term::stderr().clear_screen()?;
                 ui::welcome(cli);
                 ui::model(&settings, cli);
@@ -595,6 +621,7 @@ fn session(cli: &mut Cli) -> Result<()> {
             }
             _ => (),
         }
+        last_result.clear();
         let mut task = cli.clone();
         task.prompt = vec![prompt.into()];
         if let Some((name, instruction)) = scene {
@@ -611,19 +638,22 @@ fn session(cli: &mut Cli) -> Result<()> {
         }
         match agent::run(&settings, &task, "") {
             Ok(answer) => {
-                if answer.streamed {
-                    continue;
-                }
-                let answer = answer.text;
-                if task.json {
-                    match transforms::compact_json(&answer, data::RESULT_LIMIT) {
-                        Ok(value) => emit(&value, &task)?,
+                let output = if task.json {
+                    match transforms::compact_json(&answer.text, data::RESULT_LIMIT) {
+                        Ok(value) => value,
                         Err(_) => {
-                            eprintln!("zi: output is not valid JSON (nothing written to stdout)")
+                            eprintln!("zi: output is not valid JSON (nothing written to stdout)");
+                            continue;
                         }
                     }
                 } else {
-                    emit(&answer, &task)?;
+                    answer.text
+                };
+                if !answer.streamed {
+                    emit(&output, &task)?;
+                }
+                if let Err(error) = last_result.retain(output) {
+                    eprintln!("zi: {}", ui::clean(&error.to_string()));
                 }
             }
             Err(error) => eprintln!("zi: {}", ui::clean(&format!("{error:#}"))),

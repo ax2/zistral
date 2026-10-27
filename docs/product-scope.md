@@ -28,6 +28,11 @@ They would introduce hidden provider disclosures, stale input assumptions and pe
 The current release keeps each prompt independent; presets are explicit reusable instructions,
 not memories of past inputs or model conclusions.
 
+Since v0.25.0, the interactive UI retains only one completed result, at most 16 MiB,
+for explicit /save export. It is never model request context and is cleared by a new
+task, /clear, /config or successful /use. No automatic history files are created. This
+solves answer export without introducing conversational or long-term memory.
+
 Any future task-session design must be opt-in, bounded and inspectable, distinguish current
 input from previous observations, reset tool/read/undo state per task, retain model/profile
 and permission boundaries, and provide a clear reset/delete path. Start with an in-memory

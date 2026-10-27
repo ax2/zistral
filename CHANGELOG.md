@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.25.0 — 2026-10-27
+
+- Add interactive `/save PATH` for the latest completed answer and `/save! PATH` for
+  explicit replacement, reusing existing protected file publication. Paths are literal;
+  no shell parsing, automatic files or extra model requests.
+- Retain at most one 16 MiB result in process memory, including complete streamed answers
+  and validated compact JSON. Clear it before each new task, on /clear, /config and successful
+  /use; failed, partial or invalid-JSON tasks cannot export an older result accidentally.
+- Preserve independent model tasks and pipe behavior: retained results are never sent as
+  conversation context. No new dependencies, model tools, permissions, Agent-loop changes
+  or persistent history. Add real-terminal coverage for all three protocols and export rules.
+
 ## 0.24.0 — 2026-10-27
 
 - Add offline `lines-include --contains TEXT` and `lines-exclude --contains TEXT` for

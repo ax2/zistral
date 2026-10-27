@@ -20,7 +20,7 @@ Download a native installer from [Releases](https://github.com/ax2/zistral/relea
 | Platform | Package | Installation |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | Per-user installer; adds PATH and a Start menu launcher; no administrator required |
-| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.24.0-linux-amd64.deb` |
+| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.25.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | Open the package; installs `/usr/local/bin/zi` |
 
 Then type `zi`. On first launch, choose an existing Codex, WorkBuddy or dsh configuration,
@@ -671,3 +671,19 @@ no matches succeeds with empty output. The same `contains` definition can be pre
 exported and used by transform_input. Filtering inside a model tool does not undo disclosure
 of the task's original input; filter locally before piping to a model when you want to choose
 its input. See [line filtering](docs/line-filtering.md) for limits and newline semantics.
+
+## Save an answer after reading it
+
+After a task completes in interactive `zi`, use:
+
+```text
+/save notes.md
+/save! notes.md
+/clear
+```
+
+`/save` creates a new file; `/save!` explicitly permits replacement. Use an unquoted literal
+path, including spaces. Only the latest successful result is retained (at most 16 MiB, in
+process memory); a new task, /clear, /config or successful /use discards it. Complete streamed
+answers can be saved, partial/failed answers cannot. No extra request or chat history is sent.
+See [interactive export](docs/interactive-export.md) for JSON, file and path boundaries.

@@ -84,11 +84,11 @@ pub fn welcome(cli: &Cli) {
         eprintln!("  Ask a question below. Each prompt starts a fresh task.");
         eprintln!(
             "  {}\n",
-            style("/help  /config  /clear  /exit · Ctrl+C to stop").dim()
+            style("/help  /config  /save PATH  /clear  /exit · Ctrl+C to stop").dim()
         );
     } else {
         eprintln!(
-            "zi {} · /help /config /exit · Each prompt is a fresh task.",
+            "zi {} · /help /config /save PATH /exit · Each prompt is a fresh task.",
             env!("CARGO_PKG_VERSION")
         );
     }

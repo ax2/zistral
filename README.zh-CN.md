@@ -17,7 +17,7 @@ git diff | zi "生成一句简洁的提交说明"
 | 平台 | 安装包 | 安装方法 |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | 双击安装，无需管理员权限，自动添加用户 PATH 和开始菜单入口 |
-| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.24.0-linux-amd64.deb` |
+| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.25.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | 双击安装，命令放到 `/usr/local/bin/zi` |
 
 安装后直接运行 `zi`。Windows 安装结束可立即启动，或在开始菜单打开 zi；
@@ -495,3 +495,18 @@ zi data --step lines-include:ERROR --step lines-exclude:healthcheck -i app.log |
 没有匹配时成功输出零字节；不执行正则、JSON 字段条件或敏感信息识别。相同的 contains 定义
 可预览、导出、保存为配方或用于现有 transform_input。模型工具内的筛选不会撤回原任务已提供
 给模型的数据；需要先选输入时，先离线处理再通过管道交给模型。见 [字面行筛选](docs/line-filtering.md)。
+
+## 看完回答后再保存
+
+交互式 `zi` 中完成任务后，可直接输入：
+
+```text
+/save 笔记.md
+/save! 笔记.md
+/clear
+```
+
+`/save` 默认不覆盖已有文件，`/save!` 明确允许替换。路径整体按字面处理，内部可含空格，无需引号。
+仅在进程内保留最近一次成功结果，最多 16 MiB；新任务、/clear、/config 和成功的 /use 会清除它。
+完整流式回答也能保存，截断、失败或非法 JSON 回答不能保存，不会误用旧结果。保存不发送模型请求，
+保留的结果也不会作为聊天历史发给模型。见 [交互结果导出](docs/interactive-export.md)。

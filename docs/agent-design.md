@@ -191,3 +191,16 @@ complete-result behavior; discarded lines still count toward the 100000-line cap
 case-sensitive raw-line matching, not regex, structured predicates or implicit redaction.
 It adds no dependencies, model tool names, permissions, Agent-loop logic or memory.
 See [line filtering](line-filtering.md).
+
+## Interactive result export (v0.25.0)
+
+`last_result.rs` holds at most one 16 MiB completed answer in the interactive UI, outside
+`agent::run` and its protocol histories. New tasks clear it before preset validation;
+/clear, /config and successful /use also clear it. A failed or partial task cannot leave
+an older answer exportable. Complete streamed text stays available without duplicate display;
+JSON is validated and compacted before retention. Nothing retained is added to a request.
+
+/save PATH and /save! PATH reuse `output::Prepared` for no-clobber/explicit replacement,
+regular-file/revision checks and final publication. The unquoted remainder is a literal OS
+path, not shell syntax; no config, metadata or history is written automatically. Model
+project permissions and each fresh project Session stay unchanged. See [interactive export](interactive-export.md).
