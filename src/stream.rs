@@ -45,9 +45,10 @@ pub fn decode(
 }
 
 fn append(value: &mut Value, key: &str, text: &str) {
-    let mut s = value[key].as_str().unwrap_or_default().to_owned();
-    s.push_str(text);
-    value[key] = json!(s);
+    match &mut value[key] {
+        Value::String(existing) => existing.push_str(text),
+        slot => *slot = json!(text),
+    }
 }
 
 struct State<'a> {
@@ -294,5 +295,90 @@ mod tests {
         assert_eq!(result["choices"][0]["message"]["content"], "你好");
         assert!(decode(b"data: {}\n\n".as_slice(), "chat", 100, |_| Ok(())).is_err());
         assert!(decode(s.as_bytes(), "chat", 4, |_| Ok(())).is_err());
+    }
+}
+
+#[cfg(test)]
+mod accumulation_regressions {
+    use super::*;
+    fn event(value: Value) -> String {
+        format!("data: {value}\n\n")
+    }
+    #[test]
+    fn fragmented_chat_keeps_unicode_text_tool_ids_names_and_arguments() {
+        let mut wire =
+            event(json!({"choices":[{"delta":{"content":"你好"},"finish_reason":null}]}));
+        wire += &event(
+            json!({"choices":[{"delta":{"content":"🙂","tool_calls":[{"index":0,"id":"call_","function":{"name":"trans","arguments":"{\"operation\":"}}]},"finish_reason":null}]}),
+        );
+        wire += &event(
+            json!({"choices":[{"delta":{"tool_calls":[{"index":0,"id":"7","function":{"name":"form_input","arguments":"\"trim\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"completion_tokens":13}}),
+        );
+        wire += "data: [DONE]\n\n";
+        let mut text = String::new();
+        let value = decode(wire.as_bytes(), "chat", 16384, |s| {
+            text.push_str(s);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(text, "你好🙂");
+        let message = &value["choices"][0]["message"];
+        assert_eq!(message["content"], text);
+        assert_eq!(message["tool_calls"][0]["id"], "call_7");
+        assert_eq!(
+            message["tool_calls"][0]["function"]["name"],
+            "transform_input"
+        );
+        assert_eq!(
+            message["tool_calls"][0]["function"]["arguments"],
+            "{\"operation\":\"trim\"}"
+        );
+        assert_eq!(value["usage"]["completion_tokens"], 13);
+        assert_eq!(value["choices"][0]["finish_reason"], "tool_calls");
+    }
+    #[test]
+    fn fragmented_anthropic_keeps_text_thinking_signature_and_usage() {
+        let mut wire = event(
+            json!({"type":"message_start","message":{"id":"m","role":"assistant","usage":{"input_tokens":7},"content":[]}}),
+        );
+        wire += &event(
+            json!({"type":"content_block_start","index":0,"content_block":{"type":"text","text":"prefix "}}),
+        );
+        for part in ["你好", "🙂", ""] {
+            wire += &event(
+                json!({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":part}}),
+            );
+        }
+        wire += &event(json!({"type":"content_block_stop","index":0}));
+        wire += &event(
+            json!({"type":"content_block_start","index":1,"content_block":{"type":"thinking","thinking":null,"signature":5}}),
+        );
+        for (kind, key, parts) in [
+            ("thinking_delta", "thinking", ["why", " next"]),
+            ("signature_delta", "signature", ["sig", "nature"]),
+        ] {
+            for part in parts {
+                let mut delta = json!({"type":kind});
+                delta[key] = json!(part);
+                wire += &event(json!({"type":"content_block_delta","index":1,"delta":delta}));
+            }
+        }
+        wire += &event(json!({"type":"content_block_stop","index":1}));
+        wire += &event(
+            json!({"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":11}}),
+        );
+        wire += &event(json!({"type":"message_stop"}));
+        let mut text = String::new();
+        let value = decode(wire.as_bytes(), "anthropic", 16384, |s| {
+            text.push_str(s);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(text, "prefix 你好🙂");
+        assert_eq!(value["content"][0]["text"], text);
+        assert_eq!(value["content"][1]["thinking"], "why next");
+        assert_eq!(value["content"][1]["signature"], "signature");
+        assert_eq!(value["usage"], json!({"input_tokens":7,"output_tokens":11}));
+        assert_eq!(value["stop_reason"], "end_turn");
     }
 }

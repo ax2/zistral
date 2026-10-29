@@ -60,3 +60,7 @@ for Chat Completions, Responses and Anthropic. Both plain and `TERM=dumb` displa
 reject provider title/link metadata while preserving visible text and original `/save`
 bytes. Separate redirected/file tests compare original UTF-8/control/CRLF bytes with and
 without `--plain`. No clipboard-control sequence or real provider request is required.
+
+Since v0.29.1, internal Chat/Anthropic string accumulation avoids repeated prefix
+clones. Display/cleaning, Responses, callbacks and output/error contracts stay unchanged;
+controlled decoder measurements are [documented separately](stream-performance.md).

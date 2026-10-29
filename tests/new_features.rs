@@ -370,3 +370,81 @@ fn doctor_probe_is_explicit_and_never_prints_provider_errors_or_answers() {
     assert!(!output.contains("hidden-secret"));
     server.join().unwrap();
 }
+
+#[test]
+fn many_stream_fragments_keep_complete_unicode_pipe_output_in_all_protocols() {
+    let part = "x".repeat(121) + "中🙂";
+    let expected = part.repeat(2048);
+    for api in ["chat", "responses", "anthropic"] {
+        let (l, url) = listener();
+        let full = expected.clone();
+        let fragment = part.clone();
+        let name = api.to_owned();
+        let server = std::thread::spawn(move || {
+            let (stream, request) = accept(&l);
+            assert_eq!(request["stream"], true);
+            assert!(request.get("tools").is_none());
+            let mut body = String::new();
+            if name == "anthropic" {
+                body += &event(
+                    json!({"type":"message_start","message":{"role":"assistant","stop_reason":null,"content":[]}}),
+                );
+                body += &event(
+                    json!({"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}),
+                );
+            }
+            for _ in 0..2048 {
+                body += &event(match name.as_str() {
+                    "chat" => {
+                        json!({"choices":[{"delta":{"content":fragment},"finish_reason":null}]})
+                    }
+                    "responses" => json!({"type":"response.output_text.delta","delta":fragment}),
+                    _ => {
+                        json!({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":fragment}})
+                    }
+                });
+            }
+            match name.as_str() {
+                "chat" => {
+                    body += &chat("", json!("stop"));
+                    body += "data: [DONE]\n\n";
+                }
+                "responses" => {
+                    body += &event(
+                        json!({"type":"response.completed","response":{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":full}]}]}}),
+                    )
+                }
+                _ => {
+                    body += &event(json!({"type":"content_block_stop","index":0}));
+                    body +=
+                        &event(json!({"type":"message_delta","delta":{"stop_reason":"end_turn"}}));
+                    body += &event(json!({"type":"message_stop"}));
+                }
+            }
+            send(stream, &body);
+        });
+        let output = command()
+            .args([
+                "--api",
+                api,
+                "--base-url",
+                &url,
+                "--model",
+                "fixture",
+                "--no-tools",
+                "--stream",
+                "--plain",
+                "repeat supplied response",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(output.stdout, format!("{expected}\n").as_bytes());
+        assert!(output.stderr.is_empty());
+        server.join().unwrap();
+    }
+}

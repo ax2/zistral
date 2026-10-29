@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.29.1 — 2026-10-29
+
+- Accumulate existing Chat and Anthropic streamed string fields in place instead of
+  copying the entire prefix for every fragment. Keep text, tool identifiers/names/arguments,
+  thinking/signature metadata, callback order and nonstring initialization behavior.
+- Preserve Responses handling, wire-size/completion/error checks, streaming/pipeline
+  output, retries, tools and permissions. No dependencies or command changes.
+- Add fragmented Unicode/metadata and all-protocol long pipe regressions. Document
+  controlled same-build decoder measurements separately from model/network/UI latency.
+
 ## 0.29.0 — 2026-10-29
 
 - Add native `jsonl-where --pointer /path --equals TEXT` to keep complete records whose
