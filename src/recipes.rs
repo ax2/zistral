@@ -45,17 +45,17 @@ impl Plan {
                 for (prefix, operation) in [("lines-head:", Operation::LinesHead), ("lines-tail:", Operation::LinesTail)] {
                     if let Some(count) = text.strip_prefix(prefix) {
                         let lines = count.parse::<usize>().map_err(|_| anyhow::anyhow!("line window count must be an integer from 1 to 100000"))?;
-                        return Ok(Step { operation, reverse: false, pointer: None, fields: None, contains: None, lines: Some(lines) });
+                        return Ok(Step { equals: None, operation, reverse: false, pointer: None, fields: None, contains: None, lines: Some(lines) });
                     }
                 }
                 for (prefix, operation) in [("json-select:", Operation::JsonSelect), ("jsonl-select:", Operation::JsonlSelect)] {
                     if let Some(pointer) = text.strip_prefix(prefix) {
-                        return Ok(Step { operation, reverse: false, pointer: Some(pointer.to_owned()), fields: None, contains: None, lines: None });
+                        return Ok(Step { equals: None, operation, reverse: false, pointer: Some(pointer.to_owned()), fields: None, contains: None, lines: None });
                     }
                 }
                 for (prefix, operation) in [("lines-include:", Operation::LinesInclude), ("lines-exclude:", Operation::LinesExclude)] {
                     if let Some(contains) = text.strip_prefix(prefix) {
-                        return Ok(Step { operation, reverse: false, pointer: None, fields: None, contains: Some(contains.to_owned()), lines: None });
+                        return Ok(Step { equals: None, operation, reverse: false, pointer: None, fields: None, contains: Some(contains.to_owned()), lines: None });
                     }
                 }
                 let (name, reverse) = text.strip_suffix(":reverse")
@@ -63,7 +63,7 @@ impl Plan {
                 let operation = Operation::from_str(name, false).map_err(|_| {
                     anyhow::anyhow!("unsupported --step; see zi data --help for native operations (sort:reverse is also supported)")
                 })?;
-                Ok(Step { operation, reverse, pointer: None, fields: None, contains: None, lines: None })
+                Ok(Step { equals: None, operation, reverse, pointer: None, fields: None, contains: None, lines: None })
             }).collect::<Result<Vec<_>>>()?
         };
         Self::from_steps(plan)

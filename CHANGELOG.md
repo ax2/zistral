@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.29.0 — 2026-10-29
+
+- Add native `jsonl-where --pointer /path --equals TEXT` to keep complete records whose
+  selected JSON string equals an explicit literal. Decode string escapes for comparison;
+  preserve retained JSON tokens/order/duplicate members, with compact JSONL output.
+- Share the strict pointer/literal definition with version-1 recipes, offline plan export
+  and the existing transform_input tool. Nonstring values do not match; missing/ambiguous
+  pointers or invalid records fail the complete result, including discarded records.
+- Keep pipe/file protection, bounded records/input/output and explicit model plan export.
+  No dependencies, tool names, project permissions, Agent-loop changes or memory added.
+
 ## 0.28.0 — 2026-10-28
 
 - Add `--exact --export-plan` to propose and export a native transformation as a reusable

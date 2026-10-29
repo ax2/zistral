@@ -212,6 +212,17 @@ fn find<'a>(input: &'a str, pointer: &str) -> Result<&'a RawValue> {
     Ok(raw)
 }
 
+/// Validate the whole record and reference before exact decoded-string comparison.
+pub(crate) fn string_equals(input: &str, pointer: &str, expected: &str) -> Result<bool> {
+    let raw = find(input, pointer)?;
+    if !raw.get().starts_with('"') {
+        return Ok(false);
+    }
+    let text: String = serde_json::from_str(raw.get())
+        .map_err(|_| anyhow::anyhow!("selected string cannot be decoded"))?;
+    Ok(text == expected)
+}
+
 /// Pipeline selection always returns a JSON value, including quoted string tokens.
 pub(crate) fn select_json(input: &str, pointer: &str, limit: usize) -> Result<String> {
     crate::transforms::compact_valid_json(find(input, pointer)?.get(), limit)
@@ -346,6 +357,30 @@ mod tests {
             assert_eq!(apply(&source, "/a~1b/0/~0/number", None), i.to_string());
             assert_eq!(apply(&source, "/a~1b/0/~0/text", None), format!("值{i}"));
             assert_eq!(apply(&source, "/a~1b/1", None), "null");
+        }
+    }
+}
+
+#[cfg(test)]
+mod string_match_tests {
+    use super::*;
+    #[test]
+    fn decoded_string_match_respects_unicode_pointers_and_complete_record_validation() {
+        assert!(string_equals(r#"{"a/b":{"~":"\u0045RROR"}}"#, "/a~1b/~0", "ERROR").unwrap());
+        assert!(string_equals(r#""\r\n\t\u0000""#, "", "\r\n\t\0").unwrap());
+        assert!(string_equals(r#"["",1.2300E+400]"#, "/0", "").unwrap());
+        assert!(!string_equals(r#""é""#, "", "e\u{301}").unwrap());
+        for json in ["null", "true", "-0", "1.2300E+400", "[]", "{}"] {
+            assert!(!string_equals(json, "", json).unwrap());
+        }
+        for (json, pointer) in [
+            (r#"{"x":"ERROR"} trailing"#, "/x"),
+            (r#"{"x":"ERROR","x":"ERROR"}"#, "/x"),
+            (r#"["ERROR"]"#, "/00"),
+            (r#"{"x":"ERROR"}"#, "/missing"),
+            (r#"{"x":"\uD800"}"#, "/x"),
+        ] {
+            assert!(string_equals(json, pointer, "ERROR").is_err());
         }
     }
 }

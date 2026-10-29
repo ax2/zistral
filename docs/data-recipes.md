@@ -124,3 +124,9 @@ complete-result behavior; discarded lines still count toward the 100000-line cap
 case-sensitive raw-line matching, not regex, structured predicates or implicit redaction.
 It adds no dependencies, model tool names, permissions, Agent-loop logic or memory.
 See [line filtering](line-filtering.md).
+
+`jsonl-where` requires an explicit `pointer` and string `equals` (empty allowed, max4096
+UTF-8 bytes). Matching compares decoded JSON strings; nonstrings do not match. Referenced
+missing/ambiguous fields and invalid records fail the complete result, including discarded
+records. Retained whole records remain compact JSONL with original tokens. Use a recipe
+for composition; no multi-parameter inline `--step` shorthand. [Details](jsonl-where.md).

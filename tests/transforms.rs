@@ -2037,3 +2037,413 @@ fn line_windows_compose_on_original_input_in_every_model_protocol() {
         server.join().unwrap();
     }
 }
+
+#[test]
+fn jsonl_where_offline_files_and_real_pipe_keep_records_and_lexical_values() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join("broken.toml"), "not model configuration").unwrap();
+    let input=b"\xef\xbb\xbf{\"level\":\"INFO\",\"message\":\"ERROR\"}\r\n {\"id\":1.2300E+400,\"level\":\"\\u0045RROR\",\"x\":1,\"x\":-0} \r\n{\"level\":\"ERROR\",\"id\":123456789012345678901234567890}\n";
+    std::fs::write(root.join("events.jsonl"), input).unwrap();
+    let expected=b"{\"id\":1.2300E+400,\"level\":\"\\u0045RROR\",\"x\":1,\"x\":-0}\n{\"level\":\"ERROR\",\"id\":123456789012345678901234567890}\n";
+    let out = invoke(
+        root,
+        &[
+            "--config",
+            "broken.toml",
+            "data",
+            "jsonl-where",
+            "--pointer",
+            "/level",
+            "--equals",
+            "ERROR",
+            "-i",
+            "events.jsonl",
+        ],
+        b"ignored",
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(out.stdout, expected);
+    assert!(out.stderr.is_empty());
+    let mut first = command(root)
+        .args([
+            "data",
+            "jsonl-where",
+            "--pointer",
+            "/level",
+            "--equals",
+            "ERROR",
+            "-i",
+            "events.jsonl",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let next = command(root)
+        .args([
+            "data",
+            "--step",
+            "jsonl-select:/id",
+            "--step",
+            "jsonl-to-array",
+        ])
+        .stdin(Stdio::from(first.stdout.take().unwrap()))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap()
+        .wait_with_output()
+        .unwrap();
+    assert!(first.wait().unwrap().success() && next.status.success());
+    assert_eq!(
+        next.stdout,
+        b"[1.2300E+400,123456789012345678901234567890]\n"
+    );
+    assert_eq!(std::fs::read(root.join("events.jsonl")).unwrap(), input);
+    assert!(!root.join("config").exists());
+    for text in [
+        b"".as_slice(),
+        b"{\"level\":\"INFO\"}\n",
+        b"{\"level\":null}\n{\"level\":7}\n{\"level\":true}\n{\"level\":[]}\n",
+    ] {
+        let out = invoke(
+            root,
+            &[
+                "data",
+                "jsonl-where",
+                "--pointer",
+                "/level",
+                "--equals",
+                "ERROR",
+            ],
+            text,
+        );
+        assert!(out.status.success() && out.stdout.is_empty() && out.stderr.is_empty());
+    }
+    let empty = invoke(
+        root,
+        &["data", "jsonl-where", "--pointer", "", "--equals", ""],
+        b"\"\"\n\"x\"\nnull",
+    );
+    assert!(empty.status.success());
+    assert_eq!(empty.stdout, b"\"\"\n");
+}
+
+#[test]
+fn jsonl_where_plan_export_roundtrips_literals_and_composes_with_csv() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let literal = "ERROR\r\n\t界";
+    let out = invoke(
+        root,
+        &[
+            "data",
+            "jsonl-where",
+            "--pointer",
+            "/a~1b/~0",
+            "--equals",
+            literal,
+            "--show-plan",
+            "-o",
+            "plan.toml",
+        ],
+        b"PRIVATE_IGNORED",
+    );
+    assert!(out.status.success() && out.stdout.is_empty());
+    let plan = std::fs::read_to_string(root.join("plan.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&plan).unwrap();
+    assert_eq!(parsed["version"].as_integer(), Some(1));
+    assert_eq!(parsed["steps"][0]["equals"].as_str(), Some(literal));
+    assert!(!plan.contains("PRIVATE"));
+    let source = serde_json::json!({"a/b":{"~":literal},"n":3}).to_string();
+    let expected = format!("{source}\n");
+    let run = invoke(root, &["data", "--recipe", "plan.toml"], source.as_bytes());
+    assert!(run.status.success());
+    assert_eq!(run.stdout, expected.as_bytes());
+    let preview = invoke(
+        root,
+        &["data", "--recipe", "plan.toml", "--show-plan"],
+        b"ignored",
+    );
+    assert_eq!(preview.stdout, plan.as_bytes());
+    std::fs::write(root.join("csv.toml"),"version=1\n[[steps]]\noperation='csv-to-jsonl'\n[[steps]]\noperation='jsonl-where'\npointer='/level'\nequals='ERROR'\n[[steps]]\noperation='jsonl-project'\nfields=[{name='id',pointer='/id'}]\n[[steps]]\noperation='jsonl-to-csv'\n").unwrap();
+    let csv = invoke(
+        root,
+        &["data", "--recipe", "csv.toml"],
+        b"id,level\n0007,INFO\n0008,ERROR\n",
+    );
+    assert!(csv.status.success());
+    assert_eq!(csv.stdout, b"\"id\"\n\"0008\"\n");
+    let mut child = command(root)
+        .args([
+            "data",
+            "jsonl-where",
+            "--pointer",
+            "",
+            "--equals",
+            "",
+            "--show-plan",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let held = child.stdin.take().unwrap();
+    let end = Instant::now() + Duration::from_secs(5);
+    while child.try_wait().unwrap().is_none() {
+        if Instant::now() > end {
+            child.kill().ok();
+            panic!("plan export waited for stdin");
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    drop(held);
+    assert!(child.wait_with_output().unwrap().status.success());
+}
+
+#[test]
+fn jsonl_where_invalid_definitions_fail_before_stdin_input_output_or_config() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join("keep"), b"keep").unwrap();
+    std::fs::write(root.join("bad-config"), b"invalid settings").unwrap();
+    let oversized = "界".repeat(1366);
+    let cases = vec![
+        vec!["data", "jsonl-where", "--pointer", "/level"],
+        vec!["data", "jsonl-where", "--equals", "ERROR"],
+        vec!["data", "jsonl-where", "--pointer", "/~2", "--equals", "x"],
+        vec![
+            "data",
+            "jsonl-where",
+            "--pointer",
+            "",
+            "--equals",
+            &oversized,
+        ],
+        vec!["data", "trim", "--equals", ""],
+        vec![
+            "data",
+            "jsonl-where",
+            "--pointer",
+            "",
+            "--equals",
+            "x",
+            "--contains",
+            "x",
+        ],
+        vec![
+            "data",
+            "jsonl-where",
+            "--pointer",
+            "",
+            "--equals",
+            "x",
+            "--reverse",
+        ],
+        vec!["data", "--step", "jsonl-where"],
+        vec!["data", "--step", "trim", "--equals", "x"],
+        vec![
+            "data",
+            "jsonl-where",
+            "--pointer",
+            "",
+            "--equals",
+            "x",
+            "--show-plan",
+            "-i",
+            "missing",
+        ],
+    ];
+    for args in cases {
+        let mut child = command(root)
+            .args(["--config", "bad-config", "-o", "keep", "--force"])
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let held = child.stdin.take().unwrap();
+        let end = Instant::now() + Duration::from_secs(5);
+        while child.try_wait().unwrap().is_none() {
+            if Instant::now() > end {
+                child.kill().ok();
+                panic!("invalid definition waited for stdin");
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        drop(held);
+        let out = child.wait_with_output().unwrap();
+        assert!(!out.status.success() && out.stdout.is_empty());
+        assert_eq!(std::fs::read(root.join("keep")).unwrap(), b"keep");
+    }
+    for recipe in [
+        "version=1\n[[steps]]\noperation='jsonl-where'\npointer=''\nequals=1\n",
+        "version=1\n[[steps]]\noperation='jsonl-where'\npointer=''\nequals='x'\nequals='y'\n",
+    ] {
+        std::fs::write(root.join("bad.toml"), recipe).unwrap();
+        let out = invoke(
+            root,
+            &[
+                "data", "--recipe", "bad.toml", "-i", "missing", "-o", "keep", "--force",
+            ],
+            b"",
+        );
+        assert!(!out.status.success() && out.stdout.is_empty());
+        assert_eq!(std::fs::read(root.join("keep")).unwrap(), b"keep");
+    }
+}
+
+#[test]
+fn jsonl_where_late_errors_discarded_records_and_overwrite_rules_protect_complete_output() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join("keep"), b"keep").unwrap();
+    for tail in [
+        "PRIVATE_INVALID",
+        "",
+        "{}",
+        "{\"level\":\"INFO\",\"level\":\"ERROR\"}",
+        "{\"level\":\"\\uD800\"}",
+    ] {
+        let input = format!("{{\"level\":\"ERROR\"}}\n{tail}\n");
+        let out = invoke(
+            root,
+            &[
+                "data",
+                "jsonl-where",
+                "--pointer",
+                "/level",
+                "--equals",
+                "ERROR",
+                "-o",
+                "keep",
+                "--force",
+            ],
+            input.as_bytes(),
+        );
+        assert!(!out.status.success() && out.stdout.is_empty());
+        let error = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            error.contains("record 2") && !error.contains("PRIVATE"),
+            "{error}"
+        );
+        assert_eq!(std::fs::read(root.join("keep")).unwrap(), b"keep");
+    }
+    let oversized = "{\"level\":\"INFO\"}\n".repeat(100001);
+    let out = invoke(
+        root,
+        &[
+            "data",
+            "jsonl-where",
+            "--pointer",
+            "/level",
+            "--equals",
+            "ERROR",
+            "-o",
+            "keep",
+            "--force",
+        ],
+        oversized.as_bytes(),
+    );
+    assert!(!out.status.success() && out.stdout.is_empty());
+    assert_eq!(std::fs::read(root.join("keep")).unwrap(), b"keep");
+    let out = invoke(
+        root,
+        &[
+            "data",
+            "jsonl-where",
+            "--pointer",
+            "/level",
+            "--equals",
+            "ERROR",
+            "-o",
+            "keep",
+        ],
+        b"{\"level\":\"ERROR\"}",
+    );
+    assert!(!out.status.success() && out.stdout.is_empty());
+    assert_eq!(std::fs::read(root.join("keep")).unwrap(), b"keep");
+    let out = invoke(
+        root,
+        &[
+            "data",
+            "jsonl-where",
+            "--pointer",
+            "/level",
+            "--equals",
+            "ERROR",
+            "-o",
+            "keep",
+            "--force",
+        ],
+        b"{\"level\":\"INFO\"}",
+    );
+    assert!(out.status.success() && out.stdout.is_empty());
+    assert_eq!(std::fs::read(root.join("keep")).unwrap(), b"");
+    assert!(!std::fs::read_dir(root).unwrap().any(|p| {
+        p.unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".zi-result-")
+    }));
+}
+
+#[test]
+fn jsonl_where_model_recovers_and_composes_on_original_input_in_all_protocols() {
+    for api in ["chat", "responses", "anthropic"] {
+        let dir = tempfile::tempdir().unwrap();
+        let input=b"{\"level\":\"INFO\",\"id\":0,\"message\":\"ERROR\"}\n{\"level\":\"\\u0045RROR\",\"id\":1.2300E+400}\n";
+        let filter = json!({"operation":"jsonl-where","pointer":"/level","equals":"ERROR"});
+        let pipeline = json!({"steps":[{"operation":"jsonl-where","pointer":"/level","equals":"ERROR"},{"operation":"jsonl-select","pointer":"/id"},{"operation":"jsonl-to-array"}]});
+        let (url, server) = model_turns(
+            api,
+            vec![
+                (
+                    json!({"operation":"jsonl-where","pointer":"/level","equals":null}),
+                    Value::Null,
+                ),
+                (
+                    filter,
+                    json!("{\"level\":\"\\u0045RROR\",\"id\":1.2300E+400}\n"),
+                ),
+                (
+                    json!({"operation":"jsonl-where","pointer":"/missing","equals":"PRIVATE"}),
+                    Value::Null,
+                ),
+                (
+                    json!({"operation":"jsonl-where","pointer":"/level","equals":"INFO"}),
+                    json!("{\"level\":\"INFO\",\"id\":0,\"message\":\"ERROR\"}\n"),
+                ),
+                (pipeline, json!("[1.2300E+400]")),
+            ],
+        );
+        let out = invoke(
+            dir.path(),
+            &[
+                "--api",
+                api,
+                "--base-url",
+                &url,
+                "--model",
+                "fixture",
+                "filter records",
+            ],
+            input,
+        );
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(out.stdout, b"verified\n");
+        assert!(out.stderr.is_empty());
+        server.join().unwrap();
+    }
+}

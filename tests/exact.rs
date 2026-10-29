@@ -803,3 +803,58 @@ fn model_plan_export_requires_exact_and_rejects_json_presets_before_data_output_
         );
     }
 }
+
+#[test]
+fn jsonl_where_exact_execution_and_model_plan_export_roundtrip_all_protocols() {
+    for api in ["chat", "responses", "anthropic"] {
+        let root = tempfile::tempdir().unwrap();
+        let input=b"{\"level\":\"INFO\",\"message\":\"ERROR\"}\n{\"level\":\"\\u0045RROR\",\"id\":1.2300E+400}\n";
+        let args = json!({"operation":"jsonl-where","pointer":"/level","equals":"ERROR"});
+        for export in [false, true] {
+            let (url, task) = server(
+                api,
+                vec![calls(
+                    api,
+                    vec![call(api, "where", "transform_input", args.clone())],
+                )],
+            );
+            let options = if export {
+                vec!["--export-plan", "--max-steps", "1", "-o", "plan.toml"]
+            } else {
+                vec!["--max-steps", "1"]
+            };
+            let out = invoke(root.path(), api, &url, &options, input);
+            assert!(
+                out.status.success(),
+                "{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            if export {
+                assert!(out.stdout.is_empty());
+                let plan = std::fs::read_to_string(root.path().join("plan.toml")).unwrap();
+                let value: toml::Value = toml::from_str(&plan).unwrap();
+                assert_eq!(value["steps"][0]["equals"].as_str(), Some("ERROR"));
+                let mut child = command(root.path())
+                    .args(["data", "--recipe", "plan.toml"])
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .spawn()
+                    .unwrap();
+                child.stdin.take().unwrap().write_all(input).unwrap();
+                let run = child.wait_with_output().unwrap();
+                assert!(run.status.success());
+                assert_eq!(
+                    run.stdout,
+                    b"{\"level\":\"\\u0045RROR\",\"id\":1.2300E+400}\n"
+                );
+            } else {
+                assert_eq!(
+                    out.stdout,
+                    b"{\"level\":\"\\u0045RROR\",\"id\":1.2300E+400}\n"
+                );
+            }
+            assert_eq!(task.join().unwrap().len(), 1);
+        }
+    }
+}

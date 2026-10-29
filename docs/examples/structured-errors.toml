@@ -1,0 +1,10 @@
+version = 1
+
+[[steps]]
+operation = "jsonl-where"
+pointer = "/level"
+equals = "ERROR"
+
+[[steps]]
+operation = "lines-tail"
+lines = 20

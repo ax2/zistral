@@ -47,6 +47,8 @@ pub enum Operation {
     JsonSelect,
     /// Select one value from every JSONL record; emit compact JSON lines in input order
     JsonlSelect,
+    /// Keep complete JSONL records whose selected JSON string equals a literal
+    JsonlWhere,
     /// Convert header-based comma CSV to JSONL objects; keep every cell as a string
     CsvToJsonl,
     /// Export flat scalar JSONL objects as quoted CSV; first object defines column order
@@ -73,6 +75,12 @@ pub struct Step {
         deserialize_with = "optional_string"
     )]
     pub contains: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_string"
+    )]
+    pub equals: Option<String>,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
@@ -111,6 +119,17 @@ fn is_false(value: &bool) -> bool {
 
 impl Step {
     pub fn validate(&self) -> Result<()> {
+        match (&self.equals, self.operation) {
+            (Some(value), Operation::JsonlWhere) if value.len() <= 4096 => (),
+            (Some(_), Operation::JsonlWhere) => {
+                bail!("equals must contain at most 4096 UTF-8 bytes")
+            }
+            (None, Operation::JsonlWhere) => bail!(
+                "jsonl-where requires explicit equals text; use --equals TEXT or recipe equals (empty is allowed)"
+            ),
+            (Some(_), _) => bail!("equals is only valid for jsonl-where"),
+            (None, _) => (),
+        }
         match (self.lines, self.operation) {
             (Some(n), Operation::LinesHead | Operation::LinesTail)
                 if (1..=MAX_ITEMS).contains(&n) => {}
@@ -149,18 +168,25 @@ impl Step {
             (None, _) => (),
         }
         match (&self.pointer, self.operation) {
-            (Some(pointer), Operation::JsonSelect | Operation::JsonlSelect) => {
-                crate::selection::validate_pointer(pointer)
+            (
+                Some(pointer),
+                Operation::JsonSelect | Operation::JsonlSelect | Operation::JsonlWhere,
+            ) => crate::selection::validate_pointer(pointer),
+            (None, Operation::JsonSelect | Operation::JsonlSelect | Operation::JsonlWhere) => {
+                bail!(
+                    "{} requires an explicit pointer; use an empty pointer to select the root",
+                    if self.operation == Operation::JsonSelect {
+                        "json-select"
+                    } else if self.operation == Operation::JsonlSelect {
+                        "jsonl-select"
+                    } else {
+                        "jsonl-where"
+                    }
+                )
             }
-            (None, Operation::JsonSelect | Operation::JsonlSelect) => bail!(
-                "{} requires an explicit pointer; use an empty pointer to select the root",
-                if self.operation == Operation::JsonSelect {
-                    "json-select"
-                } else {
-                    "jsonl-select"
-                }
-            ),
-            (Some(_), _) => bail!("pointer is only valid for json-select or jsonl-select"),
+            (Some(_), _) => {
+                bail!("pointer is only valid for json-select, jsonl-select or jsonl-where")
+            }
             (None, _) => Ok(()),
         }
     }
@@ -327,6 +353,21 @@ fn jsonl_to_array(input: &str, out: &mut Buffer) -> Result<()> {
         .context("collected JSON array exceeds supported nesting")
 }
 
+fn jsonl_where(input: &str, pointer: &str, equals: &str, out: &mut Buffer) -> Result<()> {
+    for (index, line) in input.lines().enumerate() {
+        if index == MAX_ITEMS {
+            bail!("JSONL filtering accepts at most 100000 records");
+        }
+        let matched = crate::selection::string_equals(line, pointer, equals)
+            .with_context(|| format!("cannot filter JSONL record {}", index + 1))?;
+        if matched {
+            format_json(line, false, out)?;
+            out.write_all(b"\n")?;
+        }
+    }
+    Ok(())
+}
+
 fn jsonl_select(input: &str, pointer: &str, out: &mut Buffer) -> Result<()> {
     for (index, line) in input.lines().enumerate() {
         if index == MAX_ITEMS {
@@ -456,6 +497,7 @@ fn run(input: &str, operation: Operation, reverse: bool, limit: usize) -> Result
             reverse,
             contains: None,
             lines: None,
+            equals: None,
             pointer: None,
             fields: None,
         },
@@ -567,6 +609,12 @@ fn transform(input: &str, step: &Step, input_limit: usize, limit: usize) -> Resu
             step.fields.as_deref().expect("validated fields"),
             &mut out,
         )?,
+        Operation::JsonlWhere => jsonl_where(
+            input,
+            step.pointer.as_deref().expect("validated pointer"),
+            step.equals.as_deref().expect("validated equals"),
+            &mut out,
+        )?,
         Operation::JsonlSelect => jsonl_select(
             input,
             step.pointer.as_deref().expect("validated pointer"),
@@ -602,7 +650,7 @@ pub(crate) fn parse_arguments(arguments: &str) -> Result<ToolArguments> {
     }
     serde_json::from_str(arguments).map_err(|_| {
         anyhow::anyhow!(
-            "transform_input requires either operation with optional reverse/pointer/fields/contains/lines, or 1-16 steps of the same shape; do not combine them"
+            "transform_input requires either operation with optional reverse/pointer/fields/contains/lines/equals, or 1-16 steps of the same shape; do not combine them"
         )
     })
 }
@@ -665,6 +713,7 @@ mod tests {
             reverse: false,
             contains: None,
             lines: None,
+            equals: None,
             pointer: None,
             fields: Some(vec![field.clone()]),
         };
@@ -755,6 +804,7 @@ mod tests {
             reverse: false,
             contains: None,
             lines: None,
+            equals: None,
             pointer: None,
             fields: None,
         };
@@ -787,6 +837,7 @@ mod tests {
             reverse: false,
             contains: None,
             lines: None,
+            equals: None,
             pointer: None,
             fields: None,
         };
@@ -820,6 +871,7 @@ mod tests {
             reverse: false,
             contains: None,
             lines: None,
+            equals: None,
             pointer: Some(String::new()),
             fields: None,
         };
@@ -1103,6 +1155,7 @@ mod tests {
             reverse,
             contains: None,
             lines: None,
+            equals: None,
             pointer: None,
             fields: None,
         };
@@ -1279,6 +1332,7 @@ mod tests {
             fields: None,
             contains: Some("x".into()),
             lines: None,
+            equals: None,
         };
         let input = "x\n".repeat(MAX_ITEMS);
         assert_eq!(
@@ -1422,5 +1476,127 @@ mod tests {
             .unwrap()["output"],
             "end\n"
         );
+    }
+}
+
+#[cfg(test)]
+mod jsonl_where_tests {
+    use super::*;
+    fn output(args: &str, input: &str) -> Result<String> {
+        let value: serde_json::Value = serde_json::from_str(&execute(args, input)?)?;
+        Ok(value["output"].as_str().unwrap().to_owned())
+    }
+    const FILTER: &str = r#"{"operation":"jsonl-where","pointer":"/level","equals":"ERROR"}"#;
+    #[test]
+    fn structured_filter_decodes_strings_and_preserves_whole_json_tokens() {
+        let input = " {\"level\":\"INFO\",\"message\":\"ERROR\"}\r\n{\"n\":1.2300E+400,\"level\":\"\\u0045RROR\",\"x\":1,\"x\":-0}\n{\"level\":null}\n{\"level\":true}\n{\"level\":7}\n{\"level\":{}}\n{\"level\":[]}\n";
+        assert_eq!(
+            output(FILTER, input).unwrap(),
+            "{\"n\":1.2300E+400,\"level\":\"\\u0045RROR\",\"x\":1,\"x\":-0}\n"
+        );
+        assert_eq!(output(FILTER, "").unwrap(), "");
+        assert_eq!(output(FILTER, "{\"level\":\"error\"}").unwrap(), "");
+        assert_eq!(
+            output(
+                r#"{"operation":"jsonl-where","pointer":"","equals":""}"#,
+                "\"\"\nnull\n\"x\""
+            )
+            .unwrap(),
+            "\"\"\n"
+        );
+    }
+    #[test]
+    fn structured_filter_rejects_incomplete_null_duplicate_and_unrelated_definitions() {
+        for args in [
+            r#"{"operation":"jsonl-where","pointer":"/level"}"#,
+            r#"{"operation":"jsonl-where","equals":"ERROR"}"#,
+            r#"{"operation":"jsonl-where","pointer":"/level","equals":null}"#,
+            r#"{"operation":"jsonl-where","pointer":"/level","equals":1}"#,
+            r#"{"operation":"jsonl-where","pointer":"/level","equals":false}"#,
+            r#"{"operation":"jsonl-where","pointer":"/level","equals":"x","equals":"y"}"#,
+            r#"{"operation":"jsonl-where","pointer":"bad","equals":"x"}"#,
+            r#"{"operation":"jsonl-where","pointer":"/~2","equals":"x"}"#,
+            r#"{"operation":"jsonl-where","pointer":"","equals":"x","contains":"x"}"#,
+            r#"{"operation":"jsonl-where","pointer":"","equals":"x","reverse":true}"#,
+            r#"{"operation":"jsonl-where","pointer":"","equals":"x","lines":1}"#,
+            r#"{"operation":"jsonl-where","pointer":"","equals":"x","fields":[]}"#,
+            r#"{"operation":"trim","equals":""}"#,
+            r#"{"operation":"jsonl-select","pointer":"","equals":"x"}"#,
+            r#"{"steps":[{"operation":"jsonl-where","pointer":"","equals":"x"}],"equals":"x"}"#,
+        ] {
+            assert!(execute(args, "").is_err(), "{args}");
+        }
+        let args =
+            serde_json::json!({"operation":"jsonl-where","pointer":"","equals":"界".repeat(1366)})
+                .to_string();
+        assert!(execute(&args, "").is_err());
+        let schema = crate::data::tool_definitions();
+        let p = &schema[2]["function"]["parameters"];
+        assert_eq!(p["properties"]["equals"]["type"], "string");
+        assert_eq!(
+            p["properties"]["equals"],
+            p["properties"]["steps"]["items"]["properties"]["equals"]
+        );
+        assert!(
+            p["properties"]["operation"]["enum"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!("jsonl-where"))
+        );
+    }
+    #[test]
+    fn structured_filter_checks_later_discarded_records_and_hides_private_literals() {
+        for line in [
+            r#"{"PRIVATE":1}"#,
+            r#"{"level":"INFO","level":"ERROR"}"#,
+            r#"{"level":"ERROR","le\u0076el":"INFO"}"#,
+            r#"{"level":"INFO"} PRIVATE"#,
+            r#"{"level":"\uD800"}"#,
+            "",
+        ] {
+            let input = format!("{{\"level\":\"ERROR\"}}\n{line}\n");
+            let error = format!("{:#}", execute(FILTER, &input).unwrap_err());
+            assert!(error.contains("record 2"), "{error}");
+            assert!(!error.contains("PRIVATE"), "{error}");
+        }
+        let pointer =
+            serde_json::json!({"operation":"jsonl-where","pointer":"/PRIVATE","equals":"PRIVATE"})
+                .to_string();
+        assert!(!format!("{:#}", execute(&pointer, "{}").unwrap_err()).contains("PRIVATE"));
+    }
+    #[test]
+    fn structured_filter_counts_discarded_records_bytes_and_final_envelope() {
+        let rows = "{\"level\":\"INFO\"}\n".repeat(MAX_ITEMS);
+        assert_eq!(output(FILTER, &rows).unwrap(), "");
+        assert!(execute(FILTER, &(rows + "{\"level\":\"INFO\"}\n")).is_err());
+        assert!(execute(FILTER, &" ".repeat(MAX_INPUT + 1)).is_err());
+        let large = format!(
+            "{{\"level\":\"ERROR\",\"x\":\"{}\"}}",
+            "x".repeat(TOOL_OUTPUT)
+        );
+        assert!(execute(FILTER, &large).is_err());
+        let discard = large.replace("ERROR", "INFO");
+        assert_eq!(output(FILTER, &discard).unwrap(), "");
+        let step: Step = serde_json::from_str(FILTER).unwrap();
+        assert!(transform("{\"level\":\"ERROR\"}", &step, MAX_INPUT, 4).is_err());
+    }
+    #[test]
+    fn structured_filter_composes_in_order_with_selection_projection_and_csv() {
+        let args = r#"{"steps":[{"operation":"json-select","pointer":"/items"},{"operation":"array-to-jsonl"},{"operation":"jsonl-where","pointer":"/level","equals":"ERROR"},{"operation":"jsonl-project","fields":[{"name":"id","pointer":"/id"}]},{"operation":"jsonl-to-csv"}]}"#;
+        assert_eq!(
+            output(
+                args,
+                r#"{"items":[{"level":"INFO","id":1},{"id":1.2300E+400,"level":"ERROR"}]}"#
+            )
+            .unwrap(),
+            "\"id\"\n\"1.2300E+400\"\n"
+        );
+    }
+    #[test]
+    fn structured_filter_later_stage_accepts_large_intermediate() {
+        let args = r#"{"steps":[{"operation":"csv-to-jsonl"},{"operation":"jsonl-where","pointer":"/level","equals":"ERROR"}]}"#;
+        // Quoted JSON escaping expands CSV backslashes beyond the initial8MiB cap.
+        let input = format!("level,value\nINFO,{}", "\\".repeat(5 * 1024 * 1024));
+        assert_eq!(output(args, &input).unwrap(), "");
     }
 }

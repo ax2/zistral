@@ -165,3 +165,9 @@ Since v0.28.0, --exact --export-plan bridges natural-language operation selectio
 explicit user-maintained recipes. It exports a validated transform definition only; input
 is model context and no data transformation runs. Existing recipes remain inspectable
 and offline; no implicit installation, code execution, memory or new tool is introduced.
+
+Since v0.29.0, jsonl-where keeps complete JSONL records by one explicit pointer and
+decoded-string equality. It solves structured-log false positives/escaped-string misses
+without expressions, type coercion, skipped errors or implicit model context. Shared native
+CLI/recipes/tool definitions preserve lexical values and complete-result rules. No new
+dependency, tool name, permission, Agent branch or memory. See [field filtering](jsonl-where.md).
