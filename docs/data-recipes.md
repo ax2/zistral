@@ -131,7 +131,7 @@ missing/ambiguous fields and invalid records fail the complete result, including
 records. Retained whole records remain compact JSONL with original tokens. Use a recipe
 for composition; no multi-parameter inline `--step` shorthand. [Details](jsonl-where.md).
 
-## Unreleased keyed log analysis
+## Keyed log analysis (v0.30.0)
 
 `jsonl-dedupe`, `jsonl-sort` and `jsonl-count-by` require an explicit string-valued
 `pointer`. Shorthands are `jsonl-dedupe:/id`, `jsonl-sort:/time` and

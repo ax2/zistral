@@ -56,46 +56,55 @@ var Item: String; Start, Finish, Count: Integer;
 begin
   Result := Value;
   Start := 1;
-  while Start <= Length(Value) do begin
+  while Start <= Length(Result) do begin
     Finish := Start;
-    while (Finish <= Length(Value)) and (Value[Finish] <> ';') do Finish := Finish + 1;
-    Item := Copy(Value, Start, Finish - Start);
+    while (Finish <= Length(Result)) and (Result[Finish] <> ';') do Finish := Finish + 1;
+    Item := Copy(Result, Start, Finish - Start);
     if SamePath(Item, Target) then begin
       Count := Finish - Start;
-      if Finish <= Length(Value) then Count := Count + 1
+      if Finish <= Length(Result) then Count := Count + 1
       else if Start > 1 then begin Start := Start - 1; Count := Count + 1; end;
       Delete(Result, Start, Count);
-      Exit;
-    end;
-    Start := Finish + 1;
+    end else Start := Finish + 1;
   end;
 end;
 
 function ContainsPath(Value, Target: String): Boolean;
-var Item: String; P: Integer;
+var Item: String; Start, Finish: Integer;
 begin
   Result := False;
-  while Value <> '' do begin
-    P := Pos(';', Value);
-    if P = 0 then begin Item := Value; Value := ''; end
-    else begin Item := Copy(Value, 1, P - 1); Delete(Value, 1, P); end;
+  Start := 1;
+  while Start <= Length(Value) do begin
+    // Keep the delimiter index in the same Unicode character units as Copy.
+    Finish := Start;
+    while (Finish <= Length(Value)) and (Value[Finish] <> ';') do Finish := Finish + 1;
+    Item := Copy(Value, Start, Finish - Start);
     if SamePath(Item, Target) then begin Result := True; Exit; end;
+    Start := Finish + 1;
   end;
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
-var Value, AppPath, Owned: String;
+var Value, Original, AppPath, Owned: String; Added: Boolean;
 begin
   if CurStep = ssPostInstall then begin
     AppPath := ExpandConstant('{app}');
     RegQueryStringValue(HKCU, 'Environment', 'Path', Value);
+    Original := Value;
     RegQueryStringValue(HKCU, 'Software\Zistral', 'OwnedPath', Owned);
-    if (Owned <> '') and not SamePath(Owned, AppPath) then Value := WithoutPath(Value, Owned);
-    if not ContainsPath(Value, AppPath) then begin
+    if Owned <> '' then Value := WithoutPath(Value, Owned);
+    Added := not ContainsPath(Value, AppPath);
+    if Added then begin
       if Value = '' then Value := AppPath else Value := AppPath + ';' + Value;
+    end;
+    if Value <> Original then begin
       if not RegWriteExpandStringValue(HKCU, 'Environment', 'Path', Value) then
         RaiseException('Cannot update your PATH. Please run zi using the Start menu shortcut.');
-      RegWriteStringValue(HKCU, 'Software\Zistral', 'OwnedPath', AppPath);
+    end;
+    if Added then RegWriteStringValue(HKCU, 'Software\Zistral', 'OwnedPath', AppPath)
+    else if Owned <> '' then begin
+      RegDeleteValue(HKCU, 'Software\Zistral', 'OwnedPath');
+      RegDeleteKeyIfEmpty(HKCU, 'Software\Zistral');
     end;
   end;
 end;

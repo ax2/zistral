@@ -20,7 +20,7 @@ Download a native installer from [Releases](https://github.com/ax2/zistral/relea
 | Platform | Package | Installation |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | Per-user installer; adds PATH and a Start menu launcher; no administrator required |
-| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.29.1-linux-amd64.deb` |
+| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.30.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | Open the package; installs `/usr/local/bin/zi` |
 
 Then type `zi`. On first launch, choose an existing Codex, WorkBuddy or dsh configuration,
@@ -718,10 +718,10 @@ zi data jsonl-where --pointer /level --equals ERROR --show-plan -o errors.toml
 
 [JSONL field filtering / 字段筛选](docs/jsonl-where.md)
 
-## Next batch on main (unreleased)
+## Structured log analysis (v0.30.0)
 
 [Structured log analysis](docs/jsonl-key-analysis.md) groups three related improvements:
 `jsonl-dedupe --pointer /id` keeps the first complete event per decoded string ID;
 `jsonl-sort --pointer /time` stably sorts by an explicit string key;
 `jsonl-count-by --pointer /level` produces exact frequency records. All share offline
-recipes and the existing model tool. Published v0.29.1 packages do not include them yet.
+recipes and the existing model tool. See the v0.30.0 release for the corresponding installable packages.

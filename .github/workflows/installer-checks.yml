@@ -1,0 +1,37 @@
+name: Installer checks
+on:
+  push:
+    branches: [main]
+    paths: ['packaging/**', 'scripts/package.py', 'scripts/test-install.ps1', '.github/workflows/installer-checks.yml']
+  pull_request:
+    paths: ['packaging/**', 'scripts/package.py', 'scripts/test-install.ps1', '.github/workflows/installer-checks.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: installer-checks-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  windows:
+    runs-on: windows-latest
+    env:
+      TARGET: x86_64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust stable
+        run: rustup update stable --no-self-update && rustup default stable
+      - name: Build candidate executable
+        run: cargo build --release --locked --target $env:TARGET
+      - name: Package installer and portable archive
+        run: python scripts/package.py --target $env:TARGET
+      - name: Check Unicode path install, upgrade and uninstall
+        shell: pwsh
+        run: ./scripts/test-install.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-check-${{ github.sha }}
+          path: |
+            dist/*-setup.exe
+            dist/*.zip
+          if-no-files-found: error
+          retention-days: 7

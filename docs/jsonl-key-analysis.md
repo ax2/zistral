@@ -1,6 +1,6 @@
 # JSONL analysis by an explicit string key / 按明确字段分析日志
 
-Development on `main`, not included in the currently published v0.29.1 packages.
+Applies to v0.30.0. Earlier v0.29.1 packages do not include these keyed operations.
 These three operations form one release batch; they share the existing native
 CLI, version-1 recipe and `transform_input` paths. No new dependency, model tool
 name, project permission, background process or task history is added.
@@ -197,3 +197,8 @@ input directory. It does not build/download software or contact a model. The CLI
 cross-platform with no Python requirement. A separate seeded differential run compared133
 valid/invalid CLI samples; output bytes and exit status matched the previous development
 binary, while diagnostics may now include the operation name.
+
+The memory figures above use preserved development binaries from the feature/refinement
+commits before the v0.30.0 version bump, with identical transformation algorithms and
+release profiles. They are not direct measurements of downloaded official v0.30.0 assets.
+The benchmark records binary/source hashes so these scopes can be checked independently.

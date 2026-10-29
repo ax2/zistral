@@ -17,7 +17,7 @@ git diff | zi "生成一句简洁的提交说明"
 | 平台 | 安装包 | 安装方法 |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | 双击安装，无需管理员权限，自动添加用户 PATH 和开始菜单入口 |
-| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.29.1-linux-amd64.deb` |
+| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.30.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | 双击安装，命令放到 `/usr/local/bin/zi` |
 
 安装后直接运行 `zi`。Windows 安装结束可立即启动，或在开始菜单打开 zi；
@@ -538,10 +538,10 @@ zi data jsonl-where --pointer /level --equals ERROR --show-plan -o errors.toml
 
 [JSONL field filtering / 字段筛选](docs/jsonl-where.md)
 
-## main 中的下一批改进（尚未发布）
+## 结构化日志分析（v0.30.0）
 
 [结构化日志分析](docs/jsonl-key-analysis.md)将三项相关能力合并交付：
 `jsonl-dedupe --pointer /id` 按解码后的字符串 ID 保留首条完整事件；
 `jsonl-sort --pointer /time` 按明确的字符串字段稳定排序；
 `jsonl-count-by --pointer /level` 精确统计每类记录数。共享离线配方与现有模型工具。
-当前正式安装包 v0.29.1 暂不包含这些改动。
+对应安装包与本批变更见 v0.30.0 Release。

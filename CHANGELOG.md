@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.30.0 — 2026-10-30
 
 - Analyze structured logs by explicit decoded-string fields: `jsonl-dedupe` keeps
   the first complete record per key; `jsonl-sort` stably orders whole records;
@@ -10,6 +10,9 @@
   and complete-result failures; no new runtime dependencies, tools or permissions.
 - Retain only distinct keys for counting/deduplication, include operation names in
   pipeline errors, and provide reviewed raw-count/unique-count/recent-event recipes.
+- Fix repeated Windows installation under Unicode paths adding duplicate PATH entries;
+  repair older owned duplicates on upgrade while preserving user-provided entries. Native
+  installer checks cover paths containing both spaces and Chinese characters.
 
 ## 0.29.1 — 2026-10-29
 
