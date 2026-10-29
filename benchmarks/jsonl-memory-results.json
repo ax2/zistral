@@ -1,0 +1,421 @@
+{
+  "base_commit": "63794e748e9605ee78fde4359a71dc384ed124bb",
+  "after_binary_sha256": "8cf102210d7b4781808ecce8f22afd04c52787f2c8536ce26952d35257773a6a",
+  "candidate_transforms_sha256": "956cd6d480c12725ed33c5a14d063bfaf08c555c6f96cc5ae04e87ab77b4886e",
+  "selection_sha256": "038176c3bdd13d9c884e05cbe824fa2dcf1dd581b55feaa629cdf163d177cbd9",
+  "cargo_lock_sha256": "af25a248dc7d5d52bcd430d932fcd437608d94a6d0f9b11ec95bfcf8cdd585dc",
+  "release_profile": "opt-level=s,LTO=true,codegen-units=1,strip=true; same configured local Rust toolchain/dependencies",
+  "measurement_date": "2026-10-29",
+  "rows": [
+    {
+      "operation": "jsonl-count-by",
+      "distinct_keys": 1,
+      "before_peak_working_set_bytes": 25661440,
+      "after_peak_working_set_bytes": 22650880,
+      "before_peak_committed_bytes": 22437888,
+      "after_peak_committed_bytes": 17911808
+    },
+    {
+      "operation": "jsonl-dedupe",
+      "distinct_keys": 1,
+      "before_peak_working_set_bytes": 25640960,
+      "after_peak_working_set_bytes": 22618112,
+      "before_peak_committed_bytes": 22376448,
+      "after_peak_committed_bytes": 17903616
+    },
+    {
+      "operation": "jsonl-sort",
+      "distinct_keys": 1,
+      "before_peak_working_set_bytes": 29790208,
+      "after_peak_working_set_bytes": 29761536,
+      "before_peak_committed_bytes": 31293440,
+      "after_peak_committed_bytes": 31301632
+    },
+    {
+      "operation": "jsonl-count-by",
+      "distinct_keys": 100000,
+      "before_peak_working_set_bytes": 41701376,
+      "after_peak_working_set_bytes": 30969856,
+      "before_peak_committed_bytes": 44093440,
+      "after_peak_committed_bytes": 31068160
+    },
+    {
+      "operation": "jsonl-dedupe",
+      "distinct_keys": 100000,
+      "before_peak_working_set_bytes": 36220928,
+      "after_peak_working_set_bytes": 32260096,
+      "before_peak_committed_bytes": 37011456,
+      "after_peak_committed_bytes": 29564928
+    },
+    {
+      "operation": "jsonl-sort",
+      "distinct_keys": 100000,
+      "before_peak_working_set_bytes": 29761536,
+      "after_peak_working_set_bytes": 29810688,
+      "before_peak_committed_bytes": 31322112,
+      "after_peak_committed_bytes": 31305728
+    }
+  ],
+  "before_runs": [
+    {
+      "label": "before",
+      "binary_sha256": "c248993d9f029bcfff30ebc2c4563d28b69f46a69cea8cc47bbe7cb7b1befe69",
+      "platform": "win32",
+      "cases": [
+        {
+          "operation": "jsonl-count-by",
+          "records": 100000,
+          "distinct_keys": 1,
+          "input_bytes": 7300000,
+          "output_bytes": 92,
+          "output_sha256": "f4206fb5edad8f6f040b67d957d2f0a2947773e7125ab71e3a6aee361251c8b1",
+          "trials": [
+            {
+              "peak_working_set_bytes": 25694208,
+              "peak_committed_bytes": 22433792,
+              "elapsed_seconds": 0.093
+            },
+            {
+              "peak_working_set_bytes": 25657344,
+              "peak_committed_bytes": 22437888,
+              "elapsed_seconds": 0.047
+            },
+            {
+              "peak_working_set_bytes": 25661440,
+              "peak_committed_bytes": 22441984,
+              "elapsed_seconds": 0.078
+            }
+          ],
+          "median_peak_working_set_bytes": 25661440,
+          "median_peak_committed_bytes": 22437888
+        },
+        {
+          "operation": "jsonl-dedupe",
+          "records": 100000,
+          "distinct_keys": 1,
+          "input_bytes": 7300000,
+          "output_bytes": 73,
+          "output_sha256": "adc8f7a7c0fa1b87106637a5a693b6c2bf84bb455bc1441e3af8a3b5e96e6d23",
+          "trials": [
+            {
+              "peak_working_set_bytes": 25640960,
+              "peak_committed_bytes": 22376448,
+              "elapsed_seconds": 0.063
+            },
+            {
+              "peak_working_set_bytes": 25681920,
+              "peak_committed_bytes": 22450176,
+              "elapsed_seconds": 0.078
+            },
+            {
+              "peak_working_set_bytes": 25620480,
+              "peak_committed_bytes": 22376448,
+              "elapsed_seconds": 0.063
+            }
+          ],
+          "median_peak_working_set_bytes": 25640960,
+          "median_peak_committed_bytes": 22376448
+        },
+        {
+          "operation": "jsonl-sort",
+          "records": 100000,
+          "distinct_keys": 1,
+          "input_bytes": 7300000,
+          "output_bytes": 7300000,
+          "output_sha256": "74a1830280decbe5530f81d34c9c7a5dc31239308f1dc1e1819576a280d423c0",
+          "trials": [
+            {
+              "peak_working_set_bytes": 29814784,
+              "peak_committed_bytes": 31293440,
+              "elapsed_seconds": 0.109
+            },
+            {
+              "peak_working_set_bytes": 29790208,
+              "peak_committed_bytes": 31293440,
+              "elapsed_seconds": 0.109
+            },
+            {
+              "peak_working_set_bytes": 29720576,
+              "peak_committed_bytes": 31301632,
+              "elapsed_seconds": 0.109
+            }
+          ],
+          "median_peak_working_set_bytes": 29790208,
+          "median_peak_committed_bytes": 31293440
+        }
+      ],
+      "scope": "Local Windows complete CLI process OS peaks (working set and peak committed bytes),100000 identical string keys,3runs/case,all exact bytes checked. Includes startup/input/result buffering,not allocator-only data,not universal memory guarantees; sort is unchanged control;0model requests."
+    },
+    {
+      "label": "before-unique",
+      "binary_sha256": "c248993d9f029bcfff30ebc2c4563d28b69f46a69cea8cc47bbe7cb7b1befe69",
+      "platform": "win32",
+      "cases": [
+        {
+          "operation": "jsonl-count-by",
+          "records": 100000,
+          "distinct_keys": 100000,
+          "input_bytes": 7300000,
+          "output_bytes": 8700000,
+          "output_sha256": "496f89ba555b22caea033ffaaffe251e33f82c4e332b489383952188addf4a05",
+          "trials": [
+            {
+              "peak_working_set_bytes": 41680896,
+              "peak_committed_bytes": 44130304,
+              "elapsed_seconds": 0.141
+            },
+            {
+              "peak_working_set_bytes": 41701376,
+              "peak_committed_bytes": 44077056,
+              "elapsed_seconds": 0.14
+            },
+            {
+              "peak_working_set_bytes": 41717760,
+              "peak_committed_bytes": 44093440,
+              "elapsed_seconds": 0.125
+            }
+          ],
+          "median_peak_working_set_bytes": 41701376,
+          "median_peak_committed_bytes": 44093440
+        },
+        {
+          "operation": "jsonl-dedupe",
+          "records": 100000,
+          "distinct_keys": 100000,
+          "input_bytes": 7300000,
+          "output_bytes": 7300000,
+          "output_sha256": "b2ca76335c4efd53af4dbfa3f55bb943a0cb3d37139ae588d08634b06c918213",
+          "trials": [
+            {
+              "peak_working_set_bytes": 36470784,
+              "peak_committed_bytes": 37376000,
+              "elapsed_seconds": 0.156
+            },
+            {
+              "peak_working_set_bytes": 36155392,
+              "peak_committed_bytes": 37011456,
+              "elapsed_seconds": 0.156
+            },
+            {
+              "peak_working_set_bytes": 36220928,
+              "peak_committed_bytes": 36962304,
+              "elapsed_seconds": 0.141
+            }
+          ],
+          "median_peak_working_set_bytes": 36220928,
+          "median_peak_committed_bytes": 37011456
+        },
+        {
+          "operation": "jsonl-sort",
+          "records": 100000,
+          "distinct_keys": 100000,
+          "input_bytes": 7300000,
+          "output_bytes": 7300000,
+          "output_sha256": "b2ca76335c4efd53af4dbfa3f55bb943a0cb3d37139ae588d08634b06c918213",
+          "trials": [
+            {
+              "peak_working_set_bytes": 29736960,
+              "peak_committed_bytes": 31342592,
+              "elapsed_seconds": 0.141
+            },
+            {
+              "peak_working_set_bytes": 29761536,
+              "peak_committed_bytes": 31322112,
+              "elapsed_seconds": 0.125
+            },
+            {
+              "peak_working_set_bytes": 29782016,
+              "peak_committed_bytes": 31285248,
+              "elapsed_seconds": 0.125
+            }
+          ],
+          "median_peak_working_set_bytes": 29761536,
+          "median_peak_committed_bytes": 31322112
+        }
+      ],
+      "scope": "Local Windows complete CLI process OS peaks (working set and peak committed bytes),100000 repeated or distinct string keys as labelled,3runs/case,all exact bytes checked. Includes startup/input/result buffering,not allocator-only data,not universal memory guarantees; sort is unchanged control;0model requests."
+    }
+  ],
+  "after_runs": [
+    {
+      "label": "after",
+      "binary_sha256": "8cf102210d7b4781808ecce8f22afd04c52787f2c8536ce26952d35257773a6a",
+      "platform": "win32",
+      "cases": [
+        {
+          "operation": "jsonl-count-by",
+          "records": 100000,
+          "distinct_keys": 1,
+          "input_bytes": 7300000,
+          "output_bytes": 92,
+          "output_sha256": "f4206fb5edad8f6f040b67d957d2f0a2947773e7125ab71e3a6aee361251c8b1",
+          "trials": [
+            {
+              "peak_working_set_bytes": 22650880,
+              "peak_committed_bytes": 17911808,
+              "elapsed_seconds": 0.422
+            },
+            {
+              "peak_working_set_bytes": 22650880,
+              "peak_committed_bytes": 17948672,
+              "elapsed_seconds": 0.062
+            },
+            {
+              "peak_working_set_bytes": 22618112,
+              "peak_committed_bytes": 17891328,
+              "elapsed_seconds": 0.063
+            }
+          ],
+          "median_peak_working_set_bytes": 22650880,
+          "median_peak_committed_bytes": 17911808
+        },
+        {
+          "operation": "jsonl-dedupe",
+          "records": 100000,
+          "distinct_keys": 1,
+          "input_bytes": 7300000,
+          "output_bytes": 73,
+          "output_sha256": "adc8f7a7c0fa1b87106637a5a693b6c2bf84bb455bc1441e3af8a3b5e96e6d23",
+          "trials": [
+            {
+              "peak_working_set_bytes": 22605824,
+              "peak_committed_bytes": 17870848,
+              "elapsed_seconds": 0.062
+            },
+            {
+              "peak_working_set_bytes": 22663168,
+              "peak_committed_bytes": 17903616,
+              "elapsed_seconds": 0.063
+            },
+            {
+              "peak_working_set_bytes": 22618112,
+              "peak_committed_bytes": 17936384,
+              "elapsed_seconds": 0.078
+            }
+          ],
+          "median_peak_working_set_bytes": 22618112,
+          "median_peak_committed_bytes": 17903616
+        },
+        {
+          "operation": "jsonl-sort",
+          "records": 100000,
+          "distinct_keys": 1,
+          "input_bytes": 7300000,
+          "output_bytes": 7300000,
+          "output_sha256": "74a1830280decbe5530f81d34c9c7a5dc31239308f1dc1e1819576a280d423c0",
+          "trials": [
+            {
+              "peak_working_set_bytes": 29761536,
+              "peak_committed_bytes": 31326208,
+              "elapsed_seconds": 0.109
+            },
+            {
+              "peak_working_set_bytes": 29786112,
+              "peak_committed_bytes": 31301632,
+              "elapsed_seconds": 0.141
+            },
+            {
+              "peak_working_set_bytes": 29757440,
+              "peak_committed_bytes": 31272960,
+              "elapsed_seconds": 0.109
+            }
+          ],
+          "median_peak_working_set_bytes": 29761536,
+          "median_peak_committed_bytes": 31301632
+        }
+      ],
+      "scope": "Local Windows complete CLI process OS peaks (working set and peak committed bytes),100000 repeated or distinct string keys as labelled,3runs/case,all exact bytes checked. Includes startup/input/result buffering,not allocator-only data,not universal memory guarantees; sort is unchanged control;0model requests."
+    },
+    {
+      "label": "after-unique",
+      "binary_sha256": "8cf102210d7b4781808ecce8f22afd04c52787f2c8536ce26952d35257773a6a",
+      "platform": "win32",
+      "cases": [
+        {
+          "operation": "jsonl-count-by",
+          "records": 100000,
+          "distinct_keys": 100000,
+          "input_bytes": 7300000,
+          "output_bytes": 8700000,
+          "output_sha256": "496f89ba555b22caea033ffaaffe251e33f82c4e332b489383952188addf4a05",
+          "trials": [
+            {
+              "peak_working_set_bytes": 30990336,
+              "peak_committed_bytes": 31035392,
+              "elapsed_seconds": 0.125
+            },
+            {
+              "peak_working_set_bytes": 30949376,
+              "peak_committed_bytes": 31080448,
+              "elapsed_seconds": 0.125
+            },
+            {
+              "peak_working_set_bytes": 30969856,
+              "peak_committed_bytes": 31068160,
+              "elapsed_seconds": 0.109
+            }
+          ],
+          "median_peak_working_set_bytes": 30969856,
+          "median_peak_committed_bytes": 31068160
+        },
+        {
+          "operation": "jsonl-dedupe",
+          "records": 100000,
+          "distinct_keys": 100000,
+          "input_bytes": 7300000,
+          "output_bytes": 7300000,
+          "output_sha256": "b2ca76335c4efd53af4dbfa3f55bb943a0cb3d37139ae588d08634b06c918213",
+          "trials": [
+            {
+              "peak_working_set_bytes": 32251904,
+              "peak_committed_bytes": 29491200,
+              "elapsed_seconds": 0.141
+            },
+            {
+              "peak_working_set_bytes": 32284672,
+              "peak_committed_bytes": 29564928,
+              "elapsed_seconds": 0.141
+            },
+            {
+              "peak_working_set_bytes": 32260096,
+              "peak_committed_bytes": 29573120,
+              "elapsed_seconds": 0.125
+            }
+          ],
+          "median_peak_working_set_bytes": 32260096,
+          "median_peak_committed_bytes": 29564928
+        },
+        {
+          "operation": "jsonl-sort",
+          "records": 100000,
+          "distinct_keys": 100000,
+          "input_bytes": 7300000,
+          "output_bytes": 7300000,
+          "output_sha256": "b2ca76335c4efd53af4dbfa3f55bb943a0cb3d37139ae588d08634b06c918213",
+          "trials": [
+            {
+              "peak_working_set_bytes": 29798400,
+              "peak_committed_bytes": 31334400,
+              "elapsed_seconds": 0.11
+            },
+            {
+              "peak_working_set_bytes": 29827072,
+              "peak_committed_bytes": 31285248,
+              "elapsed_seconds": 0.125
+            },
+            {
+              "peak_working_set_bytes": 29810688,
+              "peak_committed_bytes": 31305728,
+              "elapsed_seconds": 0.125
+            }
+          ],
+          "median_peak_working_set_bytes": 29810688,
+          "median_peak_committed_bytes": 31305728
+        }
+      ],
+      "scope": "Local Windows complete CLI process OS peaks (working set and peak committed bytes),100000 repeated or distinct string keys as labelled,3runs/case,all exact bytes checked. Includes startup/input/result buffering,not allocator-only data,not universal memory guarantees; sort is unchanged control;0model requests."
+    }
+  ],
+  "scope": "Windows native full CLI process peaks;3runs/operation/cardinality,100000records,7300000input bytes. Byte-for-byte outputs checked. Not allocator-only data, not a universal RSS/latency guarantee. Sort unchanged as control.0model requests.",
+  "reproduction": "scripts/benchmark_jsonl_memory.py actually ran for both modes; measurements vary by machine/run."
+}

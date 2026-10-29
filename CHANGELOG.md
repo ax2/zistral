@@ -8,6 +8,8 @@
 - Compose the three operations in offline recipes and the existing transform tool,
   including exact results and plan export. Preserve retained lexical JSON payloads
   and complete-result failures; no new runtime dependencies, tools or permissions.
+- Retain only distinct keys for counting/deduplication, include operation names in
+  pipeline errors, and provide reviewed raw-count/unique-count/recent-event recipes.
 
 ## 0.29.1 — 2026-10-29
 

@@ -118,8 +118,11 @@ Use the existing limits: 1–16 steps; a 64KiB recipe/normalized plan; 8MiB orig
 pointer4096 UTF-8 bytes/128 reference tokens. A model tool returns at most64KiB including
 the JSON envelope; a large native result may require local `zi data` or a later reducing step.
 
-These are bounded, buffered operations, not streaming/external sorting. Decoded keys and
-record references are held while processing; counting/sorting is not constant-memory.
+These are bounded, buffered operations, not streaming/external sorting. Counting and
+deduplication retain distinct decoded keys rather than every repeated key. Counting stores
+each key once with its count and first position, then restores first-seen order. Sorting
+still holds all decoded keys and record references. Input and final result are buffered;
+no operation is constant-memory.
 Original payloads are borrowed until formatting, never converted through floating-point
 JSON values. No intermediate output is published on a later failure. Existing no-clobber
 file publication and explicit `--force` remain. This does not roll back a shell's own `>`
@@ -127,3 +130,70 @@ truncation or unrelated processes.
 
 这批改动聚焦一个完整的日志分析流程：保留首条事件、稳定整理顺序、统计字段分布。
 它不引入会话或长期记忆，也不会读取未明确提供的日志、隐式发现项目配置或扩张为通用自动化。
+
+## Ready-to-review examples / 可直接审阅和复用的场景
+
+Three explicit recipes are included in the source tree, without automatic installation
+or implicit discovery:
+
+| Recipe | Intended question |
+| --- | --- |
+| [severity-counts.toml](examples/severity-counts.toml) | How many raw records per severity? |
+| [unique-severity-counts.toml](examples/unique-severity-counts.toml) | How many first-seen event IDs per severity? |
+| [recent-unique-events.toml](examples/recent-unique-events.toml) | Show up to20 first-seen events, newest normalized string timestamp first |
+
+```sh
+zi data --show-plan --recipe docs/examples/unique-severity-counts.toml
+zi data --recipe docs/examples/unique-severity-counts.toml -i events.jsonl -o counts.csv
+zi data --recipe docs/examples/recent-unique-events.toml -i events.jsonl
+```
+
+Run these paths from the source checkout, or copy the reviewed recipe to your own explicit
+location. They are definitions only: no input paths, saved results, model settings, memory,
+shell commands or execution grants. Read the comments, choose matching field names, and
+keep the exact string/normalized timestamp requirements. The two count reports intentionally
+answer different questions when IDs repeat.
+
+Pipeline errors identify the step number and operation, such as
+`step 2 failed (jsonl-count-by): cannot read JSONL key at record 2 (...)`.
+Definition errors are still checked before input/output; later failures publish no partial
+result or replacement file. Input/pointer contents are not included in these diagnostics.
+
+## Local process memory measurement
+
+On Windows x64,100000 records (7300000 input bytes),3 runs per operation and key
+distribution, before/after medians from comparable local release builds:
+
+| Operation | Distinct keys | Peak working set MiB, before → after | Peak committed MiB, before → after |
+| --- | ---: | ---: | ---: |
+| jsonl-count-by | 1 | 24.47 → 21.60 | 21.40 → 17.08 |
+| jsonl-dedupe | 1 | 24.45 → 21.57 | 21.34 → 17.07 |
+| jsonl-sort | 1 | 28.41 → 28.38 | 29.84 → 29.85 |
+| jsonl-count-by | 100000 | 39.77 → 29.54 | 42.05 → 29.63 |
+| jsonl-dedupe | 100000 | 34.54 → 30.77 | 35.30 → 28.20 |
+| jsonl-sort | 100000 | 28.38 → 28.43 | 29.87 → 29.86 |
+
+Every output was checked byte for byte; sorting is the unchanged control, with small
+measurement variation. These are whole-process OS peaks, including startup/input/result
+buffers, not allocator-only figures or guarantees for all machines/data. The two columns
+are separate Windows measurements, not interchangeable estimates. Definitions follow
+[Microsoft process memory counters](https://learn.microsoft.com/en-us/windows/win32/api/psapi/ns-psapi-process_memory_counters).
+The exact byte values, trials, binary/source hashes and profile are in
+[measurement data](../benchmarks/jsonl-memory-results.json).
+
+To reproduce on Windows with Python (development only), build two comparable release
+binaries in separate checkouts, then measure each binary with both key distributions:
+
+```sh
+python scripts/benchmark_jsonl_memory.py path/to/before/zi.exe --keys repeated --output before-repeated.json
+python scripts/benchmark_jsonl_memory.py path/to/after/zi.exe --keys repeated --output after-repeated.json
+python scripts/benchmark_jsonl_memory.py path/to/before/zi.exe --keys unique --output before-unique.json
+python scripts/benchmark_jsonl_memory.py path/to/after/zi.exe --keys unique --output after-unique.json
+```
+
+The optional script uses only Python's standard library and Windows process counters,
+validates exact outputs, rejects existing result paths, and cleans its checked temporary
+input directory. It does not build/download software or contact a model. The CLI remains
+cross-platform with no Python requirement. A separate seeded differential run compared133
+valid/invalid CLI samples; output bytes and exit status matched the previous development
+binary, while diagnostics may now include the operation name.

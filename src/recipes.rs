@@ -82,8 +82,13 @@ impl Plan {
             bail!("a data pipeline requires 1-16 steps");
         }
         for (index, step) in plan.iter().enumerate() {
-            step.validate()
-                .with_context(|| format!("data pipeline step {} is invalid", index + 1))?;
+            step.validate().with_context(|| {
+                format!(
+                    "data pipeline step {} is invalid ({})",
+                    index + 1,
+                    step.operation
+                )
+            })?;
         }
         let plan = Self(plan);
         // Exported plans must remain readable within the same recipe-size contract.

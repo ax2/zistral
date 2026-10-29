@@ -2659,3 +2659,49 @@ fn keyed_jsonl_tools_recover_use_original_input_and_compose_in_all_protocols() {
         server.join().unwrap();
     }
 }
+
+#[test]
+fn pipeline_diagnostics_name_the_operation_without_echoing_recipe_or_data() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let invalid = invoke(
+        root,
+        &[
+            "data",
+            "--step",
+            "trim",
+            "--step",
+            "jsonl-sort",
+            "-i",
+            "MISSING_INPUT",
+        ],
+        b"",
+    );
+    assert!(!invalid.status.success());
+    assert!(invalid.stdout.is_empty());
+    let error = String::from_utf8_lossy(&invalid.stderr);
+    assert!(error.contains("step 2 is invalid (jsonl-sort)"), "{error}");
+    assert!(!error.contains("cannot open MISSING_INPUT"));
+    std::fs::write(root.join("keep"), b"unchanged").unwrap();
+    let out = invoke(
+        root,
+        &[
+            "data",
+            "--step",
+            "array-to-jsonl",
+            "--step",
+            "jsonl-count-by:/k",
+            "-o",
+            "keep",
+            "--force",
+        ],
+        br#"[{"k":"a"},{"k":1,"private":"SYNTHETIC_PRIVATE"}]"#,
+    );
+    assert!(!out.status.success());
+    assert!(out.stdout.is_empty());
+    let error = String::from_utf8_lossy(&out.stderr);
+    assert!(error.contains("step 2 failed (jsonl-count-by)"), "{error}");
+    assert!(error.contains("record 2"));
+    assert!(!error.contains("SYNTHETIC_PRIVATE"));
+    assert_eq!(std::fs::read(root.join("keep")).unwrap(), b"unchanged");
+}

@@ -1,0 +1,7 @@
+# Count raw records per severity, in first-seen severity order; exact strings only.
+version = 1
+[[steps]]
+operation = "jsonl-count-by"
+pointer = "/level"
+[[steps]]
+operation = "jsonl-to-csv"

@@ -63,6 +63,16 @@ pub enum Operation {
     JsonlProject,
 }
 
+impl fmt::Display for Operation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(
+            clap::ValueEnum::to_possible_value(self)
+                .expect("native operation has a CLI name")
+                .get_name(),
+        )
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Step {
@@ -398,35 +408,39 @@ fn jsonl_where(input: &str, pointer: &str, equals: &str, out: &mut Buffer) -> Re
 /// Keys borrow no JSON values other than decoded strings; record payloads remain lexical text.
 fn jsonl_by_key(input: &str, step: &Step, out: &mut Buffer) -> Result<()> {
     let pointer = step.pointer.as_deref().expect("validated pointer");
-    let mut records = Vec::new();
-    for (index, line) in input.lines().enumerate() {
+    let records = input.lines().enumerate().map(|(index, line)| -> Result<_> {
         if index == MAX_ITEMS {
             bail!("JSONL key operations accept at most 100000 records");
         }
-        let key = crate::selection::string_key(line, pointer)
-            .with_context(|| format!("cannot read JSONL key at record {}", index + 1))?;
-        records.push((key, line));
-    }
+        let key = crate::selection::string_key(line, pointer).with_context(|| {
+            format!(
+                "cannot read JSONL key at record {} ({})",
+                index + 1,
+                step.operation
+            )
+        })?;
+        Ok((key, line))
+    });
     match step.operation {
         Operation::JsonlCountBy => {
-            let mut positions = HashMap::new();
-            let mut groups: Vec<(&str, usize)> = Vec::new();
-            for (key, _) in &records {
-                let next = groups.len();
-                let position = *positions.entry(key.as_str()).or_insert(next);
-                if position == next {
-                    groups.push((key, 0));
-                }
-                groups[position].1 += 1;
+            let mut counts: HashMap<String, (usize, usize)> = HashMap::new();
+            for (index, record) in records.enumerate() {
+                let (key, _) = record?;
+                let (count, _) = counts.entry(key).or_insert((0, index));
+                *count += 1;
             }
-            for (key, count) in groups {
+            // Store each key once, then restore first-seen order after hash aggregation.
+            let mut groups: Vec<_> = counts.into_iter().collect();
+            groups.sort_unstable_by_key(|(_, (_, first))| *first);
+            for (key, (count, _)) in groups {
                 out.write_all(b"{\"value\":")?;
-                serde_json::to_writer(&mut *out, key)
+                serde_json::to_writer(&mut *out, &key)
                     .context("cannot encode JSONL group within output limit")?;
                 writeln!(out, ",\"count\":{count}}}")?;
             }
         }
         Operation::JsonlSort => {
+            let mut records = records.collect::<Result<Vec<_>>>()?;
             // Reverse the comparison, not the result, so ties retain input order in both directions.
             records.sort_by(|a, b| {
                 if step.reverse {
@@ -442,8 +456,9 @@ fn jsonl_by_key(input: &str, step: &Step, out: &mut Buffer) -> Result<()> {
         }
         Operation::JsonlDedupe => {
             let mut seen = HashSet::new();
-            for (key, line) in &records {
-                if seen.insert(key.as_str()) {
+            for record in records {
+                let (key, line) = record?;
+                if seen.insert(key) {
                     format_json(line, false, out)?;
                     out.write_all(b"\n")?;
                 }
@@ -602,8 +617,13 @@ fn pipeline(input: &str, steps: &[Step], final_limit: usize) -> Result<String> {
         bail!("a data pipeline requires 1-16 steps");
     }
     for (index, step) in steps.iter().enumerate() {
-        step.validate()
-            .with_context(|| format!("data pipeline step {} is invalid", index + 1))?;
+        step.validate().with_context(|| {
+            format!(
+                "data pipeline step {} is invalid ({})",
+                index + 1,
+                step.operation
+            )
+        })?;
     }
     let mut current = String::new();
     for (index, step) in steps.iter().enumerate() {
@@ -614,8 +634,13 @@ fn pipeline(input: &str, steps: &[Step], final_limit: usize) -> Result<String> {
         } else {
             CLI_OUTPUT
         };
-        current = transform(source, step, input_limit, limit)
-            .with_context(|| format!("data pipeline step {} failed", index + 1))?;
+        current = transform(source, step, input_limit, limit).with_context(|| {
+            format!(
+                "data pipeline step {} failed ({})",
+                index + 1,
+                step.operation
+            )
+        })?;
     }
     Ok(current)
 }

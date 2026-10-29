@@ -1,0 +1,10 @@
+# First occurrence per string event ID, then count retained records by severity.
+version = 1
+[[steps]]
+operation = "jsonl-dedupe"
+pointer = "/id"
+[[steps]]
+operation = "jsonl-count-by"
+pointer = "/level"
+[[steps]]
+operation = "jsonl-to-csv"

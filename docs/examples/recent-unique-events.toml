@@ -1,0 +1,13 @@
+# Requires uniformly normalized timestamp strings; does not parse dates/timezones.
+# Keep first record per string ID, then show20 latest by string time; ties stay stable.
+version = 1
+[[steps]]
+operation = "jsonl-dedupe"
+pointer = "/id"
+[[steps]]
+operation = "jsonl-sort"
+pointer = "/time"
+reverse = true
+[[steps]]
+operation = "lines-head"
+lines = 20
