@@ -223,6 +223,35 @@ pub(crate) fn string_equals(input: &str, pointer: &str, expected: &str) -> Resul
     Ok(text == expected)
 }
 
+/// Strict decoded-string key; find validates the entire record and rejects ambiguous references.
+pub(crate) fn string_key(input: &str, pointer: &str) -> Result<String> {
+    let raw = find(input, pointer)?;
+    // IgnoredAny checks syntax but skips surrogate pairing in unselected strings.
+    // Inspect string tokens only: never parse the record's numeric payloads as floats.
+    let (mut start, mut escaped) = (None, false);
+    for (index, byte) in input.bytes().enumerate() {
+        if let Some(begin) = start {
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                let token = &input[begin..=index];
+                if token.contains("\\u") {
+                    serde_json::from_str::<String>(token).map_err(|_| {
+                        anyhow::anyhow!("JSONL record contains an invalid Unicode string")
+                    })?;
+                }
+                start = None;
+            }
+        } else if byte == b'"' {
+            start = Some(index);
+        }
+    }
+    serde_json::from_str::<String>(raw.get())
+        .map_err(|_| anyhow::anyhow!("selected key must be a JSON string; no type coercion"))
+}
+
 /// Pipeline selection always returns a JSON value, including quoted string tokens.
 pub(crate) fn select_json(input: &str, pointer: &str, limit: usize) -> Result<String> {
     crate::transforms::compact_valid_json(find(input, pointer)?.get(), limit)

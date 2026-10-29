@@ -858,3 +858,73 @@ fn jsonl_where_exact_execution_and_model_plan_export_roundtrip_all_protocols() {
         }
     }
 }
+
+#[test]
+fn keyed_jsonl_exact_results_and_plan_exports_roundtrip_in_all_protocols() {
+    for api in ["chat", "responses", "anthropic"] {
+        let root = tempfile::tempdir().unwrap();
+        let input =
+            b"{\"id\":\"b\",\"t\":\"2\"}\n{\"id\":\"a\",\"t\":\"1\"}\n{\"id\":\"b\",\"t\":\"2\"}\n";
+        for (op, pointer, expected) in [
+            (
+                "jsonl-dedupe",
+                "/id",
+                "{\"id\":\"b\",\"t\":\"2\"}\n{\"id\":\"a\",\"t\":\"1\"}\n",
+            ),
+            (
+                "jsonl-sort",
+                "/t",
+                "{\"id\":\"a\",\"t\":\"1\"}\n{\"id\":\"b\",\"t\":\"2\"}\n{\"id\":\"b\",\"t\":\"2\"}\n",
+            ),
+            (
+                "jsonl-count-by",
+                "/id",
+                "{\"value\":\"b\",\"count\":2}\n{\"value\":\"a\",\"count\":1}\n",
+            ),
+        ] {
+            for export in [false, true] {
+                let args = json!({"operation":op,"pointer":pointer});
+                let (url, task) = server(
+                    api,
+                    vec![calls(
+                        api,
+                        vec![call(api, "keyed", "transform_input", args)],
+                    )],
+                );
+                let options = if export {
+                    vec!["--export-plan", "--max-steps", "1"]
+                } else {
+                    vec!["--max-steps", "1"]
+                };
+                let out = invoke(root.path(), api, &url, &options, input);
+                assert!(
+                    out.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&out.stderr)
+                );
+                assert_eq!(task.join().unwrap().len(), 1);
+                if export {
+                    let value: toml::Value =
+                        toml::from_str(std::str::from_utf8(&out.stdout).unwrap()).unwrap();
+                    assert_eq!(value["steps"][0]["operation"].as_str(), Some(op));
+                    assert_eq!(value["steps"][0]["pointer"].as_str(), Some(pointer));
+                    std::fs::write(root.path().join("keyed.toml"), out.stdout).unwrap();
+                    let mut child = command(root.path())
+                        .args(["data", "--recipe", "keyed.toml"])
+                        .stdin(Stdio::piped())
+                        .stdout(Stdio::piped())
+                        .stderr(Stdio::piped())
+                        .spawn()
+                        .unwrap();
+                    child.stdin.take().unwrap().write_all(input).unwrap();
+                    let run = child.wait_with_output().unwrap();
+                    assert!(run.status.success());
+                    assert_eq!(run.stdout, expected.as_bytes());
+                    assert!(run.stderr.is_empty());
+                } else {
+                    assert_eq!(out.stdout, expected.as_bytes());
+                }
+            }
+        }
+    }
+}

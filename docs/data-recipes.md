@@ -130,3 +130,12 @@ UTF-8 bytes). Matching compares decoded JSON strings; nonstrings do not match. R
 missing/ambiguous fields and invalid records fail the complete result, including discarded
 records. Retained whole records remain compact JSONL with original tokens. Use a recipe
 for composition; no multi-parameter inline `--step` shorthand. [Details](jsonl-where.md).
+
+## Unreleased keyed log analysis
+
+`jsonl-dedupe`, `jsonl-sort` and `jsonl-count-by` require an explicit string-valued
+`pointer`. Shorthands are `jsonl-dedupe:/id`, `jsonl-sort:/time` and
+`jsonl-count-by:/level`; use recipe `reverse = true` or the single-command
+`--reverse` for descending field sort. A `:reverse` suffix inside the shorthand
+pointer remains literal. All records, including discarded duplicates, are checked.
+See [full keyed analysis contracts and examples](jsonl-key-analysis.md).

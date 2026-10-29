@@ -2447,3 +2447,215 @@ fn jsonl_where_model_recovers_and_composes_on_original_input_in_all_protocols() 
         server.join().unwrap();
     }
 }
+
+#[test]
+fn keyed_jsonl_commands_preserve_records_count_decoded_values_and_sort_stably() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let input=b"{ \"id\":\"b\",\"time\":\"2\",\"n\":1.2300E+400 }\r\n{\"id\":\"a\",\"time\":\"10\",\"n\":-0}\n{\"id\":\"\\u0062\",\"time\":\"2\",\"n\":9007199254740993}\n";
+    let first = "{\"id\":\"b\",\"time\":\"2\",\"n\":1.2300E+400}\n";
+    let second = "{\"id\":\"a\",\"time\":\"10\",\"n\":-0}\n";
+    let third = "{\"id\":\"\\u0062\",\"time\":\"2\",\"n\":9007199254740993}\n";
+    for (args, expected) in [
+        (
+            vec!["data", "jsonl-dedupe", "--pointer", "/id"],
+            format!("{first}{second}"),
+        ),
+        (
+            vec!["data", "jsonl-sort", "--pointer", "/time"],
+            format!("{second}{first}{third}"),
+        ),
+        (
+            vec!["data", "jsonl-sort", "--pointer", "/time", "--reverse"],
+            format!("{first}{third}{second}"),
+        ),
+        (
+            vec!["data", "jsonl-count-by", "--pointer", "/id"],
+            "{\"value\":\"b\",\"count\":2}\n{\"value\":\"a\",\"count\":1}\n".into(),
+        ),
+    ] {
+        let out = invoke(root, &args, input);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(out.stdout, expected.as_bytes());
+        assert!(out.stderr.is_empty());
+    }
+    for op in ["jsonl-sort", "jsonl-dedupe", "jsonl-count-by"] {
+        let out = invoke(root, &["data", op, "--pointer", ""], b"");
+        assert!(out.status.success());
+        assert!(out.stdout.is_empty() && out.stderr.is_empty());
+    }
+    assert_eq!(std::fs::read_dir(root).unwrap().count(), 0);
+}
+
+#[test]
+fn keyed_jsonl_recipes_preview_roundtrip_and_run_through_a_real_pipe() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let args = [
+        "data",
+        "--show-plan",
+        "--step",
+        "csv-to-jsonl",
+        "--step",
+        "jsonl-dedupe:/id",
+        "--step",
+        "jsonl-sort:/time:reverse",
+        "--step",
+        "jsonl-count-by:/level",
+        "--step",
+        "jsonl-to-csv",
+        "-o",
+        "plan.toml",
+    ];
+    let out = invoke(root, &args, b"not data");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(out.stdout.is_empty());
+    let plan = std::fs::read_to_string(root.join("plan.toml")).unwrap();
+    assert!(plan.contains("/time:reverse"));
+    assert!(!plan.contains("reverse = true"));
+    let input = b"id,time:reverse,level\nb,2,WARN\na,1,ERROR\nb,2,WARN\nc,1,ERROR\n";
+    let out = invoke(root, &["data", "--recipe", "plan.toml"], input);
+    assert!(out.status.success());
+    assert_eq!(
+        out.stdout,
+        b"\"value\",\"count\"\n\"ERROR\",\"2\"\n\"WARN\",\"1\"\n"
+    );
+    let mut first = command(root)
+        .args(["data", "jsonl-count-by", "--pointer", ""])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let second = command(root)
+        .args(["data", "jsonl-to-csv"])
+        .stdin(Stdio::from(first.stdout.take().unwrap()))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    first
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"\"a\"\n\"b\"\n\"a\"\n")
+        .unwrap();
+    assert!(first.wait().unwrap().success());
+    let out = second.wait_with_output().unwrap();
+    assert!(out.status.success());
+    assert_eq!(
+        out.stdout,
+        b"\"value\",\"count\"\n\"a\",\"2\"\n\"b\",\"1\"\n"
+    );
+}
+
+#[test]
+fn keyed_jsonl_rejects_definitions_before_input_and_preserves_files_on_late_errors() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join("keep"), b"untouched").unwrap();
+    for op in ["jsonl-sort", "jsonl-dedupe", "jsonl-count-by"] {
+        for options in [
+            vec![],
+            vec!["--pointer", "/~2"],
+            vec!["--pointer", "", "--equals", "x"],
+            vec!["--pointer", "", "--lines", "1"],
+        ] {
+            let mut args = vec!["data", op, "-i", "DOES_NOT_EXIST", "-o", "keep", "--force"];
+            args.extend(options);
+            let out = invoke(root, &args, b"");
+            assert!(!out.status.success());
+            assert!(out.stdout.is_empty());
+            assert!(!String::from_utf8_lossy(&out.stderr).contains("cannot open DOES_NOT_EXIST"));
+            assert_eq!(std::fs::read(root.join("keep")).unwrap(), b"untouched");
+        }
+        for bad in [
+            b"{\"k\":\"a\"}\n{\"k\":1,\"payload\":\"PRIVATE\"}".as_slice(),
+            b"{\"k\":\"a\"}\n{\"k\":\"a\",\"bad\":[1,],\"payload\":\"PRIVATE\"}".as_slice(),
+        ] {
+            for file in [false, true] {
+                let mut args = vec!["data", op, "--pointer", "/k"];
+                if file {
+                    args.extend(["-o", "keep", "--force"]);
+                }
+                let out = invoke(root, &args, bad);
+                assert!(!out.status.success());
+                assert!(out.stdout.is_empty());
+                let error = String::from_utf8_lossy(&out.stderr);
+                assert!(error.contains("record 2"));
+                assert!(!error.contains("PRIVATE"));
+                assert_eq!(std::fs::read(root.join("keep")).unwrap(), b"untouched");
+            }
+        }
+    }
+    assert!(std::fs::read_dir(root).unwrap().all(|p| {
+        !p.unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".zi-result-")
+    }));
+}
+
+#[test]
+fn keyed_jsonl_tools_recover_use_original_input_and_compose_in_all_protocols() {
+    for api in ["chat", "responses", "anthropic"] {
+        let dir = tempfile::tempdir().unwrap();
+        let input=b"{\"id\":\"b\",\"level\":\"WARN\",\"t\":\"2\"}\n{\"id\":\"a\",\"level\":\"ERROR\",\"t\":\"1\"}\n{\"id\":\"\\u0062\",\"level\":\"WARN\",\"t\":\"2\"}\n";
+        let (url, server) = model_turns(
+            api,
+            vec![
+                (
+                    json!({"operation":"jsonl-count-by","pointer":null}),
+                    Value::Null,
+                ),
+                (
+                    json!({"operation":"jsonl-count-by","pointer":"/level"}),
+                    json!("{\"value\":\"WARN\",\"count\":2}\n{\"value\":\"ERROR\",\"count\":1}\n"),
+                ),
+                (
+                    json!({"operation":"jsonl-dedupe","pointer":"/id"}),
+                    json!(
+                        "{\"id\":\"b\",\"level\":\"WARN\",\"t\":\"2\"}\n{\"id\":\"a\",\"level\":\"ERROR\",\"t\":\"1\"}\n"
+                    ),
+                ),
+                (
+                    json!({"operation":"jsonl-sort","pointer":"/missing"}),
+                    Value::Null,
+                ),
+                (
+                    json!({"steps":[{"operation":"jsonl-dedupe","pointer":"/id"},{"operation":"jsonl-sort","pointer":"/t","reverse":true},{"operation":"jsonl-count-by","pointer":"/level"},{"operation":"jsonl-to-csv"}]}),
+                    json!("\"value\",\"count\"\n\"WARN\",\"1\"\n\"ERROR\",\"1\"\n"),
+                ),
+            ],
+        );
+        let out = invoke(
+            dir.path(),
+            &[
+                "--api",
+                api,
+                "--base-url",
+                &url,
+                "--model",
+                "fixture",
+                "analyze records",
+            ],
+            input,
+        );
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(out.stdout, b"verified\n");
+        assert!(out.stderr.is_empty());
+        server.join().unwrap();
+    }
+}

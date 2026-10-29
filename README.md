@@ -717,3 +717,11 @@ zi data jsonl-where --pointer /level --equals ERROR --show-plan -o errors.toml
 ```
 
 [JSONL field filtering / 字段筛选](docs/jsonl-where.md)
+
+## Next batch on main (unreleased)
+
+[Structured log analysis](docs/jsonl-key-analysis.md) groups three related improvements:
+`jsonl-dedupe --pointer /id` keeps the first complete event per decoded string ID;
+`jsonl-sort --pointer /time` stably sorts by an explicit string key;
+`jsonl-count-by --pointer /level` produces exact frequency records. All share offline
+recipes and the existing model tool. Published v0.29.1 packages do not include them yet.

@@ -537,3 +537,11 @@ zi data jsonl-where --pointer /level --equals ERROR --show-plan -o errors.toml
 ```
 
 [JSONL field filtering / 字段筛选](docs/jsonl-where.md)
+
+## main 中的下一批改进（尚未发布）
+
+[结构化日志分析](docs/jsonl-key-analysis.md)将三项相关能力合并交付：
+`jsonl-dedupe --pointer /id` 按解码后的字符串 ID 保留首条完整事件；
+`jsonl-sort --pointer /time` 按明确的字符串字段稳定排序；
+`jsonl-count-by --pointer /level` 精确统计每类记录数。共享离线配方与现有模型工具。
+当前正式安装包 v0.29.1 暂不包含这些改动。

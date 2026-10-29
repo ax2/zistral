@@ -171,3 +171,10 @@ decoded-string equality. It solves structured-log false positives/escaped-string
 without expressions, type coercion, skipped errors or implicit model context. Shared native
 CLI/recipes/tool definitions preserve lexical values and complete-result rules. No new
 dependency, tool name, permission, Agent branch or memory. See [field filtering](jsonl-where.md).
+
+Unreleased on main: three related JSONL string-key operations form one log-analysis
+batch: keep first complete records per ID, stable field ordering, and exact per-field
+counts. They reuse strict explicit pointer selection and native pipelines, not arbitrary
+expressions, numeric/date inference, new tool names, project access or task memory.
+See [keyed log analysis](jsonl-key-analysis.md). Publish this coherent batch only after
+combined validation, following the batched-release rule in [releasing](releasing.md).

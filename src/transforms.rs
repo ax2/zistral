@@ -5,7 +5,7 @@ use serde::{
     de::{IgnoredAny, MapAccess, Visitor},
 };
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     fmt,
     io::{self, Write},
 };
@@ -49,6 +49,12 @@ pub enum Operation {
     JsonlSelect,
     /// Keep complete JSONL records whose selected JSON string equals a literal
     JsonlWhere,
+    /// Keep the first whole JSONL record for each decoded string at an explicit pointer
+    JsonlDedupe,
+    /// Stably sort whole JSONL records by a decoded string field; reverse changes key order
+    JsonlSort,
+    /// Count JSONL records per decoded string field, in first-seen key order
+    JsonlCountBy,
     /// Convert header-based comma CSV to JSONL objects; keep every cell as a string
     CsvToJsonl,
     /// Export flat scalar JSONL objects as quoted CSV; first object defines column order
@@ -142,8 +148,8 @@ impl Step {
             (Some(_), _) => bail!("lines is only valid for lines-head or lines-tail"),
             (None, _) => (),
         }
-        if self.reverse && self.operation != Operation::Sort {
-            bail!("--reverse is only valid for sort");
+        if self.reverse && !matches!(self.operation, Operation::Sort | Operation::JsonlSort) {
+            bail!("--reverse is only valid for sort or jsonl-sort");
         }
         match (&self.contains, self.operation) {
             (Some(needle), Operation::LinesInclude | Operation::LinesExclude) => {
@@ -170,22 +176,43 @@ impl Step {
         match (&self.pointer, self.operation) {
             (
                 Some(pointer),
-                Operation::JsonSelect | Operation::JsonlSelect | Operation::JsonlWhere,
+                Operation::JsonSelect
+                | Operation::JsonlSelect
+                | Operation::JsonlWhere
+                | Operation::JsonlDedupe
+                | Operation::JsonlSort
+                | Operation::JsonlCountBy,
             ) => crate::selection::validate_pointer(pointer),
-            (None, Operation::JsonSelect | Operation::JsonlSelect | Operation::JsonlWhere) => {
+            (
+                None,
+                Operation::JsonSelect
+                | Operation::JsonlSelect
+                | Operation::JsonlWhere
+                | Operation::JsonlDedupe
+                | Operation::JsonlSort
+                | Operation::JsonlCountBy,
+            ) => {
                 bail!(
                     "{} requires an explicit pointer; use an empty pointer to select the root",
                     if self.operation == Operation::JsonSelect {
                         "json-select"
                     } else if self.operation == Operation::JsonlSelect {
                         "jsonl-select"
-                    } else {
+                    } else if self.operation == Operation::JsonlWhere {
                         "jsonl-where"
+                    } else if self.operation == Operation::JsonlDedupe {
+                        "jsonl-dedupe"
+                    } else if self.operation == Operation::JsonlSort {
+                        "jsonl-sort"
+                    } else {
+                        "jsonl-count-by"
                     }
                 )
             }
             (Some(_), _) => {
-                bail!("pointer is only valid for json-select, jsonl-select or jsonl-where")
+                bail!(
+                    "pointer is only valid for JSON selection, jsonl-where, jsonl-dedupe, jsonl-sort or jsonl-count-by"
+                )
             }
             (None, _) => Ok(()),
         }
@@ -364,6 +391,65 @@ fn jsonl_where(input: &str, pointer: &str, equals: &str, out: &mut Buffer) -> Re
             format_json(line, false, out)?;
             out.write_all(b"\n")?;
         }
+    }
+    Ok(())
+}
+
+/// Keys borrow no JSON values other than decoded strings; record payloads remain lexical text.
+fn jsonl_by_key(input: &str, step: &Step, out: &mut Buffer) -> Result<()> {
+    let pointer = step.pointer.as_deref().expect("validated pointer");
+    let mut records = Vec::new();
+    for (index, line) in input.lines().enumerate() {
+        if index == MAX_ITEMS {
+            bail!("JSONL key operations accept at most 100000 records");
+        }
+        let key = crate::selection::string_key(line, pointer)
+            .with_context(|| format!("cannot read JSONL key at record {}", index + 1))?;
+        records.push((key, line));
+    }
+    match step.operation {
+        Operation::JsonlCountBy => {
+            let mut positions = HashMap::new();
+            let mut groups: Vec<(&str, usize)> = Vec::new();
+            for (key, _) in &records {
+                let next = groups.len();
+                let position = *positions.entry(key.as_str()).or_insert(next);
+                if position == next {
+                    groups.push((key, 0));
+                }
+                groups[position].1 += 1;
+            }
+            for (key, count) in groups {
+                out.write_all(b"{\"value\":")?;
+                serde_json::to_writer(&mut *out, key)
+                    .context("cannot encode JSONL group within output limit")?;
+                writeln!(out, ",\"count\":{count}}}")?;
+            }
+        }
+        Operation::JsonlSort => {
+            // Reverse the comparison, not the result, so ties retain input order in both directions.
+            records.sort_by(|a, b| {
+                if step.reverse {
+                    b.0.cmp(&a.0)
+                } else {
+                    a.0.cmp(&b.0)
+                }
+            });
+            for (_, line) in records {
+                format_json(line, false, out)?;
+                out.write_all(b"\n")?;
+            }
+        }
+        Operation::JsonlDedupe => {
+            let mut seen = HashSet::new();
+            for (key, line) in &records {
+                if seen.insert(key.as_str()) {
+                    format_json(line, false, out)?;
+                    out.write_all(b"\n")?;
+                }
+            }
+        }
+        _ => unreachable!("JSONL key operation"),
     }
     Ok(())
 }
@@ -615,6 +701,9 @@ fn transform(input: &str, step: &Step, input_limit: usize, limit: usize) -> Resu
             step.equals.as_deref().expect("validated equals"),
             &mut out,
         )?,
+        Operation::JsonlDedupe | Operation::JsonlSort | Operation::JsonlCountBy => {
+            jsonl_by_key(input, step, &mut out)?
+        }
         Operation::JsonlSelect => jsonl_select(
             input,
             step.pointer.as_deref().expect("validated pointer"),
@@ -1598,5 +1687,225 @@ mod jsonl_where_tests {
         // Quoted JSON escaping expands CSV backslashes beyond the initial8MiB cap.
         let input = format!("level,value\nINFO,{}", "\\".repeat(5 * 1024 * 1024));
         assert_eq!(output(args, &input).unwrap(), "");
+    }
+}
+
+#[cfg(test)]
+mod jsonl_key_tests {
+    use super::*;
+    fn step(operation: Operation, pointer: &str, reverse: bool) -> Step {
+        Step {
+            operation,
+            pointer: Some(pointer.into()),
+            reverse,
+            fields: None,
+            contains: None,
+            equals: None,
+            lines: None,
+        }
+    }
+    const OPS: [Operation; 3] = [
+        Operation::JsonlDedupe,
+        Operation::JsonlSort,
+        Operation::JsonlCountBy,
+    ];
+
+    #[test]
+    fn key_dedupe_preserves_first_complete_record_and_decodes_equivalent_keys() {
+        let input = "{ \"k\":\"中\",\"n\":1.2300E+400,\"x\":1,\"x\":2 }\r\n{\"k\":\"\\u4e2d\",\"n\":-0}\n{\"k\":\"\",\"n\":9007199254740993}\n";
+        assert_eq!(
+            transform(
+                input,
+                &step(Operation::JsonlDedupe, "/k", false),
+                MAX_INPUT,
+                CLI_OUTPUT
+            )
+            .unwrap(),
+            "{\"k\":\"中\",\"n\":1.2300E+400,\"x\":1,\"x\":2}\n{\"k\":\"\",\"n\":9007199254740993}\n"
+        );
+        assert_eq!(
+            transform(
+                "\"a\"\n\"\\u0061\"\n\"A\"",
+                &step(Operation::JsonlDedupe, "", false),
+                MAX_INPUT,
+                CLI_OUTPUT
+            )
+            .unwrap(),
+            "\"a\"\n\"A\"\n"
+        );
+    }
+    #[test]
+    fn key_sort_is_lexical_stable_in_both_directions_without_normalization() {
+        let input =
+            "{\"k\":\"2\",\"id\":1}\n{\"k\":\"10\",\"id\":2}\n{\"k\":\"\\u0032\",\"id\":3}\n";
+        for (reverse, ids) in [(false, vec![2, 1, 3]), (true, vec![1, 3, 2])] {
+            let result = transform(
+                input,
+                &step(Operation::JsonlSort, "/k", reverse),
+                MAX_INPUT,
+                CLI_OUTPUT,
+            )
+            .unwrap();
+            let actual: Vec<_> = result
+                .lines()
+                .map(|line| {
+                    serde_json::from_str::<serde_json::Value>(line).unwrap()["id"]
+                        .as_u64()
+                        .unwrap()
+                })
+                .collect();
+            assert_eq!(actual, ids);
+            assert!(result.contains("\\u0032"));
+        }
+        assert_eq!(
+            transform(
+                "\"é\"\n\"e\\u0301\"\n\"A\"\n\"a\"",
+                &step(Operation::JsonlSort, "", false),
+                MAX_INPUT,
+                CLI_OUTPUT
+            )
+            .unwrap(),
+            "\"A\"\n\"a\"\n\"e\\u0301\"\n\"é\"\n"
+        );
+    }
+    #[test]
+    fn key_counts_use_first_seen_decoded_keys_and_escape_new_output_safely() {
+        let input = "{\"a/b\":{\"~\":[\"中\"]}}\n{\"a/b\":{\"~\":[\"\\u4e2d\"]}}\n{\"a/b\":{\"~\":[\"\\n\\u0000\\\"\"]}}\n{\"a/b\":{\"~\":[\"\"]}}";
+        assert_eq!(
+            transform(
+                input,
+                &step(Operation::JsonlCountBy, "/a~1b/~0/0", false),
+                MAX_INPUT,
+                CLI_OUTPUT
+            )
+            .unwrap(),
+            "{\"value\":\"中\",\"count\":2}\n{\"value\":\"\\n\\u0000\\\"\",\"count\":1}\n{\"value\":\"\",\"count\":1}\n"
+        );
+    }
+    #[test]
+    fn every_key_record_is_checked_without_echoing_private_data() {
+        for operation in OPS {
+            let valid = r#"{"k":"a","literal":"\\uD800","emoji":"\uD83D\uDE00","n":1.2300E+400}"#;
+            assert!(transform(valid, &step(operation, "/k", false), MAX_INPUT, CLI_OUTPUT).is_ok());
+            for bad in [
+                r#"{"k":1,"secret":"PRIVATE"}"#,
+                r#"{"k":null,"secret":"PRIVATE"}"#,
+                r#"{"k":true,"secret":"PRIVATE"}"#,
+                r#"{"k":[],"secret":"PRIVATE"}"#,
+                r#"{"k":{},"secret":"PRIVATE"}"#,
+                r#"{"k":"a","k":"a","secret":"PRIVATE"}"#,
+                r#"{"k":"a","\u006b":"a","secret":"PRIVATE"}"#,
+                r#"{"missing":"PRIVATE"}"#,
+                r#"{"k":"a","secret":"PRIVATE","bad":[1,]}"#,
+                "",
+                r#"{"k":"a","bad":"\uD800","secret":"PRIVATE"}"#,
+            ] {
+                let error = format!(
+                    "{:#}",
+                    transform(
+                        &format!("{{\"k\":\"a\"}}\n{bad}\n"),
+                        &step(operation, "/k", false),
+                        MAX_INPUT,
+                        CLI_OUTPUT
+                    )
+                    .unwrap_err()
+                );
+                assert!(error.contains("record 2"), "{error}");
+                assert!(!error.contains("PRIVATE"), "{error}");
+            }
+            let s = step(operation, "/a/01", false);
+            assert!(transform(r#"{"a":["ok","PRIVATE"]}"#, &s, MAX_INPUT, CLI_OUTPUT).is_err());
+        }
+    }
+    #[test]
+    fn key_operations_enforce_input_record_depth_and_complete_output_limits() {
+        for operation in OPS {
+            let s = step(operation, "/k", false);
+            assert_eq!(transform("", &s, MAX_INPUT, CLI_OUTPUT).unwrap(), "");
+            let many = "{\"k\":\"a\"}\n".repeat(MAX_ITEMS);
+            let out = transform(&many, &s, MAX_INPUT, CLI_OUTPUT).unwrap();
+            if operation == Operation::JsonlCountBy {
+                assert_eq!(out, "{\"value\":\"a\",\"count\":100000}\n");
+            }
+            assert!(transform(&(many + "{\"k\":\"a\"}\n"), &s, MAX_INPUT, CLI_OUTPUT).is_err());
+            assert!(transform("{\"k\":\"long\"}", &s, MAX_INPUT, 4).is_err());
+            assert!(transform(&" ".repeat(MAX_INPUT + 1), &s, MAX_INPUT, CLI_OUTPUT).is_err());
+            let deep = |n| {
+                format!(
+                    "{{\"k\":\"ok\",\"data\":{}0{}}}",
+                    "[".repeat(n),
+                    "]".repeat(n)
+                )
+            };
+            assert!(transform(&deep(127), &s, MAX_INPUT, CLI_OUTPUT).is_ok());
+            assert!(transform(&deep(128), &s, MAX_INPUT, CLI_OUTPUT).is_err());
+        }
+        let input = "\"\\\\\"\n".repeat(15000);
+        let args = r#"{"operation":"jsonl-sort","pointer":""}"#;
+        let error = format!("{:#}", execute(args, &input).unwrap_err());
+        assert!(error.contains("64 KiB") || error.contains("65536"));
+    }
+    #[test]
+    fn key_definitions_and_schema_share_strict_pointer_and_option_contracts() {
+        for operation in OPS {
+            let mut s = step(operation, "", false);
+            s.pointer = None;
+            assert!(s.validate().is_err());
+            s.pointer = Some("/~2".into());
+            assert!(s.validate().is_err());
+            s.pointer = Some(format!("/{}", "x".repeat(4096)));
+            assert!(s.validate().is_err());
+            s.pointer = Some("/x".repeat(129));
+            assert!(s.validate().is_err());
+            s = step(operation, "", false);
+            s.equals = Some(String::new());
+            assert!(s.validate().is_err());
+            s = step(operation, "", false);
+            s.contains = Some("x".into());
+            assert!(s.validate().is_err());
+            s = step(operation, "", false);
+            s.lines = Some(1);
+            assert!(s.validate().is_err());
+            s = step(operation, "", false);
+            s.fields = Some(vec![]);
+            assert!(s.validate().is_err());
+            s = step(operation, "", true);
+            assert_eq!(s.validate().is_ok(), operation == Operation::JsonlSort);
+        }
+        let tools = crate::data::tool_definitions();
+        let schema = &tools[2]["function"]["parameters"];
+        for properties in [
+            &schema["properties"],
+            &schema["properties"]["steps"]["items"]["properties"],
+        ] {
+            for op in ["jsonl-dedupe", "jsonl-sort", "jsonl-count-by"] {
+                assert!(
+                    properties["operation"]["enum"]
+                        .as_array()
+                        .unwrap()
+                        .contains(&serde_json::json!(op))
+                );
+                for bad in [
+                    serde_json::json!({"operation":op,"pointer":null}),
+                    serde_json::json!({"operation":op,"pointer":"","equals":null}),
+                    serde_json::json!({"operation":op,"pointer":"","reverse":null}),
+                ] {
+                    assert!(execute(&bad.to_string(), "\"a\"").is_err());
+                }
+            }
+        }
+    }
+    #[test]
+    fn key_analysis_can_reduce_large_intermediates_and_compose_with_csv() {
+        let args = r#"{"steps":[{"operation":"csv-to-jsonl"},{"operation":"jsonl-dedupe","pointer":"/id"},{"operation":"jsonl-count-by","pointer":"/level"},{"operation":"jsonl-to-csv"}]}"#;
+        let out = execute(args, "id,level\nb,WARN\na,ERROR\nb,WARN\nc,ERROR\n").unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&out).unwrap()["output"],
+            "\"value\",\"count\"\n\"WARN\",\"1\"\n\"ERROR\",\"2\"\n"
+        );
+        let args = r#"{"steps":[{"operation":"csv-to-jsonl"},{"operation":"jsonl-count-by","pointer":"/id"}]}"#;
+        // CSV backslashes expand past8MiB after decoding to JSON, then a keyed count reduces output.
+        let input = format!("id,payload\na,{}", "\\".repeat(5 * 1024 * 1024));
+        assert!(execute(args, &input).is_ok());
     }
 }
