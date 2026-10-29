@@ -9,9 +9,15 @@ Before submitting changes, run `cargo fmt --check`, `cargo test --locked`, and
 need mock-server integration tests; local transformations need deterministic
 tests. Never commit API keys or real private inputs. Use small milestone commits.
 
-To release, update Cargo.toml/Cargo.lock and CHANGELOG.md together and push to
-main. The release workflow skips already-published versions and publishes new
-ones after all builds pass. A `vX.Y.Z` tag or manual dispatch also works. It checks the tag against
-the package version, tests/builds on Windows/Linux/macOS, and publishes only
-after all assets are ready. A manually created tag can also trigger the workflow
-through workflow_dispatch with the same tag. Do not overwrite released tags.
+Keep commits small and frequent, but collect related improvements into a complete
+release milestone. The default is a batch of 3–5 substantial user-facing changes;
+small fixes, performance tuning and documentation normally wait for that batch.
+Do not split a change artificially or add unrelated features to meet a count.
+Only urgent issues affecting normal use, data safety or security justify a standalone
+patch; record the concrete reason in its release notes.
+
+Normal pushes to main run CI only. When the batch is complete, follow
+[the release checklist](docs/releasing.md) to choose and verify an exact commit,
+then explicitly create its matching release branch. Do not bump the version or
+start a release merely because a commit or development session finished. Published
+tags and assets are immutable. Release notes describe only the current batch.

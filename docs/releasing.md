@@ -4,6 +4,30 @@ Regular `main` pushes run CI only. They do not start the Release workflow, even 
 Cargo.toml already contains an unpublished version. Commit fixes and documentation as
 often as useful, then choose the exact reviewed commit for publication.
 
+## Choose a release milestone
+
+Continue frequent, focused commits and normal CI while developing a batch. The
+default release contains 3–5 substantial, related user-facing improvements or
+fixes that make a coherent milestone. Count useful outcomes, not changed files,
+test cases or individual functions. Do not split one improvement into artificial
+items or add unrelated features to reach a number. Assess the whole milestone
+before publication; a completed commit or agent session is not a release trigger.
+
+Small performance changes, minor fixes and documentation normally accumulate on
+main for the next batch. An urgent defect that prevents normal use, risks data
+loss, or needs a security fix can justify a standalone patch. Its release notes
+must state the concrete reason. There is no fixed release schedule and no recurring
+automation requirement. Avoid multiple minor releases in a day.
+
+Keep the current package version during ordinary development. Only bump it when
+the batch is ready for release checks. Before creating a release branch, summarize
+the batch's user outcomes, completed validation and any material limits. Release
+notes contain this batch only. Write one illustrated Feishu article per actual
+release after verifying the official binaries; do not generate articles for every
+commit or internal checkpoint.
+
+## Validate and publish the chosen batch
+
 1. Update the package/lock version and add one changelog section for this release. Keep
    historical sections unchanged. Update the manual-dispatch default and installation examples.
 2. Run the relevant local checks, the full Rust release checks and the two Python suites:
@@ -67,7 +91,7 @@ credential settings are changed by this workflow update.
 After publication, download and verify official assets, test installed executables, preserve
 existing user configuration, and publish the illustrated development article in Feishu
 文章/zistral. Read back its media, folder membership and series navigation before starting
-the next version. No recurring automation or background service is needed.
+the next release milestone. Development commits do not require a version bump. No recurring automation or background service is needed.
 
 GitHub references: [branch/tag trigger filters](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onpushbranchestagsbranches-ignoretags-ignore)
 and [workflow triggers](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow).
