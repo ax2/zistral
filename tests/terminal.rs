@@ -696,3 +696,75 @@ fn exact_terminal_tasks_buffer_native_results_and_export_empty_success_without_s
         );
     }
 }
+
+#[test]
+fn model_plan_interactive_export_saves_definitions_and_json_preset_errors_clear_stale_results() {
+    for api in ["chat", "responses", "anthropic"] {
+        let reply = |id: &str, args: Value| {
+            let body = match api {
+                "chat" => {
+                    json!({"choices":[{"finish_reason":"tool_calls","message":{"content":"DO_NOT_PUBLISH_MODEL_TEXT","tool_calls":[{"id":id,"type":"function","function":{"name":"transform_input","arguments":args.to_string()}}]}}]})
+                }
+                "responses" => {
+                    json!({"status":"completed","output":[{"type":"function_call","call_id":id,"name":"transform_input","arguments":args.to_string()}]})
+                }
+                _ => {
+                    json!({"stop_reason":"tool_use","content":[{"type":"tool_use","id":id,"name":"transform_input","input":args}]})
+                }
+            };
+            (200, body.to_string(), "application/json")
+        };
+        let home = tempfile::tempdir().unwrap();
+        let (url, server) = export_server(vec![
+            reply("json", json!({"operation":"json-minify"})),
+            reply("tail", json!({"operation":"lines-tail","lines":2})),
+        ]);
+        export_config(home.path(), &url, api);
+        let text = terminal(
+            &["--exact", "--export-plan"],
+            home.path(),
+            false,
+            &[
+                ("›", "make JSON plan"),
+                ("operation = \"json-minify\"", "/save plan.toml"),
+                ("Saved plan.toml", "/run builtin:extract"),
+                ("cannot use a JSON preset", "/save stale.toml"),
+                ("no completed result", "make tail plan"),
+                ("lines = 2", "/save tail.toml"),
+                ("Saved tail.toml", "/exit"),
+                ("Goodbye.", ""),
+            ],
+        );
+        let visible = console::strip_ansi_codes(&text);
+        assert!(visible.contains("Validate/export native plan") && visible.contains("Plan ready"));
+        assert!(!text.contains("DO_NOT_PUBLISH_MODEL_TEXT"));
+        assert!(!home.path().join("stale.toml").exists());
+        let first: toml::Value =
+            toml::from_str(&std::fs::read_to_string(home.path().join("plan.toml")).unwrap())
+                .unwrap();
+        assert_eq!(first["steps"][0]["operation"].as_str(), Some("json-minify"));
+        let second: toml::Value =
+            toml::from_str(&std::fs::read_to_string(home.path().join("tail.toml")).unwrap())
+                .unwrap();
+        assert_eq!(second["steps"][0]["lines"].as_integer(), Some(2));
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 2);
+        for (r, prompt) in requests.iter().zip(["make JSON plan", "make tail plan"]) {
+            assert_eq!(r["tools"].as_array().unwrap().len(), 1);
+            assert_eq!(r["stream"], false);
+            let history = if api == "responses" {
+                &r["input"]
+            } else {
+                &r["messages"]
+            };
+            assert_eq!(
+                history.as_array().unwrap().len(),
+                if api == "anthropic" { 1 } else { 2 }
+            );
+            assert_eq!(
+                history.as_array().unwrap().last().unwrap()["content"],
+                prompt
+            );
+        }
+    }
+}

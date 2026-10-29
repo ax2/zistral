@@ -66,6 +66,18 @@ impl Plan {
                 Ok(Step { operation, reverse, pointer: None, fields: None, contains: None, lines: None })
             }).collect::<Result<Vec<_>>>()?
         };
+        Self::from_steps(plan)
+    }
+
+    pub(crate) fn from_tool(arguments: &str) -> Result<Self> {
+        let steps = match transforms::parse_arguments(arguments)? {
+            transforms::ToolArguments::Single(step) => vec![step],
+            transforms::ToolArguments::Pipeline(args) => args.steps,
+        };
+        Self::from_steps(steps)
+    }
+
+    fn from_steps(plan: Vec<Step>) -> Result<Self> {
         if plan.is_empty() || plan.len() > transforms::MAX_STEPS {
             bail!("a data pipeline requires 1-16 steps");
         }
@@ -94,5 +106,56 @@ impl Plan {
             steps: self.0.clone(),
         };
         toml::to_string_pretty(&recipe).context("cannot render data plan")
+    }
+}
+
+#[cfg(test)]
+mod model_plan_tests {
+    use super::*;
+    #[test]
+    fn model_plan_exports_canonical_version_one_definitions_with_literal_values() {
+        for args in [
+            r#"{"operation":"json-minify"}"#,
+            r#"{"steps":[{"operation":"lines-include","contains":"ERROR:中文"},{"operation":"lines-tail","lines":2}]}"#,
+        ] {
+            let plan = Plan::from_tool(args).unwrap();
+            let text = plan.render().unwrap();
+            let recipe: Recipe = toml::from_str(&text).unwrap();
+            assert_eq!(recipe.version, 1);
+            assert_eq!(
+                Plan::from_steps(recipe.steps).unwrap().render().unwrap(),
+                text
+            );
+            assert!(text.ends_with('\n'));
+        }
+    }
+    #[test]
+    fn model_plan_uses_the_strict_native_argument_and_step_contracts() {
+        for args in [
+            r#"{"operation":"trim","steps":[]}"#,
+            r#"{"operation":"trim","command":"PRIVATE_COMMAND"}"#,
+            r#"{"operation":"lines-tail","lines":0}"#,
+            r#"{"steps":[]}"#,
+            r#"{"operation":"lines-tail","lines":null}"#,
+            r#"{"operation":"lines-tail","lines":2,"lines":3}"#,
+        ] {
+            assert!(Plan::from_tool(args).is_err(), "{args}");
+        }
+        let args = serde_json::json!({"steps":vec![serde_json::json!({"operation":"trim"});17]})
+            .to_string();
+        assert!(Plan::from_tool(&args).is_err());
+    }
+    #[test]
+    fn model_plan_enforces_argument_and_normalized_recipe_byte_limits() {
+        assert!(
+            Plan::from_tool(&format!("{}{{}}", " ".repeat(65537)))
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("arguments exceed")
+        );
+        let step:Step=serde_json::from_value(serde_json::json!({"operation":"json-select","pointer":format!("/{}","\t".repeat(2047))})).unwrap();
+        let error = Plan::from_steps(vec![step; 16]).err().unwrap();
+        assert!(error.to_string().contains("normalized recipe exceeds"));
     }
 }

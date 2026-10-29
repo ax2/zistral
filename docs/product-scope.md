@@ -160,3 +160,8 @@ output, avoiding a model rewrite. It fits natural-language selection of bounded 
 operations, not open-ended analysis or project automation. Multiple calls/free text are
 errors; native argument errors may be corrected within the existing turn budget.
 No new tool, dependency, permission, persistent history or hidden task context is added.
+
+Since v0.28.0, --exact --export-plan bridges natural-language operation selection and
+explicit user-maintained recipes. It exports a validated transform definition only; input
+is model context and no data transformation runs. Existing recipes remain inspectable
+and offline; no implicit installation, code execution, memory or new tool is introduced.

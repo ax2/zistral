@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.28.0 — 2026-10-28
+
+- Add `--exact --export-plan` to propose and export a native transformation as a reusable
+  version-1 TOML recipe without executing data transformations. Only the existing
+  transform_input definition is advertised; supplied input is model context, not a dry-run.
+- Reuse strict native argument parsing, Step validation and bounded recipe rendering.
+  Invalid definitions can be corrected within the existing turn budget; multiple calls,
+  other tools, free text, JSON output and incompatible presets fail without publication.
+- Keep pipe/file/no-clobber rules, interactive result export and independent tasks.
+  Progress identifies plan validation/export. Existing exact execution, native operations,
+  permissions, streaming, dependencies and tool names retain their contracts.
+
 ## 0.27.0 — 2026-10-27
 
 - Add explicit `--exact` model data mode: a model chooses one native count/select/transform

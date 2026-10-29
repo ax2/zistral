@@ -55,3 +55,8 @@ presets, file output and normal request/turn limits. It rejects --stream, --no-t
 project selectors, --count, --select, --config-example, offline and management commands
 before configuration/input/output. It never silently becomes a text-only or project task.
 See [exact data results](exact-results.md).
+
+--export-plan requires --exact and rejects --json, including JSON presets after preset
+resolution. Incompatible preset tasks fail before input/output or model requests; an
+interactive rejected task clears any retained result. The output is a version-1 TOML
+recipe; no data transformation runs. Existing exact-mode conflicts remain.

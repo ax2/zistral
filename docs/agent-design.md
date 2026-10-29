@@ -218,3 +218,9 @@ lexical numeric tokens. Full protocol validation precedes exact one-call/data-on
 validation and dispatch; native errors remain correlated observations for bounded repair.
 Streaming and project modes are rejected; empty native success has zero-byte delivery.
 Normal model-result handling and task independence remain. See [exact results](exact-results.md).
+
+Since v0.28.0, exact plan-export mode advertises only transform_input as a proposal schema.
+After full protocol/one-call checks it uses the shared strict native parser and recipe
+validator/renderer, bypassing Session::execute. Success returns version-1 TOML directly;
+definition errors use the same correlated bounded correction path. Data execution is
+separate and cannot be inferred from definition validity. See [plan export](model-plan-export.md).

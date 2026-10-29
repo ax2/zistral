@@ -75,6 +75,9 @@ fn prepare_calls<'a>(
 }
 
 pub fn run(settings: &Settings, cli: &Cli, input: &str) -> Result<Answer> {
+    if cli.export_plan && (!cli.exact || cli.json) {
+        bail!("--export-plan requires --exact and produces TOML, not JSON");
+    }
     if cli.exact
         && (cli.no_tools
             || cli.stream
@@ -110,7 +113,9 @@ pub fn run(settings: &Settings, cli: &Cli, input: &str) -> Result<Answer> {
     if cli.json {
         system.push_str(" Return exactly one valid JSON value, with no markdown fences.");
     }
-    if cli.exact {
+    if cli.export_plan {
+        system.push_str(" Exact mode: Plan-export mode: propose exactly one transform_input call whose single operation or ordered steps define the requested transformation. zi validates and exports a version-1 TOML recipe; it does not execute transformations on input and will not ask you to restate the plan. Supplied input is context only. Definition validity does not prove execution succeeds on any data. Count/select tools are not available in this mode. Correct native definition errors within the turn budget; do not return free text or multiple calls.");
+    } else if cli.exact {
         system.push_str(" Exact mode: request exactly one count_input, select_input or transform_input call per turn. A successful native result becomes the final output directly, without another model turn or free-text rewrite. Use ordered steps inside one transform_input for compound transformations. Native argument errors may be corrected within the turn budget. A text-only answer or multiple calls is an error. For JSON output, choose native output that is valid JSON; use transform_input json-select for quoted strings rather than decoded select_input text.");
     }
     let prompt = cli.prompt.join(" ");
@@ -125,6 +130,14 @@ pub fn run(settings: &Settings, cli: &Cli, input: &str) -> Result<Answer> {
     let responses = settings.api == "responses";
     let anthropic = settings.api == "anthropic";
     let mut tools = session.definitions();
+    if cli.export_plan {
+        tools.retain(|tool| tool["function"]["name"] == "transform_input");
+        for tool in &mut tools {
+            tool["function"]["description"] = json!(
+                "Propose a native transformation definition for export. Use the same single operation or ordered steps arguments. zi validates a version-1 TOML recipe and does not execute transformations on input. This checks definitions only, not data-dependent success. No shell, additional paths, model calls or arbitrary code are permitted in the recipe."
+            );
+        }
+    }
     if responses {
         tools = tools
             .into_iter()
@@ -360,6 +373,13 @@ fn validate_exact_calls(cli: &Cli, calls: &[ToolCall<'_>]) -> Result<()> {
             "--exact requires exactly one native data tool call; model text and tool batches are not exact results"
         );
     }
+    if cli.export_plan
+        && calls
+            .first()
+            .is_some_and(|call| call.name != "transform_input")
+    {
+        bail!("--export-plan accepts one transform_input definition only");
+    }
     Ok(())
 }
 
@@ -399,23 +419,34 @@ fn tool_result(
     if cli.no_tools {
         bail!("provider requested a tool even though --no-tools is set");
     }
-    activity.tool(name);
-    if let Ok(args) = serde_json::from_str::<Value>(arguments) {
-        if let Some(detail) = args["command"].as_str().or_else(|| args["path"].as_str()) {
-            activity.detail(detail);
+    activity.tool(name, cli.export_plan);
+    if !cli.export_plan {
+        if let Ok(args) = serde_json::from_str::<Value>(arguments) {
+            if let Some(detail) = args["command"].as_str().or_else(|| args["path"].as_str()) {
+                activity.detail(detail);
+            }
         }
     }
-    let execution = session.execute(name, arguments, input).and_then(|value| {
-        let exact = if cli.exact {
-            Some(exact_text(name, &value, cli.json)?)
-        } else {
-            None
-        };
-        Ok(Observation {
-            content: value,
-            exact,
+    let execution = if cli.export_plan {
+        crate::recipes::Plan::from_tool(arguments)
+            .and_then(|plan| plan.render())
+            .map(|text| Observation {
+                content: text.clone(),
+                exact: Some(text),
+            })
+    } else {
+        session.execute(name, arguments, input).and_then(|value| {
+            let exact = if cli.exact {
+                Some(exact_text(name, &value, cli.json)?)
+            } else {
+                None
+            };
+            Ok(Observation {
+                content: value,
+                exact,
+            })
         })
-    });
+    };
     Ok(match execution {
         Ok(observation) => {
             let value = &observation.content;
@@ -434,8 +465,13 @@ fn tool_result(
         }
         Err(error) => {
             activity.detail(&format!("Tool error: {error}"));
+            let message = if cli.export_plan {
+                format!("{error:#}")
+            } else {
+                error.to_string()
+            };
             Observation {
-                content: json!({"error":error.to_string()}).to_string(),
+                content: json!({"error":message}).to_string(),
                 exact: None,
             }
         }

@@ -583,29 +583,34 @@ fn transform(input: &str, step: &Step, input_limit: usize, limit: usize) -> Resu
     Ok(out.finish())
 }
 
-pub fn execute(arguments: &str, input: &str) -> Result<String> {
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ToolSteps {
+    pub steps: Vec<Step>,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+pub(crate) enum ToolArguments {
+    Single(Step),
+    Pipeline(ToolSteps),
+}
+
+pub(crate) fn parse_arguments(arguments: &str) -> Result<ToolArguments> {
     if arguments.len() > 64 * 1024 {
         bail!("transform tool arguments exceed 64 KiB");
     }
-    #[derive(Deserialize)]
-    #[serde(deny_unknown_fields)]
-    struct Steps {
-        steps: Vec<Step>,
-    }
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum Args {
-        Single(Step),
-        Pipeline(Steps),
-    }
-    let args: Args = serde_json::from_str(arguments).map_err(|_| {
+    serde_json::from_str(arguments).map_err(|_| {
         anyhow::anyhow!(
             "transform_input requires either operation with optional reverse/pointer/fields/contains/lines, or 1-16 steps of the same shape; do not combine them"
         )
-    })?;
-    let output = match args {
-        Args::Single(step) => transform(input, &step, MAX_INPUT, TOOL_OUTPUT)?,
-        Args::Pipeline(args) => pipeline(input, &args.steps, TOOL_OUTPUT)?,
+    })
+}
+
+pub fn execute(arguments: &str, input: &str) -> Result<String> {
+    let output = match parse_arguments(arguments)? {
+        ToolArguments::Single(step) => transform(input, &step, MAX_INPUT, TOOL_OUTPUT)?,
+        ToolArguments::Pipeline(args) => pipeline(input, &args.steps, TOOL_OUTPUT)?,
     };
     let result = serde_json::to_string(&serde_json::json!({"output":output}))?;
     if result.len() > TOOL_OUTPUT {

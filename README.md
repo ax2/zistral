@@ -20,7 +20,7 @@ Download a native installer from [Releases](https://github.com/ax2/zistral/relea
 | Platform | Package | Installation |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | Per-user installer; adds PATH and a Start menu launcher; no administrator required |
-| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.27.0-linux-amd64.deb` |
+| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.28.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | Open the package; installs `/usr/local/bin/zi` |
 
 Then type `zi`. On first launch, choose an existing Codex, WorkBuddy or dsh configuration,
@@ -704,3 +704,7 @@ Use `cat app.log | zi --exact "Keep the last two ERROR lines, preserving spaces"
 to let the model choose one native data operation/pipeline and return its result without
 a model rewrite. This guarantees native execution of the selected plan, not interpretation
 of every instruction. See [exact data results](docs/exact-results.md).
+
+Use `zi --exact --export-plan -i app.log -o recent.toml "Keep the last 20 ERROR lines"`
+to export a model-chosen native recipe for review and later offline reuse. No data
+transformation is executed during export. See [model plan export](docs/model-plan-export.md).

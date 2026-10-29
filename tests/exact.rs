@@ -115,7 +115,7 @@ fn server(api: &str, replies: Vec<Reply>) -> (String, std::thread::JoinHandle<Ve
             reader.read_exact(&mut bytes).unwrap();
             let req: Value = serde_json::from_slice(&bytes).unwrap();
             assert_eq!(req["stream"], false);
-            assert_eq!(req["tools"].as_array().unwrap().len(), 3);
+
             let system = if api == "anthropic" {
                 req["system"].as_str().unwrap()
             } else if api == "responses" {
@@ -124,6 +124,27 @@ fn server(api: &str, replies: Vec<Reply>) -> (String, std::thread::JoinHandle<Ve
                 req["messages"][0]["content"].as_str().unwrap()
             };
             assert!(system.contains("Exact mode:"));
+            let plan_export = system.contains("Plan-export mode:");
+            assert_eq!(
+                req["tools"].as_array().unwrap().len(),
+                if plan_export { 1 } else { 3 }
+            );
+            if plan_export {
+                let tool = &req["tools"][0];
+                let function = if api == "chat" {
+                    &tool["function"]
+                } else {
+                    tool
+                };
+                assert_eq!(function["name"], "transform_input");
+                assert!(
+                    function["description"]
+                        .as_str()
+                        .unwrap()
+                        .contains("does not execute")
+                );
+            }
+
             requests.push(req);
             write!(stream,"HTTP/1.1 200 OK\r\nContent-Type: {kind}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).unwrap();
         }
@@ -508,5 +529,277 @@ fn exact_unrequested_streams_never_emit_partial_output_or_replace_files() {
             b"keep"
         );
         task.join().unwrap();
+    }
+}
+
+#[test]
+fn model_plan_export_roundtrips_offline_without_executing_invalid_input() {
+    for api in ["chat", "responses", "anthropic"] {
+        for pipeline in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let args = if pipeline {
+                json!({"steps":[{"operation":"json-minify"},{"operation":"json-select","pointer":"/items"},{"operation":"array-to-jsonl"}]})
+            } else {
+                json!({"operation":"json-minify"})
+            };
+            let (url, task) = server(
+                api,
+                vec![calls(
+                    api,
+                    vec![call(api, "proposal", "transform_input", args)],
+                )],
+            );
+            let out = invoke(
+                root.path(),
+                api,
+                &url,
+                &["--export-plan", "--max-steps", "1", "-o", "plan.toml"],
+                b"NOT_JSON_PRIVATE_CONTEXT",
+            );
+            assert!(
+                out.status.success(),
+                "{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            assert!(out.stdout.is_empty());
+            let plan = std::fs::read_to_string(root.path().join("plan.toml")).unwrap();
+            let parsed: toml::Value = toml::from_str(&plan).unwrap();
+            assert_eq!(parsed["version"].as_integer(), Some(1));
+            assert_eq!(
+                parsed["steps"].as_array().unwrap().len(),
+                if pipeline { 3 } else { 1 }
+            );
+            assert!(
+                !plan.contains("NOT_JSON_PRIVATE_CONTEXT")
+                    && !plan.contains("MODEL_TEXT_IS_NOT_NATIVE_OUTPUT")
+            );
+            let mut child = command(root.path())
+                .args(["data", "--recipe", "plan.toml"])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap();
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(br#"{"items":[1.2300E+400]}"#)
+                .unwrap();
+            let executed = child.wait_with_output().unwrap();
+            assert!(executed.status.success());
+            assert_eq!(
+                executed.stdout,
+                if pipeline {
+                    b"1.2300E+400\n".to_vec()
+                } else {
+                    b"{\"items\":[1.2300E+400]}\n".to_vec()
+                }
+            );
+            let preview = command(root.path())
+                .args(["data", "--show-plan", "--recipe", "plan.toml"])
+                .stdin(Stdio::null())
+                .output()
+                .unwrap();
+            assert!(preview.status.success());
+            assert_eq!(preview.stdout, plan.as_bytes());
+            let requests = task.join().unwrap();
+            assert_eq!(requests.len(), 1);
+            assert!(requests[0].to_string().contains("NOT_JSON_PRIVATE_CONTEXT"));
+        }
+    }
+}
+
+#[test]
+fn model_plan_definition_errors_recover_without_data_execution() {
+    for api in ["chat", "responses", "anthropic"] {
+        let root = tempfile::tempdir().unwrap();
+        let (url, task) = server(
+            api,
+            vec![
+                calls(
+                    api,
+                    vec![call(
+                        api,
+                        "bad",
+                        "transform_input",
+                        json!({"operation":"lines-tail","lines":0}),
+                    )],
+                ),
+                calls(
+                    api,
+                    vec![call(
+                        api,
+                        "fixed",
+                        "transform_input",
+                        json!({"operation":"json-minify"}),
+                    )],
+                ),
+            ],
+        );
+        let out = invoke(
+            root.path(),
+            api,
+            &url,
+            &["--export-plan", "--max-steps", "2"],
+            b"INVALID_JSON_STILL_NOT_EXECUTED",
+        );
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let plan: toml::Value = toml::from_str(std::str::from_utf8(&out.stdout).unwrap()).unwrap();
+        assert_eq!(plan["steps"][0]["operation"].as_str(), Some("json-minify"));
+        let requests = task.join().unwrap();
+        assert_eq!(requests.len(), 2);
+        assert!(
+            requests[1]
+                .to_string()
+                .contains("lines must be an integer from 1 to 100000")
+        );
+    }
+}
+
+#[test]
+fn model_plan_export_rejects_other_tools_free_text_and_batches_without_publication() {
+    for api in ["chat", "responses", "anthropic"] {
+        let text = match api {
+            "chat" => {
+                json!({"choices":[{"finish_reason":"stop","message":{"content":"FAKE_PLAN"}}]})
+            }
+            "responses" => {
+                json!({"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"FAKE_PLAN"}]}]})
+            }
+            _ => json!({"stop_reason":"end_turn","content":[{"type":"text","text":"FAKE_PLAN"}]}),
+        };
+        for reply in [
+            calls(api, vec![call(api, "wrong", "count_input", json!({}))]),
+            calls(
+                api,
+                vec![
+                    call(api, "one", "transform_input", json!({"operation":"trim"})),
+                    call(api, "two", "transform_input", json!({"operation":"dedupe"})),
+                ],
+            ),
+            (text.to_string(), "application/json"),
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            std::fs::write(root.path().join("keep.toml"), b"keep").unwrap();
+            let (url, task) = server(api, vec![reply]);
+            let out = invoke(
+                root.path(),
+                api,
+                &url,
+                &[
+                    "--export-plan",
+                    "--max-steps",
+                    "1",
+                    "-o",
+                    "keep.toml",
+                    "--force",
+                ],
+                b"context",
+            );
+            assert!(!out.status.success() && out.stdout.is_empty());
+            assert_eq!(
+                std::fs::read(root.path().join("keep.toml")).unwrap(),
+                b"keep"
+            );
+            assert!(!String::from_utf8_lossy(&out.stderr).contains("zi: tool "));
+            task.join().unwrap();
+        }
+    }
+}
+
+#[test]
+fn model_plan_invalid_and_oversized_definitions_cannot_replace_files_or_leak_literals() {
+    for api in ["chat", "responses", "anthropic"] {
+        for args in [
+            json!({"operation":"trim","path":"PRIVATE_PATH"}),
+            json!({"steps":vec![json!({"operation":"trim"});17]}),
+            json!({"operation":"lines-include","contains":"x".repeat(65536)}),
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            std::fs::write(root.path().join("keep.toml"), b"keep").unwrap();
+            let (url, task) = server(
+                api,
+                vec![calls(api, vec![call(api, "bad", "transform_input", args)])],
+            );
+            let out = invoke(
+                root.path(),
+                api,
+                &url,
+                &[
+                    "--export-plan",
+                    "--max-steps",
+                    "1",
+                    "-o",
+                    "keep.toml",
+                    "--force",
+                ],
+                b"context",
+            );
+            assert!(!out.status.success() && out.stdout.is_empty());
+            assert_eq!(
+                std::fs::read(root.path().join("keep.toml")).unwrap(),
+                b"keep"
+            );
+            assert!(!String::from_utf8_lossy(&out.stderr).contains("PRIVATE_PATH"));
+            assert!(!std::fs::read_dir(root.path()).unwrap().any(|p| {
+                p.unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".zi-result-")
+            }));
+            task.join().unwrap();
+        }
+    }
+}
+
+#[test]
+fn model_plan_export_requires_exact_and_rejects_json_presets_before_data_output_or_network() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join("invalid.toml"), b"not model configuration").unwrap();
+    std::fs::write(root.path().join("keep.toml"), b"keep").unwrap();
+    for options in [
+        vec!["--export-plan", "task"],
+        vec!["--exact", "--export-plan", "--json", "task"],
+        vec![
+            "--exact",
+            "--export-plan",
+            "--preset",
+            "builtin:extract",
+            "task",
+        ],
+        vec!["--exact", "--export-plan", "data", "trim"],
+    ] {
+        let out = command(root.path())
+            .args([
+                "--config",
+                "invalid.toml",
+                "-i",
+                "missing-input",
+                "-o",
+                "keep.toml",
+                "--force",
+            ])
+            .args(&options)
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        assert!(!out.status.success() && out.stdout.is_empty());
+        let error = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            !error.contains("cannot open missing-input")
+                && !error.contains("cannot read configuration")
+        );
+        if options.contains(&"builtin:extract") {
+            assert!(error.contains("--export-plan produces TOML"), "{error}");
+        }
+        assert_eq!(
+            std::fs::read(root.path().join("keep.toml")).unwrap(),
+            b"keep"
+        );
     }
 }

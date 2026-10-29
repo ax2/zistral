@@ -186,7 +186,9 @@ impl Activity {
             rich,
             live: Cell::new(false),
             verbose: cli.verbose,
-            finish_label: if cli.output.is_some() {
+            finish_label: if cli.export_plan {
+                "Plan ready"
+            } else if cli.output.is_some() {
                 "Response ready"
             } else {
                 "Done"
@@ -253,25 +255,29 @@ impl Activity {
         );
     }
 
-    pub fn tool(&self, name: &str) {
+    pub fn tool(&self, name: &str, plan_export: bool) {
         self.tools.set(self.tools.get() + 1);
-        let label = match name {
-            "count_input" => "Count input",
-            "select_input" => "Select JSON",
-            "transform_input" => "Transform input",
-            "project_info" => "Project instructions",
-            "list_files" => "List files",
-            "read_file" => "Read file",
-            "search_files" => "Search project",
-            "write_file" => "Write file",
-            "edit_file" => "Edit file",
-            "delete_file" => "Delete file",
-            "undo_edit" => "Undo file edit",
-            "run_command" => "Run command",
-            "git_status" => "Git status",
-            "git_diff" => "Git diff",
-            "update_plan" => "Task plan",
-            _ => "Unknown tool",
+        let label = if plan_export {
+            "Validate/export native plan"
+        } else {
+            match name {
+                "count_input" => "Count input",
+                "select_input" => "Select JSON",
+                "transform_input" => "Transform input",
+                "project_info" => "Project instructions",
+                "list_files" => "List files",
+                "read_file" => "Read file",
+                "search_files" => "Search project",
+                "write_file" => "Write file",
+                "edit_file" => "Edit file",
+                "delete_file" => "Delete file",
+                "undo_edit" => "Undo file edit",
+                "run_command" => "Run command",
+                "git_status" => "Git status",
+                "git_diff" => "Git diff",
+                "update_plan" => "Task plan",
+                _ => "Unknown tool",
+            }
         };
         if self.rich && self.live.get() {
             eprintln!("\n  {} {label}", style("↳").cyan());

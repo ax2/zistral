@@ -86,6 +86,9 @@ pub struct Cli {
     /// Return one successful native data tool result without a model rewrite
     #[arg(long, conflicts_with_all = ["no_tools", "stream", "count", "select", "config_example", "agent", "cwd", "read_only", "no_exec"])]
     exact: bool,
+    /// Export the chosen native transform as a version-1 TOML recipe, without executing it
+    #[arg(long, requires = "exact", conflicts_with = "json")]
+    export_plan: bool,
     /// Disable built-in agent tools (for text-only models)
     #[arg(long)]
     no_tools: bool,
@@ -428,6 +431,9 @@ fn run(mut cli: Cli) -> Result<()> {
         return config::configure_named(&cli, *manual, name.as_deref());
     }
     presets::apply(&mut cli)?;
+    if cli.export_plan && cli.json {
+        bail!("--export-plan produces TOML and cannot use JSON output or a JSON preset");
+    }
     if cli.config_example {
         if let Some(target) = prepare_output(&cli)? {
             return save_output(
@@ -663,6 +669,10 @@ fn session(cli: &mut Cli) -> Result<()> {
         }
         if let Err(error) = presets::apply(&mut task) {
             eprintln!("zi: {}", ui::clean(&error.to_string()));
+            continue;
+        }
+        if task.export_plan && task.json {
+            eprintln!("zi: --export-plan produces TOML and cannot use a JSON preset");
             continue;
         }
         match agent::run(&settings, &task, "") {

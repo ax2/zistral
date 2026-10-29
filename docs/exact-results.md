@@ -73,3 +73,8 @@ it. That observation motivated this explicit delivery mode. Controlled tests cov
 three protocols, direct values, correction loops, valid JSON recovery, error-shaped data,
 large numeric tokens, invalid batches, streams, files and terminal export. A few live
 samples on one model are examples, not a statistical benchmark or a promise for all models.
+
+Since v0.28.0, --exact --export-plan can return a validated transformation definition
+instead of executing it. This TOML-only mode advertises transform_input proposals only;
+supplied data is context and definition checking is not a data dry-run. See
+[model plan export](model-plan-export.md) before reuse.
