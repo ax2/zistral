@@ -47,6 +47,10 @@ pub enum Operation {
     JsonSelect,
     /// Select one value from every JSONL record; emit compact JSON lines in input order
     JsonlSelect,
+    /// Replace one explicit JSON value with the literal string [REDACTED]
+    JsonRedact,
+    /// Replace one explicit value in every JSONL record, without dropping other fields
+    JsonlRedact,
     /// Keep complete JSONL records whose selected JSON string equals a literal
     JsonlWhere,
     /// Keep the first whole JSONL record for each decoded string at an explicit pointer
@@ -195,6 +199,8 @@ impl Step {
                 Some(pointer),
                 Operation::JsonSelect
                 | Operation::JsonlSelect
+                | Operation::JsonRedact
+                | Operation::JsonlRedact
                 | Operation::JsonlWhere
                 | Operation::JsonlDedupe
                 | Operation::JsonlSort
@@ -205,6 +211,8 @@ impl Step {
                 None,
                 Operation::JsonSelect
                 | Operation::JsonlSelect
+                | Operation::JsonRedact
+                | Operation::JsonlRedact
                 | Operation::JsonlWhere
                 | Operation::JsonlDedupe
                 | Operation::JsonlSort
@@ -218,7 +226,7 @@ impl Step {
             }
             (Some(_), _) => {
                 bail!(
-                    "pointer is only valid for JSON selection, jsonl-where, jsonl-dedupe, jsonl-sort, jsonl-sort-int or jsonl-count-by"
+                    "pointer is only valid for JSON selection/redaction, jsonl-where, jsonl-dedupe, jsonl-sort, jsonl-sort-int or jsonl-count-by"
                 )
             }
             (None, _) => Ok(()),
@@ -763,6 +771,31 @@ fn transform(input: &str, step: &Step, input_limit: usize, limit: usize) -> Resu
             step.pointer.as_deref().expect("validated pointer"),
             &mut out,
         )?,
+        Operation::JsonRedact => {
+            return crate::selection::redact_json(
+                input,
+                step.pointer.as_deref().expect("validated pointer"),
+                limit,
+            );
+        }
+        Operation::JsonlRedact => {
+            for (index, line) in input.lines().enumerate() {
+                if index == MAX_ITEMS {
+                    bail!("JSONL redaction accepts at most 100000 records");
+                }
+                let remaining = out.limit.saturating_sub(out.bytes.len());
+                let redacted = crate::selection::redact_json(
+                    line,
+                    step.pointer.as_deref().expect("validated pointer"),
+                    remaining.saturating_sub(1),
+                )
+                .with_context(|| {
+                    format!("cannot redact JSONL record {} (jsonl-redact)", index + 1)
+                })?;
+                out.write_all(redacted.as_bytes())?;
+                out.write_all(b"\n")?;
+            }
+        }
         Operation::JsonSelect => {
             return crate::selection::select_json(
                 input,
@@ -2124,6 +2157,80 @@ mod integer_ranking_tests {
                     .unwrap()
                     .contains(&serde_json::json!("jsonl-sort-int"))
             );
+        }
+    }
+}
+
+#[cfg(test)]
+mod redaction_tests {
+    use super::*;
+    fn step(operation: &str, pointer: &str) -> Step {
+        serde_json::from_value(serde_json::json!({"operation":operation,"pointer":pointer}))
+            .unwrap()
+    }
+    #[test]
+    fn redaction_respects_record_output_depth_and_tool_envelope_bounds() {
+        let json = step("json-redact", "");
+        assert_eq!(
+            transform("0", &json, MAX_INPUT, 12).unwrap(),
+            r#""[REDACTED]""#
+        );
+        assert!(transform("0", &json, MAX_INPUT, 11).is_err());
+        let jsonl = step("jsonl-redact", "");
+        assert_eq!(
+            transform("0\n", &jsonl, MAX_INPUT, 13).unwrap(),
+            "\"[REDACTED]\"\n"
+        );
+        assert!(transform("0\n", &jsonl, MAX_INPUT, 12).is_err());
+        assert!(transform(&"0\n".repeat(MAX_ITEMS), &jsonl, MAX_INPUT, CLI_OUTPUT).is_ok());
+        assert!(transform(&"0\n".repeat(MAX_ITEMS + 1), &jsonl, MAX_INPUT, CLI_OUTPUT).is_err());
+        for depth in [128, 129] {
+            let value = format!("{}0{}", "[".repeat(depth), "]".repeat(depth));
+            assert_eq!(
+                transform(&value, &json, MAX_INPUT, CLI_OUTPUT).is_ok(),
+                depth == 128
+            );
+        }
+        // Replacing a huge original value may shrink output below its cap.
+        let huge = serde_json::to_string(&"s".repeat(100000)).unwrap();
+        assert!(transform(&huge, &json, MAX_INPUT, 12).is_ok());
+        let args = r#"{"operation":"jsonl-redact","pointer":"/s"}"#;
+        let input = format!(r#"{{"s":0,"other":"{}"}}"#, "\\\\".repeat(20000));
+        assert!(transform(&input, &step("jsonl-redact", "/s"), MAX_INPUT, TOOL_OUTPUT).is_ok());
+        assert!(execute(args, &input).is_err()); // Escaping the final envelope also counts.
+        assert!(transform("\n", &jsonl, MAX_INPUT, CLI_OUTPUT).is_err());
+        assert!(transform("{} garbage", &json, MAX_INPUT, CLI_OUTPUT).is_err());
+    }
+    #[test]
+    fn redaction_operations_are_in_shared_schema_and_reject_invalid_step_shapes() {
+        for operation in ["json-redact", "jsonl-redact"] {
+            assert!(step(operation, "/x").validate().is_ok());
+            for extra in [
+                serde_json::json!({}),
+                serde_json::json!({"pointer":null}),
+                serde_json::json!({"pointer":"/x","reverse":true}),
+                serde_json::json!({"pointer":"/x","contains":"x"}),
+                serde_json::json!({"pointer":"/x","fields":[]}),
+            ] {
+                let mut value = serde_json::json!({"operation":operation});
+                value
+                    .as_object_mut()
+                    .unwrap()
+                    .extend(extra.as_object().unwrap().clone());
+                assert!(execute(&value.to_string(), "{}").is_err());
+            }
+            let tools = crate::data::tool_definitions();
+            for properties in [
+                &tools[2]["function"]["parameters"]["properties"],
+                &tools[2]["function"]["parameters"]["properties"]["steps"]["items"]["properties"],
+            ] {
+                assert!(
+                    properties["operation"]["enum"]
+                        .as_array()
+                        .unwrap()
+                        .contains(&serde_json::json!(operation))
+                );
+            }
         }
     }
 }

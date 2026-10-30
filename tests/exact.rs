@@ -980,3 +980,105 @@ fn integer_ranking_exact_result_and_plan_export_roundtrip_in_every_protocol() {
         }
     }
 }
+
+#[test]
+fn redaction_exact_output_and_export_plan_replay_in_every_protocol() {
+    for api in ["chat", "responses", "anthropic"] {
+        for operation in ["json-redact", "jsonl-redact"] {
+            let root = tempfile::tempdir().unwrap();
+            let input = br#"{"token":"synthetic-secret","n":1.2300E+400}"#;
+            let expected = b"{\"token\":\"[REDACTED]\",\"n\":1.2300E+400}\n";
+            for export in [false, true] {
+                let args = json!({"operation":operation,"pointer":"/token"});
+                let (url, task) = server(
+                    api,
+                    vec![calls(api, vec![call(api, "mask", "transform_input", args)])],
+                );
+                let options = if export {
+                    vec!["--export-plan", "--max-steps", "1"]
+                } else {
+                    vec!["--max-steps", "1"]
+                };
+                let out = invoke(root.path(), api, &url, &options, input);
+                assert!(
+                    out.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&out.stderr)
+                );
+                let requests = task.join().unwrap();
+                assert_eq!(requests.len(), 1);
+                // A model-triggered transform still receives original task input.
+                assert!(
+                    serde_json::to_string(&requests[0])
+                        .unwrap()
+                        .contains("synthetic-secret")
+                );
+                if export {
+                    let plan: toml::Value =
+                        toml::from_str(std::str::from_utf8(&out.stdout).unwrap()).unwrap();
+                    assert_eq!(plan["steps"][0]["operation"].as_str(), Some(operation));
+                    std::fs::write(root.path().join("mask.toml"), out.stdout).unwrap();
+                    let mut child = command(root.path())
+                        .args(["data", "--recipe", "mask.toml"])
+                        .stdin(Stdio::piped())
+                        .stdout(Stdio::piped())
+                        .stderr(Stdio::piped())
+                        .spawn()
+                        .unwrap();
+                    child.stdin.take().unwrap().write_all(input).unwrap();
+                    let replay = child.wait_with_output().unwrap();
+                    assert!(replay.status.success() && replay.stderr.is_empty());
+                    assert_eq!(replay.stdout, expected);
+                } else {
+                    assert_eq!(out.stdout, expected);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn offline_redaction_withholds_original_value_before_each_model_protocol() {
+    for api in ["chat", "responses", "anthropic"] {
+        let root = tempfile::tempdir().unwrap();
+        let source =
+            b"{\"token\":\"unique-offline-secret-7768\",\"message\":\"visible-context\"}\n";
+        let mut child = command(root.path())
+            .args(["data", "jsonl-redact", "--pointer", "/token"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child.stdin.take().unwrap().write_all(source).unwrap();
+        let offline = child.wait_with_output().unwrap();
+        assert!(offline.status.success() && offline.stderr.is_empty());
+        let (url, task) = server(
+            api,
+            vec![calls(
+                api,
+                vec![call(
+                    api,
+                    "repeat-mask",
+                    "transform_input",
+                    json!({"operation":"jsonl-redact","pointer":"/token"}),
+                )],
+            )],
+        );
+        let out = invoke(
+            root.path(),
+            api,
+            &url,
+            &["--max-steps", "1"],
+            &offline.stdout,
+        );
+        assert!(out.status.success());
+        assert_eq!(out.stdout, offline.stdout);
+        let requests = task.join().unwrap();
+        assert_eq!(requests.len(), 1);
+        let request = serde_json::to_string(&requests[0]).unwrap();
+        assert!(!request.contains("unique-offline-secret-7768"));
+        assert!(request.contains("visible-context"));
+        assert!(request.contains("[REDACTED]"));
+    }
+}

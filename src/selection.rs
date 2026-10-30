@@ -263,6 +263,23 @@ pub(crate) fn integer_key<'a>(input: &'a str, pointer: &str) -> Result<crate::in
     crate::integer::Key::parse(key_value(input, pointer)?.get())
 }
 
+/// Replace exactly the borrowed value span, never an equal value elsewhere in the record.
+/// Validation covers the complete original input before any value is hidden.
+pub(crate) fn redact_json(input: &str, pointer: &str, limit: usize) -> Result<String> {
+    let raw = key_value(input, pointer)?.get();
+    // RawValue borrows a substring of this input. Address arithmetic locates that span
+    // without unsafe pointer operations or a textual search that could match another value.
+    let start = (raw.as_ptr() as usize)
+        .checked_sub(input.as_ptr() as usize)
+        .expect("selected RawValue borrows the input");
+    let end = start + raw.len();
+    let mut redacted = String::with_capacity(input.len() - raw.len() + 12);
+    redacted.push_str(&input[..start]);
+    redacted.push_str(r#""[REDACTED]""#);
+    redacted.push_str(&input[end..]);
+    crate::transforms::compact_valid_json(&redacted, limit)
+}
+
 /// Pipeline selection always returns a JSON value, including quoted string tokens.
 pub(crate) fn select_json(input: &str, pointer: &str, limit: usize) -> Result<String> {
     crate::transforms::compact_valid_json(find(input, pointer)?.get(), limit)

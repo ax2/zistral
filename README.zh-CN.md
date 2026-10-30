@@ -585,3 +585,12 @@ zi data jsonl-where --pointer /level --equals ERROR --show-plan -o errors.toml
 `jsonl-sort --pointer /time` 按明确的字符串字段稳定排序；
 `jsonl-count-by --pointer /level` 精确统计每类记录数。共享离线配方与现有模型工具。
 对应安装包与本批变更见 v0.30.0 Release。
+
+## main 中的下一批改进（尚未发布）
+
+新增显式 `json-redact` / `jsonl-redact`：按 RFC 6901 指针把一个值改为
+`"[REDACTED]"`，保留其他字段和数字词法，可用配方串联多个明确字段。
+缺失、歧义或无效记录使完整结果失败。需要隐去模型输入中的值时，先离线处理并审阅，
+再显式发送结果；模型工具遮盖无法收回已发送的原文。详见
+[示例与边界](docs/json-redaction.md)。这是下一批的一项完整改进，
+目前 v0.31.0 正式安装包尚不包含，不单独发布小版本。

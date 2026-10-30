@@ -767,3 +767,13 @@ zi data jsonl-where --pointer /level --equals ERROR --show-plan -o errors.toml
 `jsonl-sort --pointer /time` stably sorts by an explicit string key;
 `jsonl-count-by --pointer /level` produces exact frequency records. All share offline
 recipes and the existing model tool. See the v0.30.0 release for the corresponding installable packages.
+
+## Next batch on main (unreleased)
+
+Explicit `json-redact` / `jsonl-redact` replace one RFC 6901 pointer value with
+`"[REDACTED]"`, preserving unrelated lexical JSON values. Compose explicit fields in
+a version-1 recipe and review offline before sharing data. Missing/ambiguous paths
+and malformed records fail the complete result. Model-triggered masking cannot undo
+original-input disclosure; pre-redact locally when values must be withheld.
+See [examples and boundaries](docs/json-redaction.md). This is one accumulated
+workflow improvement; the current v0.31.0 installers do not include it yet.

@@ -101,7 +101,7 @@ impl Plan {
                         return Ok(Step { equals: None, operation, reverse: false, pointer: None, fields: None, contains: None, lines: Some(lines) });
                     }
                 }
-                for (prefix, operation) in [("json-select:", Operation::JsonSelect), ("jsonl-select:", Operation::JsonlSelect), ("jsonl-dedupe:", Operation::JsonlDedupe), ("jsonl-sort:", Operation::JsonlSort), ("jsonl-sort-int:", Operation::JsonlSortInt), ("jsonl-count-by:", Operation::JsonlCountBy)] {
+                for (prefix, operation) in [("json-redact:", Operation::JsonRedact), ("jsonl-redact:", Operation::JsonlRedact), ("json-select:", Operation::JsonSelect), ("jsonl-select:", Operation::JsonlSelect), ("jsonl-dedupe:", Operation::JsonlDedupe), ("jsonl-sort:", Operation::JsonlSort), ("jsonl-sort-int:", Operation::JsonlSortInt), ("jsonl-count-by:", Operation::JsonlCountBy)] {
                     if let Some(pointer) = text.strip_prefix(prefix) {
                         return Ok(Step { equals: None, operation, reverse: false, pointer: Some(pointer.to_owned()), fields: None, contains: None, lines: None });
                     }

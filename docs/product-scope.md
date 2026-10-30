@@ -197,3 +197,11 @@ counts. They reuse strict explicit pointer selection and native pipelines, not a
 expressions, numeric/date inference, new tool names, project access or task memory.
 See [keyed log analysis](jsonl-key-analysis.md). Publish this coherent batch only after
 combined validation, following the batched-release rule in [releasing](releasing.md).
+
+Unreleased on main: explicit JSON/JSONL value redaction fits pre-sharing preparation,
+using one literal pointer per native step and a fixed replacement. It preserves other
+lexical values, validates the original, and fails complete on missing/ambiguous paths.
+It is not automatic secret discovery; model-side masking cannot retract original-input
+disclosure, so withhold values by offline processing before any request. No tool names,
+runtime, project permissions, Agent-loop branches or implicit history are added.
+See [JSON redaction](json-redaction.md). Accumulate it into the next coherent batch.

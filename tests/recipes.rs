@@ -1698,3 +1698,209 @@ fn builtin_top_counts_rank_integers_stably_and_export_an_editable_offline_plan()
     assert!(out.status.success());
     assert_eq!(out.stdout, original.as_bytes());
 }
+
+#[test]
+fn redaction_changes_only_the_explicit_value_and_keeps_lexical_payloads() {
+    let root = tempfile::tempdir().unwrap();
+    let source = r#" {"unchanged":"same","secret":"same","a/b":{"~key":["same",{"n":1.2300E+400,"n":-0}]},"big":9007199254740993,"s":"\u4e2d"} "#;
+    let out = invoke(
+        root.path(),
+        &["data", "json-redact", "--pointer", "/secret"],
+        source.as_bytes(),
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(out.stderr.is_empty());
+    assert_eq!(out.stdout, br#"{"unchanged":"same","secret":"[REDACTED]","a/b":{"~key":["same",{"n":1.2300E+400,"n":-0}]},"big":9007199254740993,"s":"\u4e2d"}
+"#);
+    let out = invoke(
+        root.path(),
+        &["data", "json-redact", "--pointer", "/a~1b/~0key/1"],
+        source.as_bytes(),
+    );
+    assert!(out.status.success());
+    assert_eq!(out.stdout, br#"{"unchanged":"same","secret":"same","a/b":{"~key":["same","[REDACTED]"]},"big":9007199254740993,"s":"\u4e2d"}
+"#);
+    let out = invoke(
+        root.path(),
+        &["data", "json-redact", "--pointer", ""],
+        source.as_bytes(),
+    );
+    assert!(out.status.success());
+    assert_eq!(out.stdout, b"\"[REDACTED]\"\n");
+}
+
+#[test]
+fn redaction_accepts_every_json_value_type_and_normalizes_jsonl_boundaries() {
+    let root = tempfile::tempdir().unwrap();
+    let source = b" {\"x\":null} \r\n{\"x\":true}\r\n{\"x\":-0}\n{\"x\":1e9999}\n{\"x\":\"s\"}\n{\"x\":[1,2]}\n{\"x\":{\"a\":1}}";
+    let out = invoke(
+        root.path(),
+        &["data", "jsonl-redact", "--pointer", "/x"],
+        source,
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(out.stdout, b"{\"x\":\"[REDACTED]\"}\n".repeat(7));
+    let empty = invoke(
+        root.path(),
+        &["data", "jsonl-redact", "--pointer", "/x"],
+        b"",
+    );
+    assert!(empty.status.success() && empty.stdout.is_empty() && empty.stderr.is_empty());
+}
+
+#[test]
+fn redaction_rejects_ambiguous_invalid_or_missing_values_without_publishing_data() {
+    let root = tempfile::tempdir().unwrap();
+    let secret = "PRIVATE_REDACTION_TEST_SENTINEL";
+    for record in [
+        format!(r#"{{"x":"{secret}","x":0}}"#),
+        format!(r#"{{"x":"{secret}","\u0078":0}}"#),
+        format!(r#"{{"missing":"{secret}"}}"#),
+        format!(r#"{{"x":"{secret}","bad":"\ud800"}}"#),
+        format!(r#"{{"x":"{secret}","bad":}}"#),
+    ] {
+        std::fs::write(root.path().join("keep.txt"), "old result").unwrap();
+        let input = format!("{{\"x\":0}}\n{record}\n");
+        let out = invoke(
+            root.path(),
+            &[
+                "data",
+                "jsonl-redact",
+                "--pointer",
+                "/x",
+                "-o",
+                "keep.txt",
+                "--force",
+            ],
+            input.as_bytes(),
+        );
+        assert!(!out.status.success());
+        assert!(out.stdout.is_empty());
+        let error = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            error.contains("record 2") && error.contains("jsonl-redact"),
+            "{error}"
+        );
+        assert!(!error.contains(secret));
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("keep.txt")).unwrap(),
+            "old result"
+        );
+    }
+    for args in [
+        vec!["data", "json-redact"],
+        vec!["data", "jsonl-redact", "--pointer", "bad"],
+        vec!["data", "jsonl-redact", "--pointer", "/x~2"],
+        vec!["data", "json-redact", "--pointer", "/x", "--reverse"],
+        vec!["data", "json-redact", "--pointer", "/x", "--equals", "x"],
+        vec!["data", "jsonl-redact", "--pointer", "/x", "--lines", "2"],
+    ] {
+        let out = invoke(
+            root.path(),
+            &[args, vec!["-i", "missing-input.json"]].concat(),
+            b"",
+        );
+        assert!(!out.status.success() && out.stdout.is_empty());
+        assert!(!String::from_utf8_lossy(&out.stderr).contains("cannot open"));
+    }
+}
+
+#[test]
+fn redaction_plan_roundtrips_and_chains_explicit_fields_before_export() {
+    let root = tempfile::tempdir().unwrap();
+    let args = [
+        "data",
+        "--show-plan",
+        "--step",
+        "json-select:/events",
+        "--step",
+        "array-to-jsonl",
+        "--step",
+        "jsonl-redact:/credentials/token",
+        "--step",
+        "jsonl-redact:/user/email",
+        "--step",
+        "jsonl-to-array",
+        "-o",
+        "mask.toml",
+    ];
+    let out = invoke(root.path(), &args, b"not read");
+    assert!(out.status.success() && out.stdout.is_empty() && out.stderr.is_empty());
+    let plan = std::fs::read_to_string(root.path().join("mask.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&plan).unwrap();
+    assert_eq!(parsed["steps"].as_array().unwrap().len(), 5);
+    assert!(!plan.contains("not read"));
+    let input = br#"{"events":[{"credentials":{"token":"private"},"user":{"email":"private"},"n":1.2300E+400}]}"#;
+    let out = invoke(root.path(), &["data", "--recipe", "mask.toml"], input);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        out.stdout,
+        br#"[{"credentials":{"token":"[REDACTED]"},"user":{"email":"[REDACTED]"},"n":1.2300E+400}]
+"#
+    );
+    let mut child = command(root.path())
+        .args(["data", "--show-plan", "--step", "json-redact:/x"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let start = std::time::Instant::now();
+    while child.try_wait().unwrap().is_none() && start.elapsed() < std::time::Duration::from_secs(5)
+    {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    if child.try_wait().unwrap().is_none() {
+        child.kill().unwrap();
+        panic!("plan export blocked on open stdin");
+    }
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success());
+}
+
+#[test]
+fn redaction_uses_exact_unicode_keys_and_strict_array_indexes() {
+    let root = tempfile::tempdir().unwrap();
+    let input = "{\"中\":{\"\":[1,2]},\"e\\u0301\":\"remain\",\"é\":\"private\"}";
+    let out = invoke(
+        root.path(),
+        &[
+            "data",
+            "--step",
+            "json-redact:/中//1",
+            "--step",
+            "json-redact:/é",
+        ],
+        input.as_bytes(),
+    );
+    assert!(out.status.success());
+    assert_eq!(
+        String::from_utf8(out.stdout).unwrap(),
+        "{\"中\":{\"\":[1,\"[REDACTED]\"]},\"e\\u0301\":\"remain\",\"é\":\"[REDACTED]\"}\n"
+    );
+    for pointer in [
+        "/中//01",
+        "/中//-",
+        "/中//2",
+        "/中//99999999999999999999999999",
+    ] {
+        let out = invoke(
+            root.path(),
+            &["data", "json-redact", "--pointer", pointer],
+            input.as_bytes(),
+        );
+        assert!(!out.status.success() && out.stdout.is_empty());
+    }
+}

@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Add explicit JSON/JSONL value redaction for offline pre-sharing preparation: replace one pointer value with a fixed marker while preserving unrelated lexical payloads; reuse and inspect ordered recipes.
+- Validate all original records and preserve complete-output/file-failure rules; document that model-side masking cannot undo original-input disclosure.
+
 ## 0.31.0 — 2026-10-30
 
 - Rank native frequency results and other exact JSON integer literals with
