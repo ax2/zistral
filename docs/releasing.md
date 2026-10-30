@@ -26,6 +26,9 @@ notes contain this batch only. Write one illustrated Feishu article per actual
 release after verifying the official binaries; do not generate articles for every
 commit or internal checkpoint.
 
+For the unreleased pre-sharing candidate, see the [boundary verification note](pre-sharing-verification.md)
+for reproducible checks and the distinction between development measurements and official delivery.
+
 ## Validate and publish the chosen batch
 
 1. Update the package/lock version and add one changelog section for this release. Keep

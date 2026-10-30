@@ -1,0 +1,174 @@
+{
+  "binary_sha256": "c4a13bfe4bdc6a15dd289131f5e53c0b4b412d9d305b3d6e142d404b5a9b35db",
+  "binary_bytes": 5632000,
+  "platform": "Windows-11-10.0.26300-SP0",
+  "runs_per_case": 3,
+  "cases": [
+    {
+      "case": "shallow-strict",
+      "input_bytes": 7340063,
+      "output_bytes": 7340068,
+      "output_sha256": "5369fd5fc073e84665545cbc99ae64ba4f5cd776f43367cee01748e3a47954de",
+      "trials": [
+        {
+          "elapsed_seconds": 0.104633,
+          "peak_working_set_bytes": 29921280,
+          "peak_pagefile_usage_bytes": 29511680
+        },
+        {
+          "elapsed_seconds": 0.083744,
+          "peak_working_set_bytes": 30015488,
+          "peak_pagefile_usage_bytes": 29372416
+        },
+        {
+          "elapsed_seconds": 0.077421,
+          "peak_working_set_bytes": 29908992,
+          "peak_pagefile_usage_bytes": 29478912
+        }
+      ],
+      "median_elapsed_seconds": 0.083744,
+      "median_peak_working_set_bytes": 29921280,
+      "median_peak_pagefile_usage_bytes": 29478912,
+      "verified": true
+    },
+    {
+      "case": "shallow-optional",
+      "input_bytes": 7340063,
+      "output_bytes": 7340068,
+      "output_sha256": "5369fd5fc073e84665545cbc99ae64ba4f5cd776f43367cee01748e3a47954de",
+      "trials": [
+        {
+          "elapsed_seconds": 0.097435,
+          "peak_working_set_bytes": 29949952,
+          "peak_pagefile_usage_bytes": 29466624
+        },
+        {
+          "elapsed_seconds": 0.092189,
+          "peak_working_set_bytes": 29925376,
+          "peak_pagefile_usage_bytes": 29511680
+        },
+        {
+          "elapsed_seconds": 0.092503,
+          "peak_working_set_bytes": 29995008,
+          "peak_pagefile_usage_bytes": 29392896
+        }
+      ],
+      "median_elapsed_seconds": 0.092503,
+      "median_peak_working_set_bytes": 29949952,
+      "median_peak_pagefile_usage_bytes": 29466624,
+      "verified": true
+    },
+    {
+      "case": "deep-optional-missing",
+      "input_bytes": 7340808,
+      "output_bytes": 7340809,
+      "output_sha256": "ebf2ceb231c41ba6be25aa7c1fa9946989e17cd381a2aca31a7ce0c86821a6dd",
+      "trials": [
+        {
+          "elapsed_seconds": 0.179838,
+          "peak_working_set_bytes": 22712320,
+          "peak_pagefile_usage_bytes": 22159360
+        },
+        {
+          "elapsed_seconds": 0.159565,
+          "peak_working_set_bytes": 22675456,
+          "peak_pagefile_usage_bytes": 22212608
+        },
+        {
+          "elapsed_seconds": 0.170782,
+          "peak_working_set_bytes": 22679552,
+          "peak_pagefile_usage_bytes": 22171648
+        }
+      ],
+      "median_elapsed_seconds": 0.170782,
+      "median_peak_working_set_bytes": 22679552,
+      "median_peak_pagefile_usage_bytes": 22171648,
+      "verified": true
+    },
+    {
+      "case": "deep-profile",
+      "input_bytes": 7340808,
+      "output_bytes": 24282,
+      "output_sha256": "e252844ec574a8d7474ec94727c380bbe88fb96fb0449b79c861ad4f99b06f41",
+      "trials": [
+        {
+          "elapsed_seconds": 0.133647,
+          "peak_working_set_bytes": 22634496,
+          "peak_pagefile_usage_bytes": 17960960
+        },
+        {
+          "elapsed_seconds": 0.12016,
+          "peak_working_set_bytes": 22659072,
+          "peak_pagefile_usage_bytes": 17993728
+        },
+        {
+          "elapsed_seconds": 0.116044,
+          "peak_working_set_bytes": 22638592,
+          "peak_pagefile_usage_bytes": 17948672
+        }
+      ],
+      "median_elapsed_seconds": 0.12016,
+      "median_peak_working_set_bytes": 22638592,
+      "median_peak_pagefile_usage_bytes": 17960960,
+      "verified": true
+    },
+    {
+      "case": "100k-profile",
+      "input_bytes": 7300000,
+      "output_bytes": 171,
+      "output_sha256": "5bbb330ccdcd9a46fc4ce66aa0e82fe88088367c7dc45f89bf97f39475ccb59a",
+      "trials": [
+        {
+          "elapsed_seconds": 0.099707,
+          "peak_working_set_bytes": 22597632,
+          "peak_pagefile_usage_bytes": 17915904
+        },
+        {
+          "elapsed_seconds": 0.091007,
+          "peak_working_set_bytes": 22614016,
+          "peak_pagefile_usage_bytes": 17924096
+        },
+        {
+          "elapsed_seconds": 0.091081,
+          "peak_working_set_bytes": 22626304,
+          "peak_pagefile_usage_bytes": 17936384
+        }
+      ],
+      "median_elapsed_seconds": 0.091081,
+      "median_peak_working_set_bytes": 22614016,
+      "median_peak_pagefile_usage_bytes": 17924096,
+      "verified": true
+    },
+    {
+      "case": "preview-encoded-overflow",
+      "input_bytes": 3145728,
+      "output_bytes": 0,
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "trials": [
+        {
+          "elapsed_seconds": 0.063189,
+          "peak_working_set_bytes": 53649408,
+          "peak_pagefile_usage_bytes": 65347584
+        },
+        {
+          "elapsed_seconds": 0.042383,
+          "peak_working_set_bytes": 53686272,
+          "peak_pagefile_usage_bytes": 65351680
+        },
+        {
+          "elapsed_seconds": 0.040224,
+          "peak_working_set_bytes": 53673984,
+          "peak_pagefile_usage_bytes": 65298432
+        }
+      ],
+      "median_elapsed_seconds": 0.042383,
+      "median_peak_working_set_bytes": 53673984,
+      "median_peak_pagefile_usage_bytes": 65347584,
+      "verified": true
+    }
+  ],
+  "scope": "Synthetic Windows whole-process OS counters and elapsed time, including startup/input/output. No model/network requests. This is not an allocator-only measurement, official-release installation check, cross-platform comparison or general performance guarantee. Terminal display expansion is outside this pipe/file probe.",
+  "binary_kind": "unreleased development build; not the official0.31.0 executable",
+  "runtime_source_commit": "15394a9f4583e5c155610215a75bb610b4fe95ac",
+  "decision": "No runtime algorithm change justified by these bounded probes; continue whole-milestone delivery gates."
+}
