@@ -604,3 +604,7 @@ zi data jsonl-where --pointer /level --equals ERROR --show-plan -o errors.toml
 次数，不含样本值，数组作为叶节点；可以先明确选择数组再展开统计。报告仍包含键名，
 不推断 Schema 或自动脱敏，详见[结构概览](docs/json-profile.md)。与离线值遮盖、
 请求预览共同形成一批发送前准备改进，统一验收后再决定发版。
+
+同批遮盖功能补充显式 `--if-present`：已有值（包括 null）仍遮盖，真正缺失时保留有效记录；
+默认继续严格报错，无效数据、歧义键和非法数组索引仍使整份结果失败。配方/工具按每步
+`if_present = true` 选择，成功但零匹配不代表已脱敏。这是原有遮盖改进的细化，不另算功能。

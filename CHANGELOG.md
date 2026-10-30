@@ -7,7 +7,7 @@
 - Preview the actual first model request with `--preview`: shared protocol/context construction, resolved input/presets and explicit capabilities, credential headers omitted, no networking/tool execution, and bounded complete JSON/file output.
 
 - Add explicit JSON/JSONL value redaction for offline pre-sharing preparation: replace one pointer value with a fixed marker while preserving unrelated lexical payloads; reuse and inspect ordered recipes.
-- Validate all original records and preserve complete-output/file-failure rules; document that model-side masking cannot undo original-input disclosure.
+- Validate all original records and preserve complete-output/file-failure rules. Explicit `--if-present` / per-step boolean retains genuinely absent redaction paths in mixed logs; defaults remain strict and invalid/ambiguous data still fails. Model-side masking cannot undo original-input disclosure.
 
 ## 0.31.0 — 2026-10-30
 

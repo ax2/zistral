@@ -92,6 +92,12 @@ pub struct Step {
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_bool"
+    )]
+    pub if_present: Option<bool>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
         deserialize_with = "optional_string"
     )]
     pub pointer: Option<String>,
@@ -127,6 +133,12 @@ fn projection_fields<'de, D: serde::Deserializer<'de>>(
     Vec::<crate::projection::Field>::deserialize(de).map(Some)
 }
 
+fn optional_bool<'de, D: serde::Deserializer<'de>>(
+    de: D,
+) -> std::result::Result<Option<bool>, D::Error> {
+    bool::deserialize(de).map(Some)
+}
+
 fn optional_string<'de, D: serde::Deserializer<'de>>(
     de: D,
 ) -> std::result::Result<Option<String>, D::Error> {
@@ -145,6 +157,14 @@ fn is_false(value: &bool) -> bool {
 
 impl Step {
     pub fn validate(&self) -> Result<()> {
+        if self.if_present.is_some()
+            && !matches!(
+                self.operation,
+                Operation::JsonRedact | Operation::JsonlRedact
+            )
+        {
+            bail!("if_present is only valid for json-redact or jsonl-redact");
+        }
         match (&self.equals, self.operation) {
             (Some(value), Operation::JsonlWhere) if value.len() <= 4096 => (),
             (Some(_), Operation::JsonlWhere) => {
@@ -632,6 +652,7 @@ fn run(input: &str, operation: Operation, reverse: bool, limit: usize) -> Result
     transform(
         input,
         &Step {
+            if_present: None,
             operation,
             reverse,
             contains: None,
@@ -781,6 +802,7 @@ fn transform(input: &str, step: &Step, input_limit: usize, limit: usize) -> Resu
             return crate::selection::redact_json(
                 input,
                 step.pointer.as_deref().expect("validated pointer"),
+                step.if_present.unwrap_or(false),
                 limit,
             );
         }
@@ -793,6 +815,7 @@ fn transform(input: &str, step: &Step, input_limit: usize, limit: usize) -> Resu
                 let redacted = crate::selection::redact_json(
                     line,
                     step.pointer.as_deref().expect("validated pointer"),
+                    step.if_present.unwrap_or(false),
                     remaining.saturating_sub(1),
                 )
                 .with_context(|| {
@@ -832,7 +855,7 @@ pub(crate) fn parse_arguments(arguments: &str) -> Result<ToolArguments> {
     }
     serde_json::from_str(arguments).map_err(|_| {
         anyhow::anyhow!(
-            "transform_input requires either operation with optional reverse/pointer/fields/contains/lines/equals, or 1-16 steps of the same shape; do not combine them"
+            "transform_input requires either operation with optional reverse/pointer/fields/contains/lines/equals/if_present, or 1-16 steps of the same shape; do not combine them"
         )
     })
 }
@@ -891,6 +914,7 @@ mod tests {
             pointer: "".into(),
         };
         let step = Step {
+            if_present: None,
             operation: Operation::JsonlProject,
             reverse: false,
             contains: None,
@@ -982,6 +1006,7 @@ mod tests {
     #[test]
     fn csv_export_enforces_record_depth_output_and_serialized_envelope_bounds() {
         let step = Step {
+            if_present: None,
             operation: Operation::JsonlToCsv,
             reverse: false,
             contains: None,
@@ -1015,6 +1040,7 @@ mod tests {
     #[test]
     fn csv_limits_keep_record_counts_and_serialized_tool_envelope_bounded() {
         let step = Step {
+            if_present: None,
             operation: Operation::CsvToJsonl,
             reverse: false,
             contains: None,
@@ -1049,6 +1075,7 @@ mod tests {
             "123456789012345678901234567890\n1.2300E+400\n-0\n\"\\u4e2d\\n\"\n{\"z\":1,\"a\":2,\"z\":3}\n"
         );
         let step = Step {
+            if_present: None,
             operation: Operation::JsonlSelect,
             reverse: false,
             contains: None,
@@ -1333,6 +1360,7 @@ mod tests {
     #[test]
     fn pipeline_allows_bounded_expansion_then_reduction_and_retains_json_tokens() {
         let step = |operation, reverse| Step {
+            if_present: None,
             operation,
             reverse,
             contains: None,
@@ -1508,6 +1536,7 @@ mod tests {
     #[test]
     fn line_filter_limits_apply_before_discarding_and_to_serialized_tool_output() {
         let mut step = Step {
+            if_present: None,
             operation: Operation::LinesInclude,
             reverse: false,
             pointer: None,
@@ -1788,6 +1817,7 @@ mod jsonl_key_tests {
     use super::*;
     fn step(operation: Operation, pointer: &str, reverse: bool) -> Step {
         Step {
+            if_present: None,
             operation,
             pointer: Some(pointer.into()),
             reverse,
@@ -2009,6 +2039,7 @@ mod integer_ranking_tests {
 
     fn step(pointer: &str, reverse: bool) -> Step {
         Step {
+            if_present: None,
             operation: Operation::JsonlSortInt,
             pointer: Some(pointer.into()),
             reverse,
@@ -2305,5 +2336,53 @@ mod profile_tests {
                 assert!(transforms::execute(&value.to_string(), "{}").is_err());
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod conditional_redaction_tests {
+    use super::*;
+    use serde_json::json;
+    #[test]
+    fn if_present_is_typed_redaction_only_and_shares_direct_and_pipeline_schemas() {
+        for operation in ["json-redact", "jsonl-redact"] {
+            for value in [json!(null), json!(0), json!("true"), json!([]), json!({})] {
+                assert!(
+                    execute(
+                        &json!({"operation":operation,"pointer":"/x","if_present":value})
+                            .to_string(),
+                        "{}"
+                    )
+                    .is_err()
+                );
+            }
+            for value in [true, false] {
+                let args = json!({"operation":"trim","if_present":value});
+                assert!(execute(&args.to_string(), "{}").is_err());
+            }
+            let args = json!({"operation":operation,"pointer":"/x","if_present":true});
+            assert!(execute(&args.to_string(), "{}").is_ok());
+            let strict = json!({"operation":operation,"pointer":"/x","if_present":false});
+            assert!(execute(&strict.to_string(), "{}").is_err());
+        }
+        let tools = crate::data::tool_definitions();
+        for properties in [
+            &tools[2]["function"]["parameters"]["properties"],
+            &tools[2]["function"]["parameters"]["properties"]["steps"]["items"]["properties"],
+        ] {
+            assert_eq!(properties["if_present"]["type"], "boolean");
+        }
+        assert!(
+            parse_arguments(
+                r#"{"steps":[{"operation":"jsonl-redact","pointer":"/x"}],"if_present":true}"#
+            )
+            .is_err()
+        );
+        let step: Step = serde_json::from_value(
+            json!({"operation":"jsonl-redact","pointer":"/x","if_present":true}),
+        )
+        .unwrap();
+        assert!(transform("{}\n", &step, MAX_INPUT, 2).is_err());
+        assert!(transform(&"{}\n".repeat(MAX_ITEMS + 1), &step, MAX_INPUT, CLI_OUTPUT).is_err());
     }
 }

@@ -792,3 +792,9 @@ masking or sharing input. It exposes key names, is not a schema/sanitization gua
 and adds no dependency or model tool name. See [structural profiles](docs/json-profile.md).
 Together with offline redaction and request preview, it completes a candidate input-
 preparation milestone to review and test together before selecting a release.
+
+The same unreleased redaction improvement now supports explicit `--if-present` for
+heterogeneous records: mask present values (including null), retain valid missing paths,
+and keep malformed/ambiguous data or invalid array indexes as complete-result errors.
+Default behavior remains strict. Recipes/tools opt in per step with boolean
+`if_present = true`; successful zero-match runs do not prove sanitization.

@@ -51,7 +51,7 @@ fn tokens(pointer: &str) -> Result<Vec<String>> {
 pub(crate) fn validate_pointer(pointer: &str) -> Result<()> {
     tokens(pointer).map(|_| ())
 }
-struct PathSeed<'a>(&'a [String]);
+struct PathSeed<'a>(&'a [String], bool);
 impl<'de> DeserializeSeed<'de> for PathSeed<'_> {
     type Value = Found<'de>;
     fn deserialize<D: de::Deserializer<'de>>(
@@ -60,12 +60,23 @@ impl<'de> DeserializeSeed<'de> for PathSeed<'_> {
     ) -> std::result::Result<Self::Value, D::Error> {
         if self.0.is_empty() {
             <&RawValue>::deserialize(deserializer).map(Ok)
+        } else if self.1 {
+            // Optional traversal borrows lexical values before visiting containers so an
+            // absent child under 1e9999 is missing, not a floating-point parser failure.
+            let raw = <&RawValue>::deserialize(deserializer)?;
+            if !matches!(raw.get().as_bytes()[0], b'{' | b'[') {
+                return Ok(Err(Problem::Missing));
+            }
+            let mut nested = serde_json::Deserializer::from_str(raw.get());
+            nested.disable_recursion_limit();
+            serde::Deserializer::deserialize_any(&mut nested, PathVisitor(self.0, true))
+                .map_err(de::Error::custom)
         } else {
-            deserializer.deserialize_any(PathVisitor(self.0))
+            deserializer.deserialize_any(PathVisitor(self.0, false))
         }
     }
 }
-struct PathVisitor<'a>(&'a [String]);
+struct PathVisitor<'a>(&'a [String], bool);
 impl<'de> Visitor<'de> for PathVisitor<'_> {
     type Value = Found<'de>;
     fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -83,7 +94,7 @@ impl<'de> Visitor<'de> for PathVisitor<'_> {
                     ambiguous = true;
                     map.next_value::<IgnoredAny>()?;
                 } else {
-                    found = Some(map.next_value_seed(PathSeed(&self.0[1..]))?);
+                    found = Some(map.next_value_seed(PathSeed(&self.0[1..], self.1))?);
                 }
             } else {
                 map.next_value::<IgnoredAny>()?;
@@ -113,7 +124,7 @@ impl<'de> Visitor<'de> for PathVisitor<'_> {
         let mut found = None;
         loop {
             if Some(position) == index {
-                match seq.next_element_seed(PathSeed(&self.0[1..]))? {
+                match seq.next_element_seed(PathSeed(&self.0[1..], self.1))? {
                     Some(value) => found = Some(value),
                     None => break,
                 }
@@ -186,7 +197,7 @@ impl<'de> Visitor<'de> for Join<'_> {
         Ok(output)
     }
 }
-fn find<'a>(input: &'a str, pointer: &str) -> Result<&'a RawValue> {
+fn locate<'a>(input: &'a str, pointer: &str, if_present: bool) -> Result<Option<&'a RawValue>> {
     if input.len() > 64 * 1024 * 1024 {
         bail!("JSON selection input exceeds 64 MiB");
     }
@@ -195,11 +206,12 @@ fn find<'a>(input: &'a str, pointer: &str) -> Result<&'a RawValue> {
     let mut deserializer = serde_json::Deserializer::from_str(input);
     // Every container was counted by the validation pass before this bounded traversal.
     deserializer.disable_recursion_limit();
-    let found = PathSeed(&tokens)
+    let found = PathSeed(&tokens, if_present)
         .deserialize(&mut deserializer)
         .map_err(|_| anyhow::anyhow!("JSON pointer cannot be evaluated against this input"))?;
     let raw = match found {
-        Ok(raw) => raw,
+        Ok(raw) => Some(raw),
+        Err(Problem::Missing) if if_present => None,
         Err(Problem::Ambiguous) => {
             bail!("JSON pointer references an ambiguous duplicate object key")
         }
@@ -210,6 +222,10 @@ fn find<'a>(input: &'a str, pointer: &str) -> Result<&'a RawValue> {
         anyhow::anyhow!("JSON pointer traversal did not consume the complete input")
     })?;
     Ok(raw)
+}
+
+fn find<'a>(input: &'a str, pointer: &str) -> Result<&'a RawValue> {
+    locate(input, pointer, false)?.context("JSON pointer does not exist in the input")
 }
 
 /// Validate the whole record and reference before exact decoded-string comparison.
@@ -226,6 +242,11 @@ pub(crate) fn string_equals(input: &str, pointer: &str, expected: &str) -> Resul
 /// Shared key validation includes string scalar validity in unselected fields.
 fn key_value<'a>(input: &'a str, pointer: &str) -> Result<&'a RawValue> {
     let raw = find(input, pointer)?;
+    validate_strings(input)?;
+    Ok(raw)
+}
+
+fn validate_strings(input: &str) -> Result<()> {
     // IgnoredAny checks syntax but skips surrogate pairing in unselected strings.
     // Inspect string tokens only: never parse the record's numeric payloads as floats.
     let (mut start, mut escaped) = (None, false);
@@ -247,7 +268,7 @@ fn key_value<'a>(input: &'a str, pointer: &str) -> Result<&'a RawValue> {
             start = Some(index);
         }
     }
-    Ok(raw)
+    Ok(())
 }
 
 /// Validate syntax/depth and all Unicode strings, borrowing the whole lexical record.
@@ -269,8 +290,23 @@ pub(crate) fn integer_key<'a>(input: &'a str, pointer: &str) -> Result<crate::in
 
 /// Replace exactly the borrowed value span, never an equal value elsewhere in the record.
 /// Validation covers the complete original input before any value is hidden.
-pub(crate) fn redact_json(input: &str, pointer: &str, limit: usize) -> Result<String> {
-    let raw = key_value(input, pointer)?.get();
+pub(crate) fn redact_json(
+    input: &str,
+    pointer: &str,
+    if_present: bool,
+    limit: usize,
+) -> Result<String> {
+    let raw = if if_present {
+        let selected = locate(input, pointer, true)?;
+        // Even a missing path must validate every original string before publishing.
+        validate_strings(input)?;
+        match selected {
+            Some(raw) => raw.get(),
+            None => return crate::transforms::compact_valid_json(input, limit),
+        }
+    } else {
+        key_value(input, pointer)?.get()
+    };
     // RawValue borrows a substring of this input. Address arithmetic locates that span
     // without unsafe pointer operations or a textual search that could match another value.
     let start = (raw.as_ptr() as usize)
@@ -442,6 +478,82 @@ mod string_match_tests {
             (r#"{"x":"\uD800"}"#, "/x"),
         ] {
             assert!(string_equals(json, pointer, "ERROR").is_err());
+        }
+    }
+}
+
+#[cfg(test)]
+mod optional_redaction_tests {
+    use super::*;
+    #[test]
+    fn optional_lookup_distinguishes_missing_from_ambiguous_and_invalid_indexes() {
+        for input in [
+            r#"{}"#,
+            r#"{"a":null}"#,
+            r#"{"a":1e9999}"#,
+            r#"{"a":true}"#,
+            r#"{"a":"s"}"#,
+            "1e9999",
+            "null",
+        ] {
+            assert!(locate(input, "/a/b", true).unwrap().is_none(), "{input}");
+            assert_eq!(redact_json(input, "/a/b", true, 4096).unwrap(), input);
+            assert!(redact_json(input, "/a/b", false, 4096).is_err());
+        }
+        assert_eq!(
+            redact_json(r#"{"a":{"b":null}}"#, "/a/b", true, 4096).unwrap(),
+            r#"{"a":{"b":"[REDACTED]"}}"#
+        );
+        assert_eq!(
+            redact_json(r#"{"a":[]}"#, "/a/0/x", true, 4096).unwrap(),
+            r#"{"a":[]}"#
+        );
+        assert_eq!(
+            redact_json(r#"{"01":null}"#, "/01", true, 4096).unwrap(),
+            r#"{"01":"[REDACTED]"}"#
+        );
+        for input in [
+            r#"{"a":null,"a":{}}"#,
+            r#"{"a":{},"\u0061":null}"#,
+            r#"{"a":{"b":1,"b":2}}"#,
+        ] {
+            assert!(redact_json(input, "/a/b", true, 4096).is_err());
+        }
+        for pointer in [
+            "/a/01",
+            "/a/-",
+            "/a/9999999999999999999999999999999999999999999999",
+        ] {
+            assert!(redact_json(r#"{"a":[]}"#, pointer, true, 4096).is_err());
+        }
+        assert_eq!(
+            redact_json(r#"{"x":1,"x":2}"#, "/absent", true, 4096).unwrap(),
+            r#"{"x":1,"x":2}"#
+        );
+    }
+    #[test]
+    fn skipped_records_still_validate_all_data_and_obey_output_limits() {
+        for input in [
+            r#"{"other":"\ud800"}"#,
+            r#"{"a":null,"other":["\udc00"]}"#,
+            "{} trailing",
+            "",
+        ] {
+            assert!(redact_json(input, "/a/b", true, 4096).is_err());
+        }
+        let input = r#" { "n":1.2300E+400,"zero":-0,"s":"\u4e2d" } "#;
+        assert_eq!(
+            redact_json(input, "/absent", true, 1000).unwrap(),
+            r#"{"n":1.2300E+400,"zero":-0,"s":"\u4e2d"}"#
+        );
+        assert!(redact_json(input, "/absent", true, 4).is_err());
+        assert_eq!(redact_json(input, "", true, 12).unwrap(), r#""[REDACTED]""#);
+        for depth in [128, 129] {
+            let input = format!("{}0{}", "[".repeat(depth), "]".repeat(depth));
+            assert_eq!(
+                redact_json(&input, "/0/0/0", true, 4096).is_ok(),
+                depth == 128
+            );
         }
     }
 }

@@ -2094,3 +2094,243 @@ fn profile_before_masking_exposes_missing_paths_without_automatically_modifying_
         data
     );
 }
+
+#[test]
+fn conditional_redaction_masks_present_null_and_preserves_valid_missing_records() {
+    let root = tempfile::tempdir().unwrap();
+    let data=b" {\"user\":{\"token\":\"PRIVATE_OPTIONAL\"},\"n\":1.2300E+400} \r\n{\"user\":{\"token\":null},\"n\":-0}\n{\"user\":null}\n{\"user\":1e9999}\n{}\n1e9999\n";
+    let expected=b"{\"user\":{\"token\":\"[REDACTED]\"},\"n\":1.2300E+400}\n{\"user\":{\"token\":\"[REDACTED]\"},\"n\":-0}\n{\"user\":null}\n{\"user\":1e9999}\n{}\n1e9999\n";
+    let out = invoke(
+        root.path(),
+        &[
+            "data",
+            "jsonl-redact",
+            "--pointer",
+            "/user/token",
+            "--if-present",
+        ],
+        data,
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(out.stdout, expected);
+    assert!(out.stderr.is_empty());
+    let strict = invoke(
+        root.path(),
+        &["data", "jsonl-redact", "--pointer", "/user/token"],
+        data,
+    );
+    assert!(!strict.status.success() && strict.stdout.is_empty());
+    for input in [br#"{}"#.as_slice(), br#"{"a":null}"#, b"1e9999"] {
+        let out = invoke(
+            root.path(),
+            &["data", "json-redact", "--pointer", "/a/b", "--if-present"],
+            input,
+        );
+        assert!(out.status.success());
+        assert_eq!(out.stdout, [input, b"\n"].concat());
+    }
+}
+
+#[test]
+fn conditional_plan_roundtrips_per_step_and_missing_mode_does_not_claim_a_match() {
+    let root = tempfile::tempdir().unwrap();
+    let out = invoke(
+        root.path(),
+        &[
+            "data",
+            "--show-plan",
+            "jsonl-redact",
+            "--pointer",
+            "/token",
+            "--if-present",
+            "-o",
+            "optional.toml",
+        ],
+        b"\xffignored",
+    );
+    assert!(out.status.success() && out.stdout.is_empty());
+    let source = std::fs::read_to_string(root.path().join("optional.toml")).unwrap();
+    let plan: toml::Value = toml::from_str(&source).unwrap();
+    assert_eq!(plan["steps"][0]["if_present"].as_bool(), Some(true));
+    let out = invoke(
+        root.path(),
+        &["data", "--recipe", "optional.toml"],
+        b"{\"token\":null}\n{}\n",
+    );
+    assert!(out.status.success());
+    assert_eq!(out.stdout, b"{\"token\":\"[REDACTED]\"}\n{}\n");
+    let nomatch = invoke(
+        root.path(),
+        &["data", "--recipe", "optional.toml"],
+        b" {\"other\":1e9999} \n{}",
+    );
+    assert!(nomatch.status.success());
+    assert_eq!(nomatch.stdout, b"{\"other\":1e9999}\n{}\n");
+    std::fs::write(
+        root.path().join("strict.toml"),
+        source.replace("if_present = true", "if_present = false"),
+    )
+    .unwrap();
+    let out = invoke(root.path(), &["data", "--recipe", "strict.toml"], b"{}\n");
+    assert!(!out.status.success() && out.stdout.is_empty());
+    let mixed = "version=1\n[[steps]]\noperation='jsonl-redact'\npointer='/user'\nif_present=true\n[[steps]]\noperation='jsonl-redact'\npointer='/user/token'\n";
+    std::fs::write(root.path().join("mixed.toml"), mixed).unwrap();
+    let failed = invoke(
+        root.path(),
+        &["data", "--recipe", "mixed.toml"],
+        b"{\"user\":{\"token\":\"private\"}}\n",
+    );
+    assert!(!failed.status.success() && failed.stdout.is_empty());
+    std::fs::write(
+        root.path().join("mixed.toml"),
+        format!("{mixed}if_present=true\n"),
+    )
+    .unwrap();
+    let out = invoke(
+        root.path(),
+        &["data", "--recipe", "mixed.toml"],
+        b"{\"user\":{\"token\":\"private\"}}\n",
+    );
+    assert!(out.status.success());
+    assert_eq!(out.stdout, b"{\"user\":\"[REDACTED]\"}\n");
+}
+
+#[test]
+fn optional_mode_never_suppresses_ambiguous_invalid_or_unsupported_record_errors() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join("keep.jsonl"), b"old result").unwrap();
+    for tail in [
+        r#"{"a":{},"a":null,"secret":"PRIVATE_OPTIONAL"}"#,
+        r#"{"a":null,"other":"\ud800"}"#,
+        r#"{"a":["\udc00"]}"#,
+        r#"{"a":} PRIVATE_OPTIONAL"#,
+    ] {
+        let data = format!("{{\"a\":{{\"b\":null}}}}\n{tail}\n");
+        let out = invoke(
+            root.path(),
+            &[
+                "data",
+                "jsonl-redact",
+                "--pointer",
+                "/a/b",
+                "--if-present",
+                "-o",
+                "keep.jsonl",
+                "--force",
+            ],
+            data.as_bytes(),
+        );
+        assert!(!out.status.success() && out.stdout.is_empty());
+        let error = String::from_utf8_lossy(&out.stderr);
+        assert!(error.contains("record 2") && !error.contains("PRIVATE_OPTIONAL"));
+        assert_eq!(
+            std::fs::read(root.path().join("keep.jsonl")).unwrap(),
+            b"old result"
+        );
+    }
+    for index in ["01", "-", "99999999999999999999999999999999999999999"] {
+        let pointer = format!("/a/{index}");
+        let out = invoke(
+            root.path(),
+            &[
+                "data",
+                "jsonl-redact",
+                "--pointer",
+                &pointer,
+                "--if-present",
+            ],
+            b"{\"a\":[]}\n",
+        );
+        assert!(!out.status.success() && out.stdout.is_empty());
+    }
+    let out = invoke(
+        root.path(),
+        &["data", "jsonl-redact", "--pointer", "/a/20", "--if-present"],
+        b"{\"a\":[]}\n",
+    );
+    assert!(out.status.success());
+    assert_eq!(out.stdout, b"{\"a\":[]}\n");
+}
+
+#[test]
+fn conditional_redaction_rejects_unrelated_modes_and_bad_boolean_definitions_before_io() {
+    let root = tempfile::tempdir().unwrap();
+    for args in [
+        vec!["data", "trim", "--if-present"],
+        vec!["data", "jsonl-profile", "--if-present"],
+        vec!["data", "json-redact", "--if-present"],
+        vec!["data", "--step", "jsonl-redact:/x", "--if-present"],
+        vec!["data", "--list-recipes", "--if-present"],
+    ] {
+        let out = invoke(
+            root.path(),
+            &[args, vec!["-i", "missing-input"]].concat(),
+            b"",
+        );
+        assert!(!out.status.success() && out.stdout.is_empty());
+        assert!(!String::from_utf8_lossy(&out.stderr).contains("cannot open"));
+    }
+    for (op, value) in [
+        ("trim", "true"),
+        ("trim", "false"),
+        ("json-redact", "'PRIVATE_OPTIONAL'"),
+        ("json-redact", "1"),
+    ] {
+        let source = format!("version=1\n[[steps]]\noperation='{op}'\nif_present={value}\n");
+        std::fs::write(root.path().join("bad.toml"), source).unwrap();
+        let out = invoke(
+            root.path(),
+            &["data", "--recipe", "bad.toml", "-i", "missing-input"],
+            b"",
+        );
+        assert!(!out.status.success() && out.stdout.is_empty());
+        let error = String::from_utf8_lossy(&out.stderr);
+        assert!(!error.contains("cannot open") && !error.contains("PRIVATE_OPTIONAL"));
+    }
+}
+
+#[test]
+fn opaque_profile_counts_do_not_gate_actual_optional_pointer_resolution() {
+    let root = tempfile::tempdir().unwrap();
+    let data=b"{\"a\":{\"0\":{\"token\":\"s\"}}}\n{\"a\":[{\"token\":\"t\"}]}\n{\"a\":[]}\n{\"a\":{\"0\":null}}\n";
+    let out = invoke(root.path(), &["data", "jsonl-profile"], data);
+    assert!(out.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let path = report["paths"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["pointer"] == "/a/0/token")
+        .unwrap();
+    assert_eq!(path["present"], 1);
+    assert_eq!(path["missing"], 3);
+    let out = invoke(
+        root.path(),
+        &[
+            "data",
+            "jsonl-redact",
+            "--pointer",
+            "/a/0/token",
+            "--if-present",
+        ],
+        data,
+    );
+    assert!(out.status.success());
+    assert_eq!(out.stdout,b"{\"a\":{\"0\":{\"token\":\"[REDACTED]\"}}}\n{\"a\":[{\"token\":\"[REDACTED]\"}]}\n{\"a\":[]}\n{\"a\":{\"0\":null}}\n");
+    let invalid = invoke(
+        root.path(),
+        &[
+            "data",
+            "jsonl-redact",
+            "--pointer",
+            "/a/token",
+            "--if-present",
+        ],
+        b"{\"a\":[]}\n",
+    );
+    assert!(!invalid.status.success() && invalid.stdout.is_empty());
+}

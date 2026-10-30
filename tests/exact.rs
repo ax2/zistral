@@ -1147,3 +1147,53 @@ fn profile_native_results_and_exported_recipes_work_in_every_model_protocol() {
         }
     }
 }
+
+#[test]
+fn conditional_redaction_tool_and_plan_preserve_missing_records_in_all_protocols() {
+    for api in ["chat", "responses", "anthropic"] {
+        let root = tempfile::tempdir().unwrap();
+        let data = b"{\"token\":null,\"n\":1e9999}\n{}\n";
+        let expected = b"{\"token\":\"[REDACTED]\",\"n\":1e9999}\n{}\n";
+        for export in [false, true] {
+            let args = json!({"operation":"jsonl-redact","pointer":"/token","if_present":true});
+            let (url, task) = server(
+                api,
+                vec![calls(
+                    api,
+                    vec![call(api, "optional", "transform_input", args)],
+                )],
+            );
+            let flags = if export {
+                vec!["--export-plan", "--max-steps", "1"]
+            } else {
+                vec!["--max-steps", "1"]
+            };
+            let out = invoke(root.path(), api, &url, &flags, data);
+            assert!(
+                out.status.success(),
+                "{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            assert_eq!(task.join().unwrap().len(), 1);
+            if export {
+                let plan: toml::Value =
+                    toml::from_str(std::str::from_utf8(&out.stdout).unwrap()).unwrap();
+                assert_eq!(plan["steps"][0]["if_present"].as_bool(), Some(true));
+                std::fs::write(root.path().join("optional.toml"), out.stdout).unwrap();
+                let mut child = command(root.path())
+                    .args(["data", "--recipe", "optional.toml"])
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .spawn()
+                    .unwrap();
+                child.stdin.take().unwrap().write_all(data).unwrap();
+                let replay = child.wait_with_output().unwrap();
+                assert!(replay.status.success());
+                assert_eq!(replay.stdout, expected);
+            } else {
+                assert_eq!(out.stdout, expected);
+            }
+        }
+    }
+}

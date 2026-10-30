@@ -32,9 +32,9 @@ This changes the selected value's type to string; it does not remove the field.
 
 Pointers follow the existing RFC 6901 rules: `~1` selects a slash in a key, `~0` a
 tilde, and array indexes must be in range and have no leading zeros. Keys are compared
-after JSON escape decoding, without Unicode normalization. A missing path, ambiguous
-duplicate referenced key, invalid JSON/Unicode string, or exceeded limit fails the whole
-operation. Invalid source data cannot be concealed by masking its parent or root.
+after JSON escape decoding, without Unicode normalization. By default, a missing path,
+ambiguous duplicate referenced key, invalid JSON/Unicode string, or exceeded limit fails
+the whole operation. Invalid source data cannot be concealed by masking its parent or root.
 Unrelated duplicate keys remain unchanged; there is no attempt to repair a record.
 
 JSONL keeps record order and uses compact records with LF endings, including after the
@@ -64,8 +64,55 @@ pointer = "/user/email"
 
 Each step consumes the preceding intermediate. Mask sibling fields in separate steps.
 If you mask `/user` first, a later `/user/email` no longer exists and the pipeline fails;
-there is no skip-missing mode. Masking the same path twice is valid. Plans contain only
+the default remains strict. Explicit `if_present = true` on that later redaction step
+retains the record when the path is absent. Masking the same path twice is valid. Plans contain only
 definitions, not input data or permissions, and `--show-plan` does not read stdin.
+
+## Mixed records: explicitly mask only when present / 显式处理可缺失字段
+
+Some records contain a sensitive field and others do not. Opt in explicitly:
+
+```sh
+zi data jsonl-redact --pointer /token --if-present -i mixed.jsonl
+zi data --show-plan jsonl-redact --pointer /token --if-present -o mask.toml
+zi data --recipe mask.toml -i mixed.jsonl
+```
+
+For `{"token":null}` followed by `{}`, this outputs
+`{"token":"[REDACTED]"}` followed by `{}`. Present null is a value to mask.
+Absent fields, noncontainer ancestors (including null or a very large number), and
+out-of-range canonical array indexes retain the valid record. JSON is still compacted
+and JSONL endings normalized. Malformed JSON/Unicode, ambiguous referenced keys,
+invalid/unsupported array indexes (such as `01`, `-`, or index overflow), and resource
+limits remain errors. A named member reference applied to an array is an invalid index,
+not a missing object field; it still fails. No type coercion or error suppression.
+
+Use a real boolean per step in a version-1 recipe or `transform_input` arguments:
+
+```toml
+version = 1
+[[steps]]
+operation = "jsonl-redact"
+pointer = "/token"
+if_present = true
+[[steps]]
+operation = "jsonl-redact"
+pointer = "/user/email"
+if_present = true
+```
+
+Omitting `if_present` or explicitly setting it to `false` keeps the strict rule.
+The property is valid only on the two redaction operations, even when false; null,
+strings and numeric values are rejected. `--if-present` modifies one CLI operation,
+not an entire `--step` pipeline; export/edit a recipe for independently controlled steps.
+
+A successful optional run may have **zero matches** (for example a misspelled path).
+It does not prove a value was hidden, detect secrets, or make other fields safe. Inspect
+the actual inputs/report/results. A structural profile counts visited object paths and
+keeps arrays opaque, so its missing count is not a general pointer-existence test inside
+arrays. Actual redaction resolves each pointer against each original record independently.
+No match summary is injected into the data stream. Every original record is validated,
+including records retained for an absent path, before the complete result is published.
 
 ## Before a model request / 先离线处理，再决定发送
 
