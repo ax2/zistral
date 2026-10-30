@@ -1,13 +1,30 @@
 # Changelog
 
-## Unreleased
+## 0.32.0 — candidate, not yet released
 
-- Inspect JSON/JSONL object paths, observed types and record presence/missing counts without sample values. Keep arrays opaque, preserve complete-result failures and bounded shared CLI/recipe/tool execution; report key names explicitly.
+- Inspect JSON/JSONL structure offline with `json-profile` / `jsonl-profile`:
+  report object paths, observed types and record presence/missing counts without
+  sample values. Arrays stay opaque until explicitly selected and expanded.
+  Reports expose key names and do not infer a schema or detect sensitive values.
 
-- Preview the actual first model request with `--preview`: shared protocol/context construction, resolved input/presets and explicit capabilities, credential headers omitted, no networking/tool execution, and bounded complete JSON/file output.
+- Mask explicit JSON/JSONL pointer values before sharing with `json-redact` /
+  `jsonl-redact`. Preserve unrelated lexical values, including exact number tokens,
+  and compose reviewed, reusable recipes. Strict missing-path errors remain the
+  default; opt into `--if-present` or per-step `if_present = true` for heterogeneous
+  records. Present null is masked; invalid/ambiguous data still fails completely.
 
-- Add explicit JSON/JSONL value redaction for offline pre-sharing preparation: replace one pointer value with a fixed marker while preserving unrelated lexical payloads; reuse and inspect ordered recipes.
-- Validate all original records and preserve complete-output/file-failure rules. Explicit `--if-present` / per-step boolean retains genuinely absent redaction paths in mixed logs; defaults remain strict and invalid/ambiguous data still fails. Model-side masking cannot undo original-input disclosure.
+- Inspect the actual first model request using `--preview`, with shared protocol
+  and context construction, resolved input/presets and explicit capabilities.
+  Omit authentication headers and execute no network requests or tools. Bound
+  serialized and terminal-escaped output before publishing; reject oversized
+  terminal displays before allocating their expanded buffer. A preview covers
+  only the initial request and is not a locked replay of later execution.
+
+All three fit one input-preparation workflow: inspect structure, mask chosen values,
+then review the request before explicitly sending it. Model-side masking cannot undo
+disclosure of the original input. Preserve complete-result/file-failure behavior and
+pipe compatibility; add installed-executable workflow checks without new runtime
+dependencies, model tools, permissions, sessions or memory.
 
 ## 0.31.0 — 2026-10-30
 

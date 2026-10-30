@@ -768,7 +768,11 @@ zi data jsonl-where --pointer /level --equals ERROR --show-plan -o errors.toml
 `jsonl-count-by --pointer /level` produces exact frequency records. All share offline
 recipes and the existing model tool. See the v0.30.0 release for the corresponding installable packages.
 
-## Next batch on main (unreleased)
+## v0.32.0 candidate on main (not yet released)
+
+The source package version is selected for release checks. Published installers and
+versioned install commands above still target v0.31.0. See the
+[candidate review](docs/releases/v0.32.0-candidate.md); a main push does not publish it.
 
 Explicit `json-redact` / `jsonl-redact` replace one RFC 6901 pointer value with
 `"[REDACTED]"`, preserving unrelated lexical JSON values. Compose explicit fields in
@@ -791,7 +795,7 @@ and array expansion choose a record set. The bounded report helps review paths b
 masking or sharing input. It exposes key names, is not a schema/sanitization guarantee,
 and adds no dependency or model tool name. See [structural profiles](docs/json-profile.md).
 Together with offline redaction and request preview, it completes a candidate input-
-preparation milestone to review and test together before selecting a release.
+preparation milestone being validated together for the selected candidate.
 
 The same unreleased redaction improvement now supports explicit `--if-present` for
 heterogeneous records: mask present values (including null), retain valid missing paths,

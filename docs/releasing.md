@@ -74,7 +74,7 @@ It prints `v0.16.2` for the matching package. A rejected event/ref writes no tag
 When GITHUB_OUTPUT is set by Actions, successful validation also appends `tag=...` there.
 The preview does not create a branch, build artifacts or publish anything.
 
-Packaging-source changes also run the read-only `Installer checks` workflow, before a
+Package version/dependency metadata and packaging-source changes also run the read-only `Installer checks` workflow, before a
 Release request. It builds a Windows installer/archive and exercises install twice into
 a directory containing both spaces and Chinese characters, then uninstall/PATH/config
 preservation. Its short-lived `installer-check-SHA` artifacts are CI candidates, not a
