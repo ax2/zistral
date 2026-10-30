@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Import exported task presets into a user library with `zi presets import FILE`;
+  preview additions/replacements with `--dry-run`, reject collisions by default,
+  and require `--replace` to update matching user definitions. Validate the combined
+  library and detect observed edits before publishing; preserve source definitions.
+- Report parser-provided line/column locations for invalid recipe/preset TOML without
+  echoing source excerpts or values; preserve existing BOM and offline behavior.
+
 - Discover four embedded offline recipes with `zi data --list-recipes`, then run
   them directly with `--recipe builtin:NAME`. Inspect/export the same validated
   version-1 TOML with `--show-plan` and edit it for your own fields or line limits.

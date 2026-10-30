@@ -278,6 +278,20 @@ shell `>` 的创建/截断行为仍由 shell 决定。
 
 ## 场景命令与自定义提示词
 
+开发中（尚未发布）：导出的场景可直接合并到个人场景库，不再手工拼接 TOML：
+
+```sh
+zi presets import team-fr.toml --dry-run
+zi presets import team-fr.toml
+zi presets import team-fr.toml --replace --dry-run
+```
+
+先导出或准备 `team-fr.toml`。预览只显示要新增/替换的名称，不打印模板和变量值，也不写文件。
+默认同名即整体拒绝；显式 `--replace` 只替换来源中的用户定义，其他场景保留，不能覆盖内置场景。
+完整校验两份文件及合并后的上限，成功后统一保存；目标 TOML 会规范化，注释和排版不保留。
+配方/场景的 TOML 错误会提供解析器报告的行列，不回显原文或值。[导入与排错说明](docs/preset-import.md)。
+
+
 ```sh
 zi presets                                # 离线列出内置和自定义场景
 cat article.txt | zi -s summarize

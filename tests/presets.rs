@@ -1042,3 +1042,514 @@ fn interactive_presets_and_json_task_work_in_a_real_terminal() {
     );
     assert!(!root.join("presets.toml").exists());
 }
+
+#[test]
+fn exported_presets_preview_import_and_merge_without_loading_model_settings() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join("broken-config.toml"), "not TOML").unwrap();
+    let out = run(
+        root,
+        &[
+            "--config",
+            "broken-config.toml",
+            "presets",
+            "export",
+            "translate",
+            "--name",
+            "team-fr",
+            "--var",
+            "language=French",
+            "-o",
+            "source.toml",
+        ],
+        b"PRIVATE_INPUT",
+    );
+    assert!(out.status.success() && out.stdout.is_empty() && out.stderr.is_empty());
+    let source = std::fs::read(root.join("source.toml")).unwrap();
+    let args = [
+        "--config",
+        "broken-config.toml",
+        "--presets",
+        "new directory/team.toml",
+        "presets",
+        "import",
+        "source.toml",
+    ];
+    let mut preview = args.to_vec();
+    preview.push("--dry-run");
+    let out = run(root, &preview, b"PRIVATE_INPUT");
+    assert!(
+        out.status.success() && out.stderr.is_empty(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(text.contains("Would import 1") && text.contains("add team-fr"));
+    assert!(!text.contains("French") && !text.contains("PRIVATE_INPUT"));
+    assert!(!root.join("new directory").exists() && !root.join("config").exists());
+    let out = run(root, &args, b"PRIVATE_INPUT");
+    assert!(
+        out.status.success() && out.stderr.is_empty(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(String::from_utf8_lossy(&out.stdout).contains("Imported 1"));
+    let rendered = run(
+        root,
+        &[
+            "--config",
+            "broken-config.toml",
+            "--presets",
+            "new directory/team.toml",
+            "presets",
+            "render",
+            "team-fr",
+        ],
+        b"",
+    );
+    assert!(rendered.status.success() && rendered.stderr.is_empty());
+    assert!(
+        String::from_utf8_lossy(&rendered.stdout)
+            .contains("Translate the supplied input into French")
+    );
+    let next = "\u{feff}version=1\n[presets.other]\ndescription='Other task'\nprompt='Keep {{literal}} as data'\n[presets.other.defaults]\nliteral='{{not_expanded}}'\n";
+    std::fs::write(root.join("other.toml"), next).unwrap();
+    let out = run(
+        root,
+        &[
+            "--presets",
+            "new directory/team.toml",
+            "presets",
+            "import",
+            "other.toml",
+        ],
+        b"",
+    );
+    assert!(out.status.success() && out.stderr.is_empty());
+    let text = std::fs::read_to_string(root.join("new directory/team.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&text).unwrap();
+    assert_eq!(parsed["presets"].as_table().unwrap().len(), 2);
+    assert_eq!(
+        parsed["presets"]["team-fr"]["defaults"]["language"].as_str(),
+        Some("French")
+    );
+    let out = run(
+        root,
+        &[
+            "--presets",
+            "new directory/team.toml",
+            "presets",
+            "render",
+            "other",
+        ],
+        b"",
+    );
+    assert!(out.status.success());
+    assert_eq!(out.stdout, b"Keep {{not_expanded}} as data\n");
+    assert_eq!(std::fs::read(root.join("source.toml")).unwrap(), source);
+    assert_eq!(
+        std::fs::read_to_string(root.join("other.toml")).unwrap(),
+        next
+    );
+    assert!(!root.join("config").exists());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            std::fs::metadata(root.join("new directory/team.toml"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+    }
+}
+
+#[test]
+fn preset_import_collision_is_all_or_nothing_and_replace_is_explicit() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let original = "# Keep until an actual successful import\nversion=1\n[presets.z_keep]\ndescription='Original'\nprompt='Original task'\n[presets.unrelated]\ndescription='Unrelated'\nprompt='Untouched'\n";
+    std::fs::write(root.join("team.toml"), original).unwrap();
+    let source = "version=1\n[presets.a_new]\ndescription='New'\nprompt='New task'\n[presets.z_keep]\ndescription='Replacement'\nprompt='Replaced task'\n";
+    std::fs::write(root.join("source.toml"), source).unwrap();
+    let args = ["--presets", "team.toml", "presets", "import", "source.toml"];
+    for dry in [false, true] {
+        let mut args = args.to_vec();
+        if dry {
+            args.push("--dry-run");
+        }
+        let out = run(root, &args, b"");
+        assert!(!out.status.success() && out.stdout.is_empty());
+        assert!(String::from_utf8_lossy(&out.stderr).contains("--replace"));
+        assert_eq!(
+            std::fs::read_to_string(root.join("team.toml")).unwrap(),
+            original
+        );
+    }
+    let mut args = args.to_vec();
+    args.extend(["--replace", "--dry-run"]);
+    let out = run(root, &args, b"");
+    assert!(out.status.success() && out.stderr.is_empty());
+    let preview = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        preview.contains("add a_new")
+            && preview.contains("replace z_keep")
+            && !preview.contains("Replaced task")
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.join("team.toml")).unwrap(),
+        original
+    );
+    args.pop();
+    let out = run(root, &args, b"");
+    assert!(out.status.success() && out.stderr.is_empty());
+    let target = std::fs::read_to_string(root.join("team.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&target).unwrap();
+    assert_eq!(parsed["presets"].as_table().unwrap().len(), 3);
+    assert_eq!(
+        parsed["presets"]["z_keep"]["prompt"].as_str(),
+        Some("Replaced task")
+    );
+    assert_eq!(
+        parsed["presets"]["unrelated"]["prompt"].as_str(),
+        Some("Untouched")
+    );
+    assert!(!target.contains("# Keep"));
+    assert_eq!(
+        std::fs::read_to_string(root.join("source.toml")).unwrap(),
+        source
+    );
+    let out = run(
+        root,
+        &[
+            "--presets",
+            "team.toml",
+            "presets",
+            "import",
+            "team.toml",
+            "--replace",
+        ],
+        b"",
+    );
+    assert!(!out.status.success() && out.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("different files"));
+    assert_eq!(
+        std::fs::read_to_string(root.join("team.toml")).unwrap(),
+        target
+    );
+}
+
+#[test]
+fn invalid_import_definitions_and_combined_limits_preserve_both_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let valid = "version=1\n[presets.keep]\ndescription='Keep'\nprompt='Original task'\n";
+    std::fs::write(root.join("team.toml"), valid).unwrap();
+    for invalid in [
+        "version=2\n[presets.x]\ndescription='Task'\nprompt='PRIVATE_PROMPT'\n".to_owned(),
+        "version=1\n[presets]\n".to_owned(),
+        "version=1\n[presets.summarize]\ndescription='Task'\nprompt='PRIVATE_PROMPT'\n".to_owned(),
+        "version=1\n[presets.x]\ndescription='Task'\nprompt='PRIVATE_PROMPT'\nPRIVATE_FIELD='PRIVATE_VALUE'\n".to_owned(),
+        "version=1\n[presets.x]\ndescription='Task'\nprompt='PRIVATE_PROMPT'\n[presets.x.defaults]\nPRIVATE_DEFAULT='PRIVATE_VALUE'\n".to_owned(),
+        "version=1\n[presets.x]\ndescription='Task'\nprompt='{{input}} PRIVATE_PROMPT'\n".to_owned(),
+        "version=1\n[presets.'PRIVATE_BAD:NAME']\ndescription='Task'\nprompt='PRIVATE_PROMPT'\n".to_owned(),
+        format!("version=1\n[presets.x]\ndescription='Task'\nprompt='{}'\n", "x".repeat(16*1024+1)),
+        "#".repeat(256*1024+1),
+    ] {
+        std::fs::write(root.join("source.toml"), &invalid).unwrap();
+        let out = run(root, &["--presets", "team.toml", "presets", "import", "source.toml", "--replace"], b"");
+        assert!(!out.status.success() && out.stdout.is_empty());
+        assert!(!String::from_utf8_lossy(&out.stderr).contains("PRIVATE"), "{}", String::from_utf8_lossy(&out.stderr));
+        assert_eq!(std::fs::read_to_string(root.join("team.toml")).unwrap(), valid);
+        assert_eq!(std::fs::read_to_string(root.join("source.toml")).unwrap(), invalid);
+    }
+    std::fs::write(root.join("source.toml"), b"\xff").unwrap();
+    let out = run(
+        root,
+        &["--presets", "team.toml", "presets", "import", "source.toml"],
+        b"",
+    );
+    assert!(!out.status.success() && String::from_utf8_lossy(&out.stderr).contains("UTF-8"));
+    let library = |prefix: &str, count: usize, size: usize| {
+        let mut text = "version=1\n".to_owned();
+        for n in 0..count {
+            text.push_str(&format!(
+                "[presets.{prefix}{n}]\ndescription='Task'\nprompt='{}'\n",
+                "x".repeat(size)
+            ));
+        }
+        text
+    };
+    for (existing, incoming, message) in [
+        (
+            library("old", 63, 1),
+            library("new", 2, 1),
+            "64 custom presets",
+        ),
+        (
+            library("old", 20, 7000),
+            library("new", 20, 7000),
+            "256 KiB",
+        ),
+    ] {
+        std::fs::write(root.join("team.toml"), &existing).unwrap();
+        std::fs::write(root.join("source.toml"), &incoming).unwrap();
+        let out = run(
+            root,
+            &["--presets", "team.toml", "presets", "import", "source.toml"],
+            b"",
+        );
+        assert!(!out.status.success() && out.stdout.is_empty());
+        assert!(String::from_utf8_lossy(&out.stderr).contains(message));
+        assert_eq!(
+            std::fs::read_to_string(root.join("team.toml")).unwrap(),
+            existing
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("source.toml")).unwrap(),
+            incoming
+        );
+    }
+    std::fs::write(root.join("team.toml"), "PRIVATE_BROKEN_LIBRARY =").unwrap();
+    std::fs::write(root.join("source.toml"), valid).unwrap();
+    let out = run(
+        root,
+        &[
+            "--presets",
+            "team.toml",
+            "presets",
+            "import",
+            "source.toml",
+            "--replace",
+        ],
+        b"",
+    );
+    assert!(!out.status.success() && out.stdout.is_empty());
+    let error = String::from_utf8_lossy(&out.stderr);
+    assert!(error.contains("line 1, column") && !error.contains("PRIVATE"));
+    assert_eq!(
+        std::fs::read_to_string(root.join("team.toml")).unwrap(),
+        "PRIVATE_BROKEN_LIBRARY ="
+    );
+}
+
+#[test]
+fn import_never_waits_for_stdin_and_rejects_task_and_export_modes_before_io() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(
+        root.join("source.toml"),
+        "version=1\n[presets.mine]\ndescription='Task'\nprompt='My task'\n",
+    )
+    .unwrap();
+    let mut cases = vec![(vec!["--dry-run"], true)];
+    for options in [
+        vec!["-i", "-"],
+        vec!["--json"],
+        vec!["--stream"],
+        vec!["--var", "x=PRIVATE_VALUE"],
+        vec!["--count"],
+        vec!["--agent"],
+        vec!["--cwd", "missing"],
+        vec!["-o", "out.toml"],
+        vec!["-o", "out.toml", "--force"],
+    ] {
+        cases.push((options, false));
+    }
+    for (options, success) in cases {
+        let mut args = vec![
+            "--presets",
+            "not created/team.toml",
+            "presets",
+            "import",
+            "source.toml",
+        ];
+        args.extend(options);
+        let mut child = command(root)
+            .args(&args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let stdin = child.stdin.take().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while child.try_wait().unwrap().is_none() {
+            if Instant::now() > deadline {
+                child.kill().ok();
+                let _ = child.wait();
+                panic!("import waited for stdin EOF: {args:?}");
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        drop(stdin);
+        let out = child.wait_with_output().unwrap();
+        assert_eq!(
+            out.status.success(),
+            success,
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        if success {
+            assert!(out.stderr.is_empty());
+        } else {
+            assert!(out.stdout.is_empty());
+        }
+        assert!(!root.join("not created").exists() && !root.join("out.toml").exists());
+    }
+    let out = run(root, &["presets", "import", "-"], b"PRIVATE_STDIN");
+    assert!(!out.status.success() && out.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("explicit file"));
+    std::fs::create_dir(root.join("directory")).unwrap();
+    let out = run(
+        root,
+        &[
+            "--presets",
+            "new/team.toml",
+            "presets",
+            "import",
+            "directory",
+        ],
+        b"",
+    );
+    assert!(!out.status.success() && out.stdout.is_empty());
+    assert!(!root.join("new").exists());
+    let out = run(
+        root,
+        &[
+            "--presets",
+            "directory",
+            "presets",
+            "import",
+            "source.toml",
+            "--dry-run",
+        ],
+        b"",
+    );
+    assert!(!out.status.success() && out.stdout.is_empty());
+}
+
+#[test]
+fn imported_json_preset_is_used_only_by_explicit_model_tasks_in_all_protocols() {
+    for api in ["chat", "responses", "anthropic"] {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let definition = "version=1\n[presets.ticket]\ndescription='Ticket'\nprompt='Extract facts for {{audience}}'\njson=true\n[presets.ticket.defaults]\naudience='engineers'\n";
+        std::fs::write(root.join("source.toml"), definition).unwrap();
+        let imported = run(
+            root,
+            &["presets", "import", "source.toml"],
+            b"IGNORED_PIPE_DATA",
+        );
+        assert!(imported.status.success() && imported.stderr.is_empty());
+        assert!(!String::from_utf8_lossy(&imported.stdout).contains("engineers"));
+        let (url, server) = model(api, r#"{"ok":true}"#);
+        let out = run(
+            root,
+            &[
+                "--api",
+                api,
+                "--base-url",
+                &url,
+                "--model",
+                "fixture",
+                "-s",
+                "ticket",
+                "requested fields",
+            ],
+            b"PRIVATE_INPUT",
+        );
+        assert!(
+            out.status.success() && out.stderr.is_empty(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(out.stdout, b"{\"ok\":true}\n");
+        let request = server.join().unwrap();
+        assert_eq!(request["tools"].as_array().unwrap().len(), 3);
+        let text = request.to_string();
+        assert!(text.contains("Extract facts for engineers") && text.contains("PRIVATE_INPUT"));
+        assert!(!text.contains("source.toml") && !text.contains("IGNORED_PIPE_DATA"));
+        assert_eq!(
+            std::fs::read_to_string(root.join("source.toml")).unwrap(),
+            definition
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn preset_import_rejects_link_destinations_and_preserves_existing_permissions() {
+    use std::os::unix::{
+        ffi::OsStrExt,
+        fs::{PermissionsExt, symlink},
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let definition = "version=1\n[presets.new]\ndescription='Task'\nprompt='My task'\n";
+    let existing = "version=1\n[presets.keep]\ndescription='Task'\nprompt='Keep task'\n";
+    std::fs::write(root.join("source.toml"), definition).unwrap();
+    std::fs::write(root.join("real.toml"), existing).unwrap();
+    symlink("real.toml", root.join("link.toml")).unwrap();
+    for extra in [vec![], vec!["--dry-run"]] {
+        let mut args = vec!["--presets", "link.toml", "presets", "import", "source.toml"];
+        args.extend(extra);
+        let out = run(root, &args, b"");
+        assert!(!out.status.success() && out.stdout.is_empty());
+        assert_eq!(
+            std::fs::read_to_string(root.join("real.toml")).unwrap(),
+            existing
+        );
+    }
+    std::fs::set_permissions(
+        root.join("real.toml"),
+        std::fs::Permissions::from_mode(0o640),
+    )
+    .unwrap();
+    let out = run(
+        root,
+        &["--presets", "real.toml", "presets", "import", "source.toml"],
+        b"",
+    );
+    assert!(out.status.success() && out.stderr.is_empty());
+    assert_eq!(
+        std::fs::metadata(root.join("real.toml"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o640
+    );
+    let fifo = root.join("source.pipe");
+    let name = std::ffi::CString::new(fifo.as_os_str().as_bytes()).unwrap();
+    assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
+    let mut child = command(root)
+        .args([
+            "--presets",
+            "new/team.toml",
+            "presets",
+            "import",
+            "source.pipe",
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while child.try_wait().unwrap().is_none() {
+        if Instant::now() > deadline {
+            child.kill().ok();
+            let _ = child.wait();
+            panic!("nonregular import source blocked while opening FIFO");
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let out = child.wait_with_output().unwrap();
+    assert!(!out.status.success() && out.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("regular file"));
+    assert!(!root.join("new").exists());
+}

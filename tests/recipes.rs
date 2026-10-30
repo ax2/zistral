@@ -1604,3 +1604,34 @@ fn explicit_recipe_preserves_non_utf8_linux_paths() {
     assert!(out.status.success() && out.stderr.is_empty());
     assert!(String::from_utf8_lossy(&out.stdout).contains("json-minify"));
 }
+
+#[test]
+fn recipe_parse_locations_never_echo_definition_values_or_publish_output() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join("keep.toml"), b"original").unwrap();
+    for text in [
+        "version=1\n[[steps]]\noperation='PRIVATE_UNKNOWN_OPERATION'\n",
+        "\u{feff}version=1\r\n[[steps]]\r\noperation='trim'\r\nPRIVATE_FIELD='PRIVATE_VALUE'\r\n",
+        "version=1\n[[steps]]\noperation=\n",
+    ] {
+        std::fs::write(root.join("bad.toml"), text).unwrap();
+        for preview in [false, true] {
+            let mut args = vec!["data", "--recipe", "bad.toml", "-o", "keep.toml", "--force"];
+            if preview {
+                args.push("--show-plan");
+            } else {
+                args.extend(["-i", "missing-data"]);
+            }
+            let out = invoke(root, &args, b"PRIVATE_INPUT");
+            assert!(!out.status.success() && out.stdout.is_empty());
+            let error = String::from_utf8_lossy(&out.stderr);
+            assert!(
+                error.contains("invalid recipe TOML at line") && error.contains("column"),
+                "{error}"
+            );
+            assert!(!error.contains("PRIVATE") && !error.contains("cannot open"));
+            assert_eq!(std::fs::read(root.join("keep.toml")).unwrap(), b"original");
+        }
+    }
+}

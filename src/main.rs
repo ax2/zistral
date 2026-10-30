@@ -3,6 +3,7 @@ mod config;
 mod csv_input;
 mod csv_output;
 mod data;
+mod definition;
 mod doctor;
 mod imports;
 mod last_result;
@@ -179,7 +180,7 @@ enum Commands {
         #[arg(long, conflicts_with_all = ["operation", "steps", "recipe", "show_plan", "reverse", "pointer", "fields", "contains", "equals", "lines"])]
         list_recipes: bool,
     },
-    /// List, inspect, render, export or initialize reusable task presets (offline)
+    /// List, inspect, render, export, import or initialize reusable task presets (offline)
     Presets {
         #[command(subcommand)]
         action: Option<PresetAction>,
@@ -222,6 +223,17 @@ enum PresetAction {
         /// Required custom name in the exported definition; cannot replace a builtin
         #[arg(long = "name")]
         new_name: String,
+    },
+    /// Import a version-1 TOML library into the selected user preset file, offline
+    Import {
+        /// Explicit source file (not stdin); existing destination presets are merged
+        source: PathBuf,
+        /// Allow replacement of matching user names; builtins cannot be replaced
+        #[arg(long)]
+        replace: bool,
+        /// Validate and list additions/replacements without creating files or directories
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Create an example user preset file; never overwrite an existing file
     Init,
@@ -400,6 +412,11 @@ fn run(mut cli: Cli) -> Result<()> {
                 }
                 output
             }
+            Some(PresetAction::Import {
+                source,
+                replace,
+                dry_run,
+            }) => presets::import(&cli, source, *replace, *dry_run)?,
             Some(PresetAction::Init) => presets::init(&cli)?,
         };
         return write_output(&output);

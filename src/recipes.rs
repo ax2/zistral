@@ -78,8 +78,9 @@ impl Plan {
                 bail!("recipe exceeds 64 KiB");
             }
             let text = std::str::from_utf8(&bytes).context("recipe must be UTF-8")?;
-            let file: Recipe = toml::from_str(text.strip_prefix('\u{feff}').unwrap_or(text))
-                .map_err(|_| anyhow::anyhow!("invalid recipe: expected version and native operation steps; see zi data --help"))?;
+            let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+            let file: Recipe = toml::from_str(text)
+                .map_err(|error| crate::definition::toml_error(&error, text, "recipe"))?;
             if file.version != 1 {
                 bail!("unsupported recipe version; expected version = 1");
             }

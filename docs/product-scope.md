@@ -90,6 +90,13 @@ original input only, 16 MiB intermediate text and 64 KiB final JSON envelope. It
 need for a model to reconstruct a compound deterministic transformation. It does not load
 recipe files, execute expressions or carry tool output into another invocation implicitly.
 
+The unreleased batch also supports explicit preset-library import with a no-write
+preview, collision checks and bounded merge/publication. It installs declarative task
+instructions, never model settings, executable code, project permissions or past input.
+Provide safe line/column diagnostics for editing definitions; do not print raw parser
+source excerpts or values. Preset import, preview and collision handling are one customization improvement,
+not separate release items merely to reach a batch count.
+
 ## Delivery rule
 
 Every released version needs appropriate tests, Windows/Linux/macOS checks and installable

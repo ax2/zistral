@@ -361,6 +361,20 @@ recipes, not dry-run results or a guarantee that future data will pass each oper
 
 ## Reusable task presets
 
+Development (unreleased): import an exported version-1 preset into your library:
+
+```sh
+zi presets import team-fr.toml --dry-run
+zi presets import team-fr.toml
+zi presets import team-fr.toml --replace --dry-run
+```
+
+Names collide only with explicit `--replace`; unrelated custom presets stay, builtins
+cannot be replaced. Preview lists names without printing prompts/defaults or writing
+files. Both libraries and their merged limits are checked before publication. A successful
+import normalizes TOML and drops comments/formatting. [Import, limits and safe diagnostics](docs/preset-import.md).
+
+
 ```sh
 zi presets                              # Offline list of builtin and user presets
 cat article.txt | zi -s summarize

@@ -1,9 +1,9 @@
-use crate::{Cli, config, ui};
+use crate::{Cli, config, definition, output, ui};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 const MAX_FILE: u64 = 256 * 1024;
 const MAX_PROMPT: usize = 16 * 1024;
@@ -124,7 +124,7 @@ impl Preset {
         let names = self.variables()?;
         for (k, v) in &self.defaults {
             if !names.contains(k.as_str()) {
-                bail!("default variable is not used in preset: {k}");
+                bail!("default variable is not used in preset; check variable names");
             }
             validate_value(v)?;
         }
@@ -190,16 +190,18 @@ pub fn path(cli: &Cli) -> Result<PathBuf> {
         .join("presets.toml"))
 }
 
-fn load(cli: &Cli) -> Result<BTreeMap<String, Preset>> {
-    let mut all = builtins();
-    let path = path(cli)?;
-    let file = match std::fs::File::open(&path) {
-        Ok(file) => file,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound && cli.presets.is_none() => {
-            return Ok(all);
+fn read_file(path: &Path, allow_missing: bool) -> Result<Option<String>> {
+    let metadata = match std::fs::metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound && allow_missing => {
+            return Ok(None);
         }
         Err(error) => return Err(error).context("cannot open presets file"),
     };
+    if !metadata.is_file() {
+        bail!("presets path must be a regular file");
+    }
+    let file = std::fs::File::open(path).context("cannot open presets file")?;
     if !file.metadata()?.is_file() {
         bail!("presets path must be a regular file");
     }
@@ -208,25 +210,37 @@ fn load(cli: &Cli) -> Result<BTreeMap<String, Preset>> {
     if bytes.len() as u64 > MAX_FILE {
         bail!("presets file exceeds 256 KiB");
     }
-    let text = std::str::from_utf8(&bytes).context("presets file must be UTF-8")?;
-    let parsed: File = toml::from_str(text).map_err(|_| {
-        anyhow::anyhow!("invalid presets TOML; check version, names and supported fields")
-    })?;
+    String::from_utf8(bytes)
+        .context("presets file must be UTF-8")
+        .map(Some)
+}
+
+fn parse_file(text: &str) -> Result<BTreeMap<String, Preset>> {
+    let parsed: File =
+        toml::from_str(text).map_err(|error| definition::toml_error(&error, text, "presets"))?;
     if parsed.version != 1 {
         bail!("unsupported presets format version; expected 1");
     }
     if parsed.presets.len() > 64 {
         bail!("at most 64 custom presets are supported");
     }
-    for (name, preset) in parsed.presets {
-        config::validate_name(&name).context("invalid custom preset name")?;
-        if all.contains_key(&name) {
+    let builtin = builtins();
+    for (name, preset) in &parsed.presets {
+        config::validate_name(name).context("invalid custom preset name")?;
+        if builtin.contains_key(name) {
             bail!("custom preset cannot replace builtin {name}; choose another name");
         }
         preset
             .validate()
             .with_context(|| format!("invalid preset {name}"))?;
-        all.insert(name, preset);
+    }
+    Ok(parsed.presets)
+}
+
+fn load(cli: &Cli) -> Result<BTreeMap<String, Preset>> {
+    let mut all = builtins();
+    if let Some(text) = read_file(&path(cli)?, cli.presets.is_none())? {
+        all.extend(parse_file(&text)?);
     }
     Ok(all)
 }
@@ -306,6 +320,89 @@ pub fn export(cli: &Cli, name: &str, new_name: &str) -> Result<String> {
     }
     Ok(output)
 }
+/// Import only explicit declarative definitions; never render or execute them.
+pub fn import(cli: &Cli, source: &Path, replace: bool, dry_run: bool) -> Result<String> {
+    if !cli.vars.is_empty() {
+        bail!("presets import does not accept --var; edit/export defaults before importing");
+    }
+    if source.as_os_str() == "-" {
+        bail!("presets import requires an explicit file; stdin is not read");
+    }
+    let incoming = parse_file(&read_file(source, false)?.context("missing import source")?)
+        .context("invalid import source")?;
+    if incoming.is_empty() {
+        bail!("import source must contain at least one custom preset");
+    }
+    let target = path(cli)?;
+    if let (Ok(source), Ok(target)) = (source.canonicalize(), target.canonicalize()) {
+        if source == target {
+            bail!("import source and destination must be different files");
+        }
+    }
+    match std::fs::symlink_metadata(&target) {
+        Ok(metadata) if !metadata.is_file() || metadata.file_type().is_symlink() => {
+            bail!("presets destination must be a regular file, not a link or directory")
+        }
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+            return Err(error).context("cannot inspect presets destination");
+        }
+        _ => (),
+    }
+    let original = read_file(&target, true)?;
+    let mut merged = original
+        .as_deref()
+        .map(parse_file)
+        .transpose()?
+        .unwrap_or_default();
+    let mut actions = Vec::new();
+    for (name, preset) in incoming {
+        let exists = merged.contains_key(&name);
+        if exists && !replace {
+            bail!("preset {name} already exists; use --replace to update matching user presets");
+        }
+        actions.push(format!("{} {name}", if exists { "replace" } else { "add" }));
+        merged.insert(name, preset);
+    }
+    if merged.len() > 64 {
+        bail!("merged library exceeds 64 custom presets; nothing imported");
+    }
+    let text = toml::to_string_pretty(&File {
+        version: 1,
+        presets: merged,
+    })
+    .context("cannot render merged presets")?;
+    if text.len() as u64 > MAX_FILE {
+        bail!("merged presets file exceeds 256 KiB; nothing imported");
+    }
+    let destination = ui::clean(&target.display().to_string());
+    let summary = format!(
+        "{} {} preset(s) into {destination}\n{}",
+        if dry_run { "Would import" } else { "Imported" },
+        actions.len(),
+        actions.join("\n")
+    );
+    if dry_run {
+        return Ok(format!(
+            "{summary}\nDestination TOML will be normalized; comments and source formatting are not retained."
+        ));
+    }
+    publish_import(&target, original.as_deref(), &text)?;
+    Ok(summary)
+}
+
+fn publish_import(target: &Path, original: Option<&str>, text: &str) -> Result<()> {
+    if let Some(parent) = target.parent().filter(|p| !p.as_os_str().is_empty()) {
+        std::fs::create_dir_all(parent).context("cannot create presets directory")?;
+    }
+    // Observe before rereading: reject both stale merge inputs and later observed edits.
+    let pending = output::Prepared::new(target, true)?;
+    if read_file(target, true)?.as_deref() != original {
+        bail!("presets destination changed while importing; nothing replaced");
+    }
+    pending.save(text, false)?;
+    Ok(())
+}
+
 pub fn init(cli: &Cli) -> Result<String> {
     if !cli.vars.is_empty() {
         bail!("presets init does not accept --var");
@@ -456,5 +553,28 @@ mod tests {
             p.validate().unwrap();
             p.render(&[]).unwrap();
         }
+    }
+}
+
+#[cfg(test)]
+mod import_publication_tests {
+    use super::*;
+
+    #[test]
+    fn stale_destination_snapshot_never_replaces_a_newer_library_or_leaves_temp_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("team.toml");
+        let original = "version=1\n[presets]\n";
+        let newer = "# Another editor saved this file\nversion=1\n[presets]\n";
+        std::fs::write(&target, newer).unwrap();
+        let error = publish_import(&target, Some(original), original).unwrap_err();
+        assert!(error.to_string().contains("changed while importing"));
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), newer);
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+        let absent = dir.path().join("created-by-other-editor.toml");
+        std::fs::write(&absent, newer).unwrap();
+        assert!(publish_import(&absent, None, original).is_err());
+        assert_eq!(std::fs::read_to_string(&absent).unwrap(), newer);
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 2);
     }
 }
