@@ -223,8 +223,8 @@ pub(crate) fn string_equals(input: &str, pointer: &str, expected: &str) -> Resul
     Ok(text == expected)
 }
 
-/// Strict decoded-string key; find validates the entire record and rejects ambiguous references.
-pub(crate) fn string_key(input: &str, pointer: &str) -> Result<String> {
+/// Shared key validation includes string scalar validity in unselected fields.
+fn key_value<'a>(input: &'a str, pointer: &str) -> Result<&'a RawValue> {
     let raw = find(input, pointer)?;
     // IgnoredAny checks syntax but skips surrogate pairing in unselected strings.
     // Inspect string tokens only: never parse the record's numeric payloads as floats.
@@ -248,8 +248,19 @@ pub(crate) fn string_key(input: &str, pointer: &str) -> Result<String> {
             start = Some(index);
         }
     }
+    Ok(raw)
+}
+
+/// Strict decoded-string key; never coerce other JSON types.
+pub(crate) fn string_key(input: &str, pointer: &str) -> Result<String> {
+    let raw = key_value(input, pointer)?;
     serde_json::from_str::<String>(raw.get())
         .map_err(|_| anyhow::anyhow!("selected key must be a JSON string; no type coercion"))
+}
+
+/// Borrow exact integer digits directly from the validated record, without allocating a key.
+pub(crate) fn integer_key<'a>(input: &'a str, pointer: &str) -> Result<crate::integer::Key<'a>> {
+    crate::integer::Key::parse(key_value(input, pointer)?.get())
 }
 
 /// Pipeline selection always returns a JSON value, including quoted string tokens.

@@ -53,6 +53,8 @@ pub enum Operation {
     JsonlDedupe,
     /// Stably sort whole JSONL records by a decoded string field; reverse changes key order
     JsonlSort,
+    /// Stably sort whole JSONL records by an exact integer literal, without float conversion
+    JsonlSortInt,
     /// Count JSONL records per decoded string field, in first-seen key order
     JsonlCountBy,
     /// Convert header-based comma CSV to JSONL objects; keep every cell as a string
@@ -158,8 +160,13 @@ impl Step {
             (Some(_), _) => bail!("lines is only valid for lines-head or lines-tail"),
             (None, _) => (),
         }
-        if self.reverse && !matches!(self.operation, Operation::Sort | Operation::JsonlSort) {
-            bail!("--reverse is only valid for sort or jsonl-sort");
+        if self.reverse
+            && !matches!(
+                self.operation,
+                Operation::Sort | Operation::JsonlSort | Operation::JsonlSortInt
+            )
+        {
+            bail!("--reverse is only valid for sort, jsonl-sort or jsonl-sort-int");
         }
         match (&self.contains, self.operation) {
             (Some(needle), Operation::LinesInclude | Operation::LinesExclude) => {
@@ -191,6 +198,7 @@ impl Step {
                 | Operation::JsonlWhere
                 | Operation::JsonlDedupe
                 | Operation::JsonlSort
+                | Operation::JsonlSortInt
                 | Operation::JsonlCountBy,
             ) => crate::selection::validate_pointer(pointer),
             (
@@ -200,28 +208,17 @@ impl Step {
                 | Operation::JsonlWhere
                 | Operation::JsonlDedupe
                 | Operation::JsonlSort
+                | Operation::JsonlSortInt
                 | Operation::JsonlCountBy,
             ) => {
                 bail!(
                     "{} requires an explicit pointer; use an empty pointer to select the root",
-                    if self.operation == Operation::JsonSelect {
-                        "json-select"
-                    } else if self.operation == Operation::JsonlSelect {
-                        "jsonl-select"
-                    } else if self.operation == Operation::JsonlWhere {
-                        "jsonl-where"
-                    } else if self.operation == Operation::JsonlDedupe {
-                        "jsonl-dedupe"
-                    } else if self.operation == Operation::JsonlSort {
-                        "jsonl-sort"
-                    } else {
-                        "jsonl-count-by"
-                    }
+                    self.operation
                 )
             }
             (Some(_), _) => {
                 bail!(
-                    "pointer is only valid for JSON selection, jsonl-where, jsonl-dedupe, jsonl-sort or jsonl-count-by"
+                    "pointer is only valid for JSON selection, jsonl-where, jsonl-dedupe, jsonl-sort, jsonl-sort-int or jsonl-count-by"
                 )
             }
             (None, _) => Ok(()),
@@ -405,6 +402,47 @@ fn jsonl_where(input: &str, pointer: &str, equals: &str, out: &mut Buffer) -> Re
     Ok(())
 }
 
+fn sort_records<K: Ord>(
+    mut records: Vec<(K, &str)>,
+    reverse: bool,
+    out: &mut Buffer,
+) -> Result<()> {
+    // Reverse comparisons, not the result, so equal keys retain input order both ways.
+    records.sort_by(|a, b| {
+        if reverse {
+            b.0.cmp(&a.0)
+        } else {
+            a.0.cmp(&b.0)
+        }
+    });
+    for (_, line) in records {
+        format_json(line, false, out)?;
+        out.write_all(b"\n")?;
+    }
+    Ok(())
+}
+
+fn jsonl_sort_int(input: &str, step: &Step, out: &mut Buffer) -> Result<()> {
+    let pointer = step.pointer.as_deref().expect("validated pointer");
+    let records = input
+        .lines()
+        .enumerate()
+        .map(|(index, line)| -> Result<_> {
+            if index == MAX_ITEMS {
+                bail!("JSONL key operations accept at most 100000 records");
+            }
+            let key = crate::selection::integer_key(line, pointer).with_context(|| {
+                format!(
+                    "cannot read JSONL key at record {} (jsonl-sort-int)",
+                    index + 1
+                )
+            })?;
+            Ok((key, line))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    sort_records(records, step.reverse, out)
+}
+
 /// Keys borrow no JSON values other than decoded strings; record payloads remain lexical text.
 fn jsonl_by_key(input: &str, step: &Step, out: &mut Buffer) -> Result<()> {
     let pointer = step.pointer.as_deref().expect("validated pointer");
@@ -440,19 +478,7 @@ fn jsonl_by_key(input: &str, step: &Step, out: &mut Buffer) -> Result<()> {
             }
         }
         Operation::JsonlSort => {
-            let mut records = records.collect::<Result<Vec<_>>>()?;
-            // Reverse the comparison, not the result, so ties retain input order in both directions.
-            records.sort_by(|a, b| {
-                if step.reverse {
-                    b.0.cmp(&a.0)
-                } else {
-                    a.0.cmp(&b.0)
-                }
-            });
-            for (_, line) in records {
-                format_json(line, false, out)?;
-                out.write_all(b"\n")?;
-            }
+            sort_records(records.collect::<Result<Vec<_>>>()?, step.reverse, out)?
         }
         Operation::JsonlDedupe => {
             let mut seen = HashSet::new();
@@ -726,6 +752,9 @@ fn transform(input: &str, step: &Step, input_limit: usize, limit: usize) -> Resu
             step.equals.as_deref().expect("validated equals"),
             &mut out,
         )?,
+        Operation::JsonlSortInt => {
+            jsonl_sort_int(input, step, &mut out)?;
+        }
         Operation::JsonlDedupe | Operation::JsonlSort | Operation::JsonlCountBy => {
             jsonl_by_key(input, step, &mut out)?
         }
@@ -1932,5 +1961,169 @@ mod jsonl_key_tests {
         // CSV backslashes expand past8MiB after decoding to JSON, then a keyed count reduces output.
         let input = format!("id,payload\na,{}", "\\".repeat(5 * 1024 * 1024));
         assert!(execute(args, &input).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod integer_ranking_tests {
+    use super::*;
+
+    fn step(pointer: &str, reverse: bool) -> Step {
+        Step {
+            operation: Operation::JsonlSortInt,
+            pointer: Some(pointer.into()),
+            reverse,
+            fields: None,
+            contains: None,
+            lines: None,
+            equals: None,
+        }
+    }
+
+    #[test]
+    fn integer_record_order_is_exact_stable_and_preserves_lexical_payloads() {
+        let lines = [
+            r#"{"k":9007199254740993,"n":1.2300E+400}"#,
+            r#"{"k":-0,"id":"z1"}"#,
+            r#"{"k":-10,"id":"negative"}"#,
+            r#"{"k":9007199254740992,"n":123456789012345678901234567890}"#,
+            r#"{"k":0,"id":"z2"}"#,
+            r#"{"k":-0,"id":"z3"}"#,
+            r#"{"k":9007199254740993,"id":"tie"}"#,
+        ];
+        let input = lines.join("\r\n");
+        for (reverse, order) in [
+            (false, vec![2, 1, 4, 5, 3, 0, 6]),
+            (true, vec![0, 6, 3, 1, 4, 5, 2]),
+        ] {
+            let expected = order
+                .into_iter()
+                .map(|i| format!("{}\n", lines[i]))
+                .collect::<String>();
+            assert_eq!(
+                transform(&input, &step("/k", reverse), MAX_INPUT, CLI_OUTPUT).unwrap(),
+                expected
+            );
+        }
+        assert_eq!(
+            transform(
+                " { \"k\" : -2 } \n{ \"k\": 10 }\n",
+                &step("/k", false),
+                MAX_INPUT,
+                CLI_OUTPUT
+            )
+            .unwrap(),
+            "{\"k\":-2}\n{\"k\":10}\n"
+        );
+        let huge = "9".repeat(4096);
+        let input = format!("{huge}\n-0\n-{huge}\n0\n2\n10\n");
+        assert_eq!(
+            transform(&input, &step("", false), MAX_INPUT, CLI_OUTPUT).unwrap(),
+            format!("-{huge}\n-0\n0\n2\n10\n{huge}\n")
+        );
+        assert_eq!(
+            transform("", &step("", false), MAX_INPUT, CLI_OUTPUT).unwrap(),
+            ""
+        );
+        assert_eq!(
+            transform(
+                "{\"a/b\":{\"~\":[10]}}\n{\"a/b\":{\"~\":[2]}}\n",
+                &step("/a~1b/~0/0", false),
+                MAX_INPUT,
+                CLI_OUTPUT
+            )
+            .unwrap(),
+            "{\"a/b\":{\"~\":[2]}}\n{\"a/b\":{\"~\":[10]}}\n"
+        );
+    }
+
+    #[test]
+    fn integer_key_errors_validate_all_records_without_echoing_data() {
+        for bad in [
+            r#"{"k":1.0,"v":"PRIVATE"}"#,
+            r#"{"k":1e0,"v":"PRIVATE"}"#,
+            r#"{"k":"2","v":"PRIVATE"}"#,
+            r#"{"k":null,"v":"PRIVATE"}"#,
+            r#"{"k":false,"v":"PRIVATE"}"#,
+            r#"{"k":[],"v":"PRIVATE"}"#,
+            r#"{"k":{},"v":"PRIVATE"}"#,
+            r#"{"other":"PRIVATE"}"#,
+            r#"{"k":2,"k":3,"v":"PRIVATE"}"#,
+            r#"{"k":2,"v":"\uD800"}"#,
+            r#"{"k":2,"v":[1,],"payload":"PRIVATE"}"#,
+            "",
+            "PRIVATE_INVALID_JSON",
+        ] {
+            let input = format!("{{\"k\":1}}\n{bad}\n");
+            let error = format!(
+                "{:#}",
+                transform(&input, &step("/k", false), MAX_INPUT, CLI_OUTPUT).unwrap_err()
+            );
+            assert!(
+                error.contains("record 2") && error.contains("jsonl-sort-int"),
+                "{error}"
+            );
+            assert!(!error.contains("PRIVATE") && !error.contains("D800"));
+        }
+        assert!(transform("[0,1]", &step("/01", false), MAX_INPUT, CLI_OUTPUT).is_err());
+        assert!(transform("[0,1]", &step("/-", false), MAX_INPUT, CLI_OUTPUT).is_err());
+    }
+
+    #[test]
+    fn integer_sort_keeps_definition_record_input_intermediate_and_tool_limits() {
+        let mut s = step("", true);
+        assert!(s.validate().is_ok());
+        s.pointer = None;
+        assert!(s.validate().is_err());
+        s.pointer = Some("/~2".into());
+        assert!(s.validate().is_err());
+        s.pointer = Some(format!("/{}", "x".repeat(4096)));
+        assert!(s.validate().is_err());
+        for field in ["contains", "equals", "lines", "fields"] {
+            let mut s = step("", false);
+            match field {
+                "contains" => s.contains = Some("x".into()),
+                "equals" => s.equals = Some("x".into()),
+                "lines" => s.lines = Some(1),
+                _ => s.fields = Some(vec![]),
+            }
+            assert!(s.validate().is_err());
+        }
+        let zeros = "0\n".repeat(MAX_ITEMS);
+        assert_eq!(
+            transform(&zeros, &step("", false), MAX_INPUT, CLI_OUTPUT).unwrap(),
+            zeros
+        );
+        assert!(transform(&(zeros + "0\n"), &step("", false), MAX_INPUT, CLI_OUTPUT).is_err());
+        assert!(transform("0\n", &step("", false), MAX_INPUT, 1).is_err());
+        assert!(
+            transform(
+                &"9".repeat(MAX_INPUT + 1),
+                &step("", false),
+                MAX_INPUT,
+                CLI_OUTPUT
+            )
+            .is_err()
+        );
+        let large = (format!("{{\"k\":0,\"v\":\"{}\"}}\n", "x".repeat(85))).repeat(MAX_ITEMS);
+        assert!(large.len() > MAX_INPUT && large.len() < CLI_OUTPUT);
+        assert_eq!(
+            transform(&large, &step("/k", true), CLI_OUTPUT, CLI_OUTPUT).unwrap(),
+            large
+        );
+        let escaped = format!("{{\"k\":0,\"v\":\"{}\"}}", "\\\\".repeat(20000));
+        assert!(execute(r#"{"operation":"jsonl-sort-int","pointer":"/k"}"#, &escaped).is_err());
+        let tools = crate::data::tool_definitions();
+        for properties in [
+            &tools[2]["function"]["parameters"]["properties"],
+            &tools[2]["function"]["parameters"]["properties"]["steps"]["items"]["properties"],
+        ] {
+            assert!(
+                properties["operation"]["enum"]
+                    .as_array()
+                    .unwrap()
+                    .contains(&serde_json::json!("jsonl-sort-int"))
+            );
+        }
     }
 }

@@ -18,10 +18,11 @@ zi data --recipe recent.toml -i events.jsonl
 | `builtin:cleanup` | Trim each line, keep first identical trimmed line, sort descending. |
 | `builtin:severity-counts` | Count raw records by decoded string `/level`, convert counts to CSV. |
 | `builtin:unique-severity-counts` | Keep first string `/id`, then count retained string `/level` as CSV. |
+| `builtin:top-severity-counts` | Count string `/level`, stably rank integer counts descending, take 20 groups as CSV. |
 | `builtin:recent-unique-events` | Keep first string `/id`, stably sort string `/time` descending, take first 20 records as JSONL. |
 
 去重保留首条，不会自动选取同一 ID 的最新记录。时间只做字符串排序，不解析日期；应先统一
-格式与时区。计数分组按首次出现顺序输出。缺失、重复歧义或非字符串字段会使整次处理失败，
+格式与时区。原始计数分组按首次出现顺序输出；top-severity-counts 按整数频次倒序排列，同频仍按首次出现顺序。缺失、重复歧义或非字符串字段会使整次处理失败，
 不会发布部分输出。需要别的字段或行数时，先导出、审阅并编辑配方，再以文件路径调用。
 
 `--list-recipes` is offline and never reads or waits for stdin. It rejects explicit
@@ -70,7 +71,7 @@ reverse = true
 
 Operations: `trim`, `dedupe`, `sort`, `json-format`, `json-minify`, `json-keys`,
 `jsonl-to-array`, `array-to-jsonl`. [JSONL conversion rules](json-lines.md).
-`sort` and `jsonl-sort` accept `reverse = true`; `sort:reverse` is the line-sort CLI shorthand. Single-operation
+`sort`, `jsonl-sort` and `jsonl-sort-int` accept `reverse = true`; `sort:reverse` is the line-sort CLI shorthand. Single-operation
 `zi data sort --reverse` remains supported. Do not mix positional operations, `--step`
 and `--recipe`; pipeline direction belongs to its individual step, not a global `--reverse`.
 

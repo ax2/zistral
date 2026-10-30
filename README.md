@@ -317,7 +317,15 @@ See [tool pipeline examples and boundaries](docs/tool-pipelines.md).
 
 ## Reusable offline pipelines
 
-Development (unreleased): installed binaries embed four reviewed recipes. Discover,
+Development (unreleased): `zi data jsonl-sort-int --pointer /count --reverse` ranks
+whole records by exact JSON integer literals. `2` precedes `10` ascending; arbitrarily
+long digits retain precision within existing size limits, and ties (including -0/0)
+stay stable both ways. Decimal/exponent syntax and string coercion are rejected.
+Use `--recipe builtin:top-severity-counts` for a ready-to-run top20 frequency report.
+[Semantics, limits and reusable examples](docs/integer-ranking.md).
+
+
+Development (unreleased): installed binaries embed five reviewed recipes. Discover,
 inspect and run them without a source checkout or model configuration:
 
 ```sh
@@ -331,7 +339,8 @@ zi data --recipe recent.toml -i events.jsonl
 `builtin:cleanup` trims/deduplicates/sorts lines descending; `builtin:severity-counts`
 counts raw `/level` values as CSV; `builtin:unique-severity-counts` first deduplicates
 by `/id`; `builtin:recent-unique-events` keeps first `/id`, sorts `/time` descending
-and takes 20 records. JSONL keys must be strings. Timestamp order is lexical;
+and takes 20 records. `builtin:top-severity-counts` ranks exact integer counts descending
+and exports the top 20 groups as CSV. Category/ID/time keys remain strings. Timestamp order is lexical;
 normalize formats/timezones first. Names are exact and case-sensitive. `--list-recipes`
 does not read stdin; explicit `--input` and processing options are rejected.
 
@@ -345,7 +354,7 @@ zi data --show-plan --step trim --step dedupe --step sort:reverse -o cleanup.tom
 
 Use one operation, repeated `--step` in execution order, or an explicit `--recipe` file (or qualified builtin reference in development builds).
 Recipes have `version = 1` and `[[steps]]` entries with `operation` and optional `reverse`
-(sort or jsonl-sort only). All definitions are checked before reading input. Only the complete final
+(sort, jsonl-sort or jsonl-sort-int only). All definitions are checked before reading input. Only the complete final
 result is emitted; a failed later step emits no intermediate stdout and does not replace
 an existing output file. Shell `>` still opens/truncates its destination independently.
 

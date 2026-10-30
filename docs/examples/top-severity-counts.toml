@@ -1,0 +1,15 @@
+# Count every record, rank by exact integer count descending, take20 groups and export CSV.
+# Equal counts retain first-seen level order; /level must select a JSON string.
+version = 1
+[[steps]]
+operation = "jsonl-count-by"
+pointer = "/level"
+[[steps]]
+operation = "jsonl-sort-int"
+pointer = "/count"
+reverse = true
+[[steps]]
+operation = "lines-head"
+lines = 20
+[[steps]]
+operation = "jsonl-to-csv"

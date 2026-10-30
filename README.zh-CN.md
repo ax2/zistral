@@ -238,7 +238,14 @@ Agent 可通过现有 `transform_input` 的有序 `steps` 一次完成“去空�
 
 ## 可复用的离线处理流程
 
-开发中（尚未发布）：程序已内嵌四份经过审阅的配方，无需下载源码或另行放置配方文件：
+开发中（尚未发布）：`zi data jsonl-sort-int --pointer /count --reverse` 按 JSON 整数字面值
+对完整记录精确排序，可直接接在频次统计后。超出机器整数范围的位数不丢精度（仍受输入大小上限
+约束），正反序同值均保持原顺序；不转换字符串，不接受小数或指数写法。
+`--recipe builtin:top-severity-counts` 可直接输出频次前 20 组 CSV。
+[规则与配方示例](docs/integer-ranking.md)。
+
+
+开发中（尚未发布）：程序已内嵌五份经过审阅的配方，无需下载源码或另行放置配方文件：
 
 ```sh
 zi data --list-recipes
@@ -251,7 +258,8 @@ zi data --recipe recent.toml -i events.jsonl
 `builtin:cleanup` 去除行首尾空白、去重并倒序排列；`builtin:severity-counts` 按 `/level`
 统计原始记录，输出 CSV；`builtin:unique-severity-counts` 先按 `/id` 保留首条再统计；
 `builtin:recent-unique-events` 先按 `/id` 保留首条，再按 `/time` 倒序取前 20 条。
-JSONL 字段必须是字符串；时间按字符串排序，需要先统一格式与时区。名称区分大小写，
+`builtin:top-severity-counts` 按精确整数频次倒序输出前 20 组 CSV；同频按首次出现顺序。
+类别、ID 和时间字段必须是字符串；时间按字符串排序，需要先统一格式与时区。名称区分大小写，
 未知的 `builtin:` 名称不会回退到本地文件。目录与预览不读取 stdin，不加载模型配置；
 目录模式拒绝显式 `--input` 和处理步骤。导出后可审阅、修改，再用显式文件路径执行。
 
@@ -264,7 +272,7 @@ zi data --show-plan --step trim --step dedupe --step sort:reverse -o cleanup.tom
 ```
 
 单一操作、按执行顺序重复的 `--step`、显式 `--recipe` 三选一。TOML 配方包含 `version = 1`
-和 `[[steps]]`，每步声明 `operation`，可选 `reverse` 只用于 sort 或 jsonl-sort。先检查完整定义再读取输入，
+和 `[[steps]]`，每步声明 `operation`，可选 `reverse` 只用于 sort、jsonl-sort 或 jsonl-sort-int。先检查完整定义再读取输入，
 全部成功后只输出最终结果；后续步骤失败时不向 stdout 输出中间数据，也不替换已有的 `-o` 文件。
 shell `>` 的创建/截断行为仍由 shell 决定。
 

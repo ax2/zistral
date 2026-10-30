@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Rank native frequency results and other exact JSON integer literals with
+  `jsonl-sort-int`: stable ties in both directions, no float conversion or fixed
+  machine-integer bound. Add `builtin:top-severity-counts` for descending top20
+  severity groups as CSV; export/edit the same native plan for other fields/limits.
+
 - Import exported task presets into a user library with `zi presets import FILE`;
   preview additions/replacements with `--dry-run`, reject collisions by default,
   and require `--replace` to update matching user definitions. Validate the combined
@@ -9,7 +14,7 @@
 - Report parser-provided line/column locations for invalid recipe/preset TOML without
   echoing source excerpts or values; preserve existing BOM and offline behavior.
 
-- Discover four embedded offline recipes with `zi data --list-recipes`, then run
+- Discover five embedded offline recipes with `zi data --list-recipes`, then run
   them directly with `--recipe builtin:NAME`. Inspect/export the same validated
   version-1 TOML with `--show-plan` and edit it for your own fields or line limits.
   No source checkout, companion files, configuration or model requests required.

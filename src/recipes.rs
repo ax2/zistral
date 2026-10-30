@@ -8,7 +8,7 @@ use std::{io::Read, path::Path};
 const MAX_RECIPE: u64 = 64 * 1024;
 
 // Embed reviewed source examples so installed binaries need no companion recipe files.
-const BUILTINS: [(&str, &str, &str); 4] = [
+const BUILTINS: [(&str, &str, &str); 5] = [
     (
         "cleanup",
         "Trim lines, keep unique lines, sort descending",
@@ -23,6 +23,11 @@ const BUILTINS: [(&str, &str, &str); 4] = [
         "unique-severity-counts",
         "Keep first string /id, count retained /level, emit CSV",
         include_str!("../docs/examples/unique-severity-counts.toml"),
+    ),
+    (
+        "top-severity-counts",
+        "Count string /level, rank counts descending, take 20 groups, emit CSV",
+        include_str!("../docs/examples/top-severity-counts.toml"),
     ),
     (
         "recent-unique-events",
@@ -96,7 +101,7 @@ impl Plan {
                         return Ok(Step { equals: None, operation, reverse: false, pointer: None, fields: None, contains: None, lines: Some(lines) });
                     }
                 }
-                for (prefix, operation) in [("json-select:", Operation::JsonSelect), ("jsonl-select:", Operation::JsonlSelect), ("jsonl-dedupe:", Operation::JsonlDedupe), ("jsonl-sort:", Operation::JsonlSort), ("jsonl-count-by:", Operation::JsonlCountBy)] {
+                for (prefix, operation) in [("json-select:", Operation::JsonSelect), ("jsonl-select:", Operation::JsonlSelect), ("jsonl-dedupe:", Operation::JsonlDedupe), ("jsonl-sort:", Operation::JsonlSort), ("jsonl-sort-int:", Operation::JsonlSortInt), ("jsonl-count-by:", Operation::JsonlCountBy)] {
                     if let Some(pointer) = text.strip_prefix(prefix) {
                         return Ok(Step { equals: None, operation, reverse: false, pointer: Some(pointer.to_owned()), fields: None, contains: None, lines: None });
                     }

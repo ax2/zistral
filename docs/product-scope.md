@@ -97,6 +97,12 @@ Provide safe line/column diagnostics for editing definitions; do not print raw p
 source excerpts or values. Preset import, preview and collision handling are one customization improvement,
 not separate release items merely to reach a batch count.
 
+Exact integer field sorting extends the existing bounded log workflow: native
+frequency records contain integers and cannot use string ordering. Keep this as an
+explicit `jsonl-sort-int` operation with stable ties and no float conversion/type
+inference, and provide a reviewed top-frequency recipe. Do not add a general math,
+query or date engine for this need. See [integer ranking](integer-ranking.md).
+
 ## Delivery rule
 
 Every released version needs appropriate tests, Windows/Linux/macOS checks and installable

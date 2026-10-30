@@ -1322,6 +1322,7 @@ fn embedded_catalog_and_preview_finish_without_stdin_eof_or_model_configuration(
                     "builtin:cleanup",
                     "builtin:severity-counts",
                     "builtin:unique-severity-counts",
+                    "builtin:top-severity-counts",
                     "builtin:recent-unique-events"
                 ]
             );
@@ -1634,4 +1635,66 @@ fn recipe_parse_locations_never_echo_definition_values_or_publish_output() {
             assert_eq!(std::fs::read(root.join("keep.toml")).unwrap(), b"original");
         }
     }
+}
+
+#[test]
+fn builtin_top_counts_rank_integers_stably_and_export_an_editable_offline_plan() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let logs = "{\"level\":\"WARN\"}\n".repeat(2)
+        + &"{\"level\":\"ERROR\"}\n".repeat(10)
+        + &"{\"level\":\"INFO\"}\n".repeat(2);
+    let out = invoke(
+        root,
+        &["data", "--recipe", "builtin:top-severity-counts"],
+        logs.as_bytes(),
+    );
+    assert!(
+        out.status.success() && out.stderr.is_empty(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        out.stdout,
+        b"\"value\",\"count\"\n\"ERROR\",\"10\"\n\"WARN\",\"2\"\n\"INFO\",\"2\"\n"
+    );
+    let preview = invoke(
+        root,
+        &[
+            "data",
+            "--show-plan",
+            "--recipe",
+            "builtin:top-severity-counts",
+            "-o",
+            "top.toml",
+        ],
+        b"NOT_JSON_IGNORED",
+    );
+    assert!(preview.status.success() && preview.stdout.is_empty() && preview.stderr.is_empty());
+    let original = std::fs::read_to_string(root.join("top.toml")).unwrap();
+    let plan: toml::Value = toml::from_str(&original).unwrap();
+    assert_eq!(plan["steps"].as_array().unwrap().len(), 4);
+    assert_eq!(
+        plan["steps"][1]["operation"].as_str(),
+        Some("jsonl-sort-int")
+    );
+    assert_eq!(plan["steps"][1]["reverse"].as_bool(), Some(true));
+    let edited = original.replace("lines = 20", "lines = 1");
+    std::fs::write(root.join("top.toml"), &edited).unwrap();
+    let out = invoke(root, &["data", "--recipe", "top.toml"], logs.as_bytes());
+    assert!(out.status.success() && out.stderr.is_empty());
+    assert_eq!(out.stdout, b"\"value\",\"count\"\n\"ERROR\",\"10\"\n");
+    assert_eq!(
+        std::fs::read_to_string(root.join("top.toml")).unwrap(),
+        edited
+    );
+    let source = include_str!("../docs/examples/top-severity-counts.toml");
+    std::fs::write(root.join("source.toml"), source).unwrap();
+    let out = invoke(
+        root,
+        &["data", "--show-plan", "--recipe", "source.toml"],
+        b"",
+    );
+    assert!(out.status.success());
+    assert_eq!(out.stdout, original.as_bytes());
 }

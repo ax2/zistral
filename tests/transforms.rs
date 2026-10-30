@@ -2705,3 +2705,131 @@ fn pipeline_diagnostics_name_the_operation_without_echoing_recipe_or_data() {
     assert!(!error.contains("SYNTHETIC_PRIVATE"));
     assert_eq!(std::fs::read(root.join("keep")).unwrap(), b"unchanged");
 }
+
+#[test]
+fn integer_sort_works_offline_with_exact_values_and_stable_reverse_ties() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join("broken.toml"), "not model configuration").unwrap();
+    let input=b"{\"n\":10,\"id\":\"a\",\"v\":1.2300E+400}\r\n{\"n\":2,\"id\":\"b\"}\n{\"n\":10,\"id\":\"c\"}\n";
+    let out = invoke(
+        root,
+        &[
+            "--config",
+            "broken.toml",
+            "data",
+            "jsonl-sort-int",
+            "--pointer",
+            "/n",
+            "--reverse",
+        ],
+        input,
+    );
+    assert!(
+        out.status.success() && out.stderr.is_empty(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(out.stdout,b"{\"n\":10,\"id\":\"a\",\"v\":1.2300E+400}\n{\"n\":10,\"id\":\"c\"}\n{\"n\":2,\"id\":\"b\"}\n");
+    let out = invoke(root, &["data", "--step", "jsonl-sort-int:/n"], input);
+    assert!(out.status.success() && out.stderr.is_empty());
+    assert!(out.stdout.starts_with(b"{\"n\":2,\"id\":\"b\"}\n"));
+    std::fs::write(root.join("keep"), b"original").unwrap();
+    for options in [
+        vec![],
+        vec!["--pointer", "/~2"],
+        vec!["--pointer", "/n", "--contains", "x"],
+        vec!["--pointer", "/n", "--lines", "1"],
+    ] {
+        let mut args = vec![
+            "data",
+            "jsonl-sort-int",
+            "-i",
+            "missing-input",
+            "-o",
+            "keep",
+            "--force",
+        ];
+        args.extend(options);
+        let out = invoke(root, &args, b"");
+        assert!(!out.status.success() && out.stdout.is_empty());
+        assert!(!String::from_utf8_lossy(&out.stderr).contains("cannot open missing-input"));
+        assert_eq!(std::fs::read(root.join("keep")).unwrap(), b"original");
+    }
+    for second in [
+        "{\"n\":1.0,\"v\":\"PRIVATE\"}",
+        "{\"n\":\"10\",\"v\":\"PRIVATE\"}",
+        "{\"n\":1,\"n\":2,\"v\":\"PRIVATE\"}",
+    ] {
+        let input = format!("{{\"n\":2}}\n{second}\n");
+        let out = invoke(
+            root,
+            &[
+                "data",
+                "jsonl-sort-int",
+                "--pointer",
+                "/n",
+                "--reverse",
+                "-o",
+                "keep",
+                "--force",
+            ],
+            input.as_bytes(),
+        );
+        assert!(!out.status.success() && out.stdout.is_empty());
+        let error = String::from_utf8_lossy(&out.stderr);
+        assert!(error.contains("record 2") && !error.contains("PRIVATE"));
+        assert_eq!(std::fs::read(root.join("keep")).unwrap(), b"original");
+    }
+    assert!(!root.join("config").exists());
+}
+
+#[test]
+fn integer_sort_tools_rank_counts_recover_errors_and_keep_original_input_in_all_protocols() {
+    for api in ["chat", "responses", "anthropic"] {
+        let dir = tempfile::tempdir().unwrap();
+        let input=b"{\"level\":\"WARN\",\"n\":2}\n{\"level\":\"ERROR\",\"n\":10}\n{\"level\":\"ERROR\",\"n\":1}\n";
+        let sorted = "{\"level\":\"ERROR\",\"n\":1}\n{\"level\":\"WARN\",\"n\":2}\n{\"level\":\"ERROR\",\"n\":10}\n";
+        let (url, server) = model_turns(
+            api,
+            vec![
+                (
+                    json!({"operation":"jsonl-sort-int","pointer":null}),
+                    Value::Null,
+                ),
+                (
+                    json!({"operation":"jsonl-sort-int","pointer":"/n"}),
+                    json!(sorted),
+                ),
+                (
+                    json!({"steps":[{"operation":"jsonl-count-by","pointer":"/level"},{"operation":"jsonl-sort-int","pointer":"/count","reverse":true},{"operation":"lines-head","lines":1},{"operation":"jsonl-to-csv"}]}),
+                    json!("\"value\",\"count\"\n\"ERROR\",\"2\"\n"),
+                ),
+                (
+                    json!({"operation":"jsonl-sort-int","pointer":"/n"}),
+                    json!(sorted),
+                ),
+            ],
+        );
+        let out = invoke(
+            dir.path(),
+            &[
+                "--api",
+                api,
+                "--base-url",
+                &url,
+                "--model",
+                "fixture",
+                "rank counts",
+            ],
+            input,
+        );
+        assert!(
+            out.status.success() && out.stderr.is_empty(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(out.stdout, b"verified\n");
+        server.join().unwrap();
+    }
+}

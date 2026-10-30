@@ -928,3 +928,55 @@ fn keyed_jsonl_exact_results_and_plan_exports_roundtrip_in_all_protocols() {
         }
     }
 }
+
+#[test]
+fn integer_ranking_exact_result_and_plan_export_roundtrip_in_every_protocol() {
+    for api in ["chat", "responses", "anthropic"] {
+        let root = tempfile::tempdir().unwrap();
+        let input = b"{\"n\":2,\"id\":\"a\"}\n{\"n\":10,\"id\":\"b\"}\n{\"n\":10,\"id\":\"c\"}\n";
+        let expected =
+            b"{\"n\":10,\"id\":\"b\"}\n{\"n\":10,\"id\":\"c\"}\n{\"n\":2,\"id\":\"a\"}\n";
+        for export in [false, true] {
+            let args = json!({"operation":"jsonl-sort-int","pointer":"/n","reverse":true});
+            let (url, task) = server(
+                api,
+                vec![calls(api, vec![call(api, "ints", "transform_input", args)])],
+            );
+            let options = if export {
+                vec!["--export-plan", "--max-steps", "1"]
+            } else {
+                vec!["--max-steps", "1"]
+            };
+            let out = invoke(root.path(), api, &url, &options, input);
+            assert!(
+                out.status.success(),
+                "{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            assert_eq!(task.join().unwrap().len(), 1);
+            if export {
+                let plan: toml::Value =
+                    toml::from_str(std::str::from_utf8(&out.stdout).unwrap()).unwrap();
+                assert_eq!(
+                    plan["steps"][0]["operation"].as_str(),
+                    Some("jsonl-sort-int")
+                );
+                assert_eq!(plan["steps"][0]["reverse"].as_bool(), Some(true));
+                std::fs::write(root.path().join("ints.toml"), out.stdout).unwrap();
+                let mut child = command(root.path())
+                    .args(["data", "--recipe", "ints.toml"])
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .spawn()
+                    .unwrap();
+                child.stdin.take().unwrap().write_all(input).unwrap();
+                let run = child.wait_with_output().unwrap();
+                assert!(run.status.success() && run.stderr.is_empty());
+                assert_eq!(run.stdout, expected);
+            } else {
+                assert_eq!(out.stdout, expected);
+            }
+        }
+    }
+}
