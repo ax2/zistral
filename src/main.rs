@@ -32,7 +32,7 @@ use std::path::PathBuf;
     bin_name = "zi",
     version,
     subcommand_precedence_over_arg = true,
-    after_help = "Examples:\n  zi config\n  cat data.json | zi 'Join the first item of .abc'\n  cat article.txt | zi 对内容进行字数统计\n  cat article.txt | zi --count\n  cat data.json | zi --select /abc/0 --join ','\n\nRun zi config once to save your model service and API key.\nUse --config-example to print a configuration template."
+    after_help = "Examples:\n  zi config\n  zi --preview --no-stream -i data.json 'Summarize the input'\n  cat data.json | zi 'Join the first item of .abc'\n  cat article.txt | zi 对内容进行字数统计\n  cat article.txt | zi --count\n  cat data.json | zi --select /abc/0 --join ','\n\nRun zi config once to save your model service and API key.\nUse --config-example to print a configuration template."
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -91,6 +91,9 @@ pub struct Cli {
     /// Export the chosen native transform as a version-1 TOML recipe, without executing it
     #[arg(long, requires = "exact", conflicts_with = "json")]
     export_plan: bool,
+    /// Preview the first model request as JSON, without network/tool execution or credential headers
+    #[arg(long, conflicts_with_all = ["count", "select", "config_example"])]
+    preview: bool,
     /// Disable built-in agent tools (for text-only models)
     #[arg(long)]
     no_tools: bool,
@@ -266,6 +269,9 @@ fn read_input(cli: &Cli) -> Result<String> {
 }
 
 fn run(mut cli: Cli) -> Result<()> {
+    if cli.preview && cli.command.is_some() {
+        bail!("--preview is for model tasks, not offline or management commands");
+    }
     if cli.exact && cli.command.is_some() {
         bail!("--exact is for model data tasks, not offline or management commands");
     }
@@ -380,7 +386,7 @@ fn run(mut cli: Cli) -> Result<()> {
             write_output(&output)
         };
     }
-    if project::enabled(&cli) {
+    if project::enabled(&cli) && !cli.preview {
         process::install_interrupt_handler()?;
     }
     if cli.command.is_some() && cli.preset.is_some() {
@@ -481,6 +487,11 @@ fn run(mut cli: Cli) -> Result<()> {
     if (cli.count || cli.select.is_some()) && !cli.prompt.is_empty() {
         bail!("local --count/--select modes do not accept a prompt");
     }
+    if cli.preview && cli.prompt.is_empty() {
+        bail!(
+            "--preview requires an instruction or a preset; it does not start an interactive session"
+        );
+    }
     if !cli.count && cli.select.is_none() && cli.prompt.is_empty() {
         if cli.output.is_some() {
             bail!("provide an instruction for file output; interactive sessions use stdout");
@@ -497,10 +508,22 @@ fn run(mut cli: Cli) -> Result<()> {
     } else if let Some(pointer) = &cli.select {
         data::select(&input, pointer, cli.join.as_deref())?
     } else {
-        if io::stdin().is_terminal() && io::stdout().is_terminal() && config::needs_setup(&cli) {
+        if !cli.preview
+            && io::stdin().is_terminal()
+            && io::stdout().is_terminal()
+            && config::needs_setup(&cli)
+        {
             config::configure(&cli, false)?;
         }
         let settings = config::Settings::load(&cli)?;
+        if cli.preview {
+            let preview = agent::preview(&settings, &cli, &input)?;
+            return if let Some(target) = target {
+                save_output(&preview, target, &cli, true)
+            } else {
+                write_output(&preview)
+            };
+        }
         let answer = agent::run(&settings, &cli, &input)?;
         if answer.streamed {
             return Ok(());

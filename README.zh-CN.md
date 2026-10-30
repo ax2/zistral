@@ -594,3 +594,8 @@ zi data jsonl-where --pointer /level --equals ERROR --show-plan -o errors.toml
 再显式发送结果；模型工具遮盖无法收回已发送的原文。详见
 [示例与边界](docs/json-redaction.md)。这是下一批的一项完整改进，
 目前 v0.31.0 正式安装包尚不包含，不单独发布小版本。
+
+同批新增 `zi --preview`，在发送前查看首轮请求的地址、解析后的提示词、输入与工具定义，
+与实际发送共用正文构造；不含认证头、不联网、不执行工具，可保存为 JSON 审阅。
+项目选项仅提供正常首轮上下文，后续请求仍取决于实际模型和工具结果。详见
+[请求预览](docs/request-preview.md)。本功能和离线值遮盖累计到下一批统一发布。

@@ -74,7 +74,15 @@ fn prepare_calls<'a>(
     Ok(prepared)
 }
 
-pub fn run(settings: &Settings, cli: &Cli, input: &str) -> Result<Answer> {
+struct InitialRequest {
+    system: String,
+    messages: Vec<Value>,
+    tools: Vec<Value>,
+    endpoint: String,
+    session: Session,
+}
+
+fn prepare(settings: &Settings, cli: &Cli, input: &str) -> Result<InitialRequest> {
     if cli.export_plan && (!cli.exact || cli.json) {
         bail!("--export-plan requires --exact and produces TOML, not JSON");
     }
@@ -90,24 +98,7 @@ pub fn run(settings: &Settings, cli: &Cli, input: &str) -> Result<Answer> {
             "--exact requires native data tools and is incompatible with streaming/project modes"
         );
     }
-    let streaming = !cli.exact
-        && cli.output.is_none()
-        && !cli.no_stream
-        && !cli.json
-        && (cli.stream || (!cli.plain && io::stdout().is_terminal()));
-    let mut display = crate::ui::StreamDisplay::new();
-    let activity = Activity::new(settings, cli, input.len());
-    let client = Client::builder()
-        .timeout(Duration::from_secs(cli.timeout))
-        .connect_timeout(Duration::from_secs(cli.timeout.min(30)))
-        .redirect(reqwest::redirect::Policy::none())
-        .user_agent(concat!("zistral/", env!("CARGO_PKG_VERSION")))
-        .build()
-        .context("cannot initialize HTTP client")?;
     let mut session = Session::new(cli)?;
-    let max_steps = cli
-        .max_steps
-        .unwrap_or(if crate::project::enabled(cli) { 32 } else { 8 });
     let mut system = SYSTEM.to_owned();
     system.push_str(&session.context()?);
     if cli.json {
@@ -171,21 +162,115 @@ pub fn run(settings: &Settings, cli: &Cli, input: &str) -> Result<Answer> {
             }
         )
     });
+    Ok(InitialRequest {
+        system,
+        messages,
+        tools,
+        endpoint,
+        session,
+    })
+}
+
+fn streaming(cli: &Cli) -> bool {
+    !cli.exact
+        && cli.output.is_none()
+        && !cli.no_stream
+        && !cli.json
+        && (cli.stream || (!cli.plain && io::stdout().is_terminal()))
+}
+
+fn request_body(
+    settings: &Settings,
+    cli: &Cli,
+    streaming: bool,
+    system: &str,
+    messages: &[Value],
+    tools: &[Value],
+) -> Value {
+    let anthropic = settings.api == "anthropic";
+    let responses = settings.api == "responses";
+    let mut body = json!({"model":settings.model,"stream":streaming});
+    if anthropic {
+        body["system"] = json!(system);
+        body["messages"] = json!(messages);
+        body["max_tokens"] = json!(cli.max_output_tokens);
+    } else if responses {
+        body["input"] = json!(messages);
+        body["store"] = json!(false);
+    } else {
+        body["messages"] = json!(messages);
+    }
+    if !cli.no_tools {
+        body["tools"] = json!(tools);
+    }
+    body
+}
+
+pub fn preview(settings: &Settings, cli: &Cli, input: &str) -> Result<String> {
+    let request = prepare(settings, cli, input)?;
+    let body = request_body(
+        settings,
+        cli,
+        streaming(cli),
+        &request.system,
+        &request.messages,
+        &request.tools,
+    );
+    let value = json!({
+        "version": 1,
+        "kind": "first-model-request-preview",
+        "request": {"method":"POST", "url":request.endpoint, "body":body},
+        "authentication": {"configured":settings.api_key.is_some(), "credential_headers_omitted":true},
+        "project_tools_enabled": crate::project::enabled(cli),
+        "max_model_turns": cli.max_steps.unwrap_or(if crate::project::enabled(cli) {32} else {8}),
+        "network_requests": 0,
+        "scope": "Initial request only; no model/tool execution. Later requests depend on model responses and tool results. Input, resolved prompts and explicit project instructions are included; authentication headers are omitted."
+    });
+    // Bound encoded output while serializing: input/control characters can expand in JSON.
+    struct Limited(Vec<u8>);
+    impl io::Write for Limited {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            if bytes.len() > crate::transforms::CLI_OUTPUT.saturating_sub(self.0.len()) {
+                return Err(io::Error::other("request preview exceeds 16 MiB"));
+            }
+            self.0.extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut output = Limited(Vec::new());
+    serde_json::to_writer_pretty(&mut output, &value)
+        .context("cannot encode request preview within 16 MiB")?;
+    Ok(String::from_utf8(output.0).expect("JSON serialization is UTF-8"))
+}
+
+pub fn run(settings: &Settings, cli: &Cli, input: &str) -> Result<Answer> {
+    let InitialRequest {
+        system,
+        mut messages,
+        tools,
+        endpoint,
+        mut session,
+    } = prepare(settings, cli, input)?;
+    let streaming = streaming(cli);
+    let mut display = crate::ui::StreamDisplay::new();
+    let activity = Activity::new(settings, cli, input.len());
+    let client = Client::builder()
+        .timeout(Duration::from_secs(cli.timeout))
+        .connect_timeout(Duration::from_secs(cli.timeout.min(30)))
+        .redirect(reqwest::redirect::Policy::none())
+        .user_agent(concat!("zistral/", env!("CARGO_PKG_VERSION")))
+        .build()
+        .context("cannot initialize HTTP client")?;
+    let max_steps = cli
+        .max_steps
+        .unwrap_or(if crate::project::enabled(cli) { 32 } else { 8 });
+    let responses = settings.api == "responses";
+    let anthropic = settings.api == "anthropic";
     for step in 0..max_steps {
-        let mut body = json!({"model":settings.model,"stream":streaming});
-        if anthropic {
-            body["system"] = json!(system);
-            body["messages"] = json!(messages);
-            body["max_tokens"] = json!(cli.max_output_tokens);
-        } else if responses {
-            body["input"] = json!(messages);
-            body["store"] = json!(false);
-        } else {
-            body["messages"] = json!(messages);
-        }
-        if !cli.no_tools {
-            body["tools"] = json!(tools);
-        }
+        let body = request_body(settings, cli, streaming, &system, &messages, &tools);
         let mut retried = 0;
         let response = loop {
             activity.request(step + 1, max_steps);

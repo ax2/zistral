@@ -777,3 +777,10 @@ and malformed records fail the complete result. Model-triggered masking cannot u
 original-input disclosure; pre-redact locally when values must be withheld.
 See [examples and boundaries](docs/json-redaction.md). This is one accumulated
 workflow improvement; the current v0.31.0 installers do not include it yet.
+
+Unreleased `zi --preview` inspects the first model request with the same protocol body
+construction as normal execution: resolved preset/input/tools, selected endpoint and
+stream mode, without authentication headers, networking or tool execution. Optional
+project flags include only their normal initial scoped context. See
+[request preview](docs/request-preview.md) for limits and output/environment differences.
+This joins offline value redaction in the next batch; no new version is published yet.

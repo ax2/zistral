@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 
 pub fn enabled(cli: &Cli) -> bool {
     !cli.plain
+        && !cli.preview
         && !cli.json
         && io::stdout().is_terminal()
         && io::stderr().is_terminal()

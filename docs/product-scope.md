@@ -205,3 +205,10 @@ It is not automatic secret discovery; model-side masking cannot retract original
 disclosure, so withhold values by offline processing before any request. No tool names,
 runtime, project permissions, Agent-loop branches or implicit history are added.
 See [JSON redaction](json-redaction.md). Accumulate it into the next coherent batch.
+
+Unreleased first-request preview supports explicit disclosure review before model use.
+Reuse actual context/body preparation for all3protocols; omit authentication headers
+and bypass network/tool execution. Include only normally available first-turn project
+context when explicitly enabled. Do not call this full-session prediction, automatic
+sanitization, provider probing or frozen request replay. No extra model tool, dependency
+or persistent task history. See [request preview](request-preview.md).

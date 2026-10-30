@@ -768,3 +768,29 @@ fn model_plan_interactive_export_saves_definitions_and_json_preset_errors_clear_
         }
     }
 }
+
+#[test]
+fn request_preview_remains_json_in_real_terminal_without_setup_or_activity() {
+    let root = tempfile::tempdir().unwrap();
+    let input = root.path().join("input.txt");
+    std::fs::write(&input, "PREVIEW_TERMINAL_DATA").unwrap();
+    let output = terminal(
+        &[
+            "--preview",
+            "--model",
+            "fixture",
+            "-i",
+            input.to_str().unwrap(),
+            "task",
+        ],
+        root.path(),
+        false,
+        &[("\"version\": 1", "")],
+    );
+    let shown = console::strip_ansi_codes(&output);
+    assert!(shown.contains("first-model-request-preview"), "{shown}");
+    assert!(shown.contains("PREVIEW_TERMINAL_DATA"));
+    assert!(shown.contains("\"stream\": true"));
+    assert!(!shown.contains("Let's connect") && !shown.contains("API key:"));
+    assert!(!root.path().join("config").exists());
+}

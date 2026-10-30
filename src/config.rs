@@ -579,6 +579,7 @@ impl Settings {
             .or_else(|| nonempty(file.api_key));
         if matches!(url.host_str(), Some("api.openai.com" | "api.anthropic.com"))
             && api_key.is_none()
+            && !cli.preview
         {
             bail!("set ZI_API_KEY or {key_env}; local servers may run without a key");
         }
