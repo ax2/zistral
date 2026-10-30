@@ -773,7 +773,11 @@ fn model_plan_interactive_export_saves_definitions_and_json_preset_errors_clear_
 fn request_preview_remains_json_in_real_terminal_without_setup_or_activity() {
     let root = tempfile::tempdir().unwrap();
     let input = root.path().join("input.txt");
-    std::fs::write(&input, "PREVIEW_TERMINAL_DATA").unwrap();
+    std::fs::write(
+        &input,
+        "PREVIEW_TERMINAL_DATA\u{009b}31m\u{009d}52;c;data\u{007f}",
+    )
+    .unwrap();
     let output = terminal(
         &[
             "--preview",
@@ -790,6 +794,8 @@ fn request_preview_remains_json_in_real_terminal_without_setup_or_activity() {
     let shown = console::strip_ansi_codes(&output);
     assert!(shown.contains("first-model-request-preview"), "{shown}");
     assert!(shown.contains("PREVIEW_TERMINAL_DATA"));
+    assert!(!output.contains(['\u{007f}', '\u{009b}', '\u{009d}']));
+    assert!(shown.contains("\\u009b") && shown.contains("\\u009d") && shown.contains("\\u007f"));
     assert!(shown.contains("\"stream\": true"));
     assert!(!shown.contains("Let's connect") && !shown.contains("API key:"));
     assert!(!root.path().join("config").exists());

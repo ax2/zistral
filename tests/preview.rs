@@ -51,7 +51,7 @@ fn preview_matches_actual_first_request_in_all_protocols_and_task_modes() {
     )
     .unwrap();
     std::fs::write(root.path().join("keep.txt"), "unchanged").unwrap();
-    let input = "合成输入\r\n\u{1b}[31mDO_NOT_EXECUTE\n".as_bytes();
+    let input = "合成输入\r\n\u{1b}[31mDO_NOT_EXECUTE\u{009b}31m\u{007f}\n".as_bytes();
     let modes: &[&[&str]] = &[
         &[],
         &["--no-tools"],
@@ -338,13 +338,18 @@ fn preview_file_output_is_json_and_failures_preserve_existing_result() {
     let out = invoke(
         root.path(),
         &[common.to_vec(), vec!["task"]].concat(),
-        b"original input",
+        "original input\u{009b}\u{007f}".as_bytes(),
     );
     assert!(out.status.success() && out.stdout.is_empty() && out.stderr.is_empty());
     let saved = std::fs::read(root.path().join("request.json")).unwrap();
     let p: Value = serde_json::from_slice(&saved).unwrap();
     assert_eq!(p["request"]["body"]["stream"], false);
     assert_eq!(p["version"], 1);
+    let wire = p["request"]["body"]["messages"][1]["content"]
+        .as_str()
+        .unwrap();
+    assert!(wire.contains('\u{009b}') && wire.contains('\u{007f}'));
+    assert!(String::from_utf8_lossy(&saved).contains('\u{009b}'));
     let again = invoke(
         root.path(),
         &[common.to_vec(), vec!["task"]].concat(),

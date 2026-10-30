@@ -518,6 +518,15 @@ fn run(mut cli: Cli) -> Result<()> {
         let settings = config::Settings::load(&cli)?;
         if cli.preview {
             let preview = agent::preview(&settings, &cli, &input)?;
+            let preview = if target.is_none() && io::stdout().is_terminal() {
+                let shown = ui::json_display(&preview);
+                if shown.len() > transforms::CLI_OUTPUT {
+                    bail!("terminal request preview exceeds 16 MiB after JSON display escaping");
+                }
+                shown
+            } else {
+                preview
+            };
             return if let Some(target) = target {
                 save_output(&preview, target, &cli, true)
             } else {

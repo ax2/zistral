@@ -49,13 +49,13 @@ pub fn clean(text: &str) -> String {
     out
 }
 
-// Only for already validated, compact JSON sent to a terminal. Escaping keeps
+// Only for already validated JSON sent to a terminal. Keep legal JSON whitespace. Escaping keeps
 // literal DEL/C1 string values and keys intact without parsing/reserializing
 // numbers, duplicate keys, or existing escape tokens. Raw pipe/file text bypasses it.
 pub fn json_display(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for c in text.chars() {
-        if c.is_control() {
+        if c.is_control() && !matches!(c, '\n' | '\r' | '\t') {
             out.push_str(&format!("\\u{:04x}", u32::from(c)));
         } else {
             out.push(c);
@@ -448,5 +448,13 @@ mod tests {
         let tokens = r#"{"n":1.2300E+400,"n":-0.00,"s":"\u4E2D","a":[true,null]}"#;
         crate::transforms::validate_json(tokens).unwrap();
         assert_eq!(super::json_display(tokens), tokens);
+        let pretty = format!("{{\n\t\"s\": \"LEFT{}RIGHT\"\r\n}}", '\u{009b}');
+        let shown = super::json_display(&pretty);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&shown).unwrap(),
+            serde_json::from_str::<serde_json::Value>(&pretty).unwrap()
+        );
+        assert!(shown.contains("{\n\t") && shown.contains("\r\n}"));
+        assert!(shown.contains("\\u009b") && !shown.contains('\u{009b}'));
     }
 }
