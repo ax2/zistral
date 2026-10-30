@@ -238,6 +238,24 @@ Agent 可通过现有 `transform_input` 的有序 `steps` 一次完成“去空�
 
 ## 可复用的离线处理流程
 
+开发中（尚未发布）：程序已内嵌四份经过审阅的配方，无需下载源码或另行放置配方文件：
+
+```sh
+zi data --list-recipes
+zi data --recipe builtin:severity-counts -i events.jsonl
+zi data --show-plan --recipe builtin:recent-unique-events -o recent.toml
+# 编辑 recent.toml 的字段或行数，再直接复用：
+zi data --recipe recent.toml -i events.jsonl
+```
+
+`builtin:cleanup` 去除行首尾空白、去重并倒序排列；`builtin:severity-counts` 按 `/level`
+统计原始记录，输出 CSV；`builtin:unique-severity-counts` 先按 `/id` 保留首条再统计；
+`builtin:recent-unique-events` 先按 `/id` 保留首条，再按 `/time` 倒序取前 20 条。
+JSONL 字段必须是字符串；时间按字符串排序，需要先统一格式与时区。名称区分大小写，
+未知的 `builtin:` 名称不会回退到本地文件。目录与预览不读取 stdin，不加载模型配置；
+目录模式拒绝显式 `--input` 和处理步骤。导出后可审阅、修改，再用显式文件路径执行。
+
+
 ```sh
 cat lines.txt | zi data --step trim --step dedupe --step sort:reverse
 zi data --recipe docs/examples/cleanup.toml -i lines.txt -o clean.txt
@@ -246,7 +264,7 @@ zi data --show-plan --step trim --step dedupe --step sort:reverse -o cleanup.tom
 ```
 
 单一操作、按执行顺序重复的 `--step`、显式 `--recipe` 三选一。TOML 配方包含 `version = 1`
-和 `[[steps]]`，每步声明 `operation`，可选 `reverse` 只用于 sort。先检查完整定义再读取输入，
+和 `[[steps]]`，每步声明 `operation`，可选 `reverse` 只用于 sort 或 jsonl-sort。先检查完整定义再读取输入，
 全部成功后只输出最终结果；后续步骤失败时不向 stdout 输出中间数据，也不替换已有的 `-o` 文件。
 shell `>` 的创建/截断行为仍由 shell 决定。
 

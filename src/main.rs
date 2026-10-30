@@ -143,10 +143,10 @@ pub struct Cli {
 enum Commands {
     /// Transform explicit input locally, without a model or configuration
     #[command(
-        after_help = "Examples:\n  zi data jsonl-count-by --pointer /level -i events.jsonl\n  zi data jsonl-dedupe --pointer /id -i events.jsonl\n  zi data jsonl-sort --pointer /time --reverse -i events.jsonl\n  zi data jsonl-where --pointer /level --equals ERROR -i events.jsonl\n  zi data lines-tail --lines 50 -i app.log\n  zi data --step lines-include:ERROR --step lines-tail:20 -i app.log\n  zi data lines-include --contains ERROR -i app.log\n  zi data --step lines-include:ERROR --step lines-exclude:healthcheck -i app.log\n  zi data trim -i notes.txt\n  zi data --step trim --step dedupe --step sort:reverse -i notes.txt\n  zi data --recipe cleanup.toml -i notes.txt -o clean.txt\n  zi data --step json-select:/data/items --step array-to-jsonl -i response.json\n  zi data json-select --pointer /data/items -i response.json\n  zi data jsonl-select --pointer /payload/id -i events.jsonl\n  zi data --step csv-to-jsonl --step jsonl-select:/id --step dedupe --step jsonl-to-array -i table.csv\n  zi data jsonl-project --field id=/payload/id --field n=/payload/n -i events.jsonl\n  zi data jsonl-to-csv -i records.jsonl -o table.csv\n  zi data --step jsonl-select:/payload/id --step dedupe --step jsonl-to-array\n  zi data --show-plan --recipe cleanup.toml\n  zi data --show-plan --step trim --step dedupe -o cleanup.toml\n\nRecipe example (UTF-8 TOML):\n  version = 1\n  [[steps]]\n  operation = \"trim\"\n  [[steps]]\n  operation = \"sort\"\n  reverse = true\n\nUse one operation, repeated --step, or --recipe. --show-plan validates and exports\nthe resolved version-1 TOML without reading stdin or executing data operations;\n--input is rejected and -o saves the plan. Data-dependent failures still require a run.\nRecipes allow only native data operations: no shell, file paths or model requests.\nLimits: 16 steps, 64 KiB recipe, 8 MiB initial input, 16 MiB intermediate/final result."
+        after_help = "Examples:\n  zi data --list-recipes\n  zi data --recipe builtin:severity-counts -i events.jsonl\n  zi data --show-plan --recipe builtin:recent-unique-events -o recent.toml\n  zi data jsonl-count-by --pointer /level -i events.jsonl\n  zi data jsonl-dedupe --pointer /id -i events.jsonl\n  zi data jsonl-sort --pointer /time --reverse -i events.jsonl\n  zi data jsonl-where --pointer /level --equals ERROR -i events.jsonl\n  zi data lines-tail --lines 50 -i app.log\n  zi data --step lines-include:ERROR --step lines-tail:20 -i app.log\n  zi data lines-include --contains ERROR -i app.log\n  zi data --step lines-include:ERROR --step lines-exclude:healthcheck -i app.log\n  zi data trim -i notes.txt\n  zi data --step trim --step dedupe --step sort:reverse -i notes.txt\n  zi data --recipe cleanup.toml -i notes.txt -o clean.txt\n  zi data --step json-select:/data/items --step array-to-jsonl -i response.json\n  zi data json-select --pointer /data/items -i response.json\n  zi data jsonl-select --pointer /payload/id -i events.jsonl\n  zi data --step csv-to-jsonl --step jsonl-select:/id --step dedupe --step jsonl-to-array -i table.csv\n  zi data jsonl-project --field id=/payload/id --field n=/payload/n -i events.jsonl\n  zi data jsonl-to-csv -i records.jsonl -o table.csv\n  zi data --step jsonl-select:/payload/id --step dedupe --step jsonl-to-array\n  zi data --show-plan --recipe cleanup.toml\n  zi data --show-plan --step trim --step dedupe -o cleanup.toml\n\nRecipe example (UTF-8 TOML):\n  version = 1\n  [[steps]]\n  operation = \"trim\"\n  [[steps]]\n  operation = \"sort\"\n  reverse = true\n\nUse one operation, repeated --step, or --recipe (FILE or builtin:NAME).\n--list-recipes lists embedded recipes offline without reading stdin; --input is rejected.\nBuiltin names are exact, case-sensitive references; unknown names never fall back to files.\n--show-plan validates and exports\nthe resolved version-1 TOML without reading stdin or executing data operations;\n--input is rejected and -o saves the plan. Data-dependent failures still require a run.\nRecipes allow only native data operations: no shell, file paths or model requests.\nLimits: 16 steps, 64 KiB recipe, 8 MiB initial input, 16 MiB intermediate/final result."
     )]
     Data {
-        #[arg(value_enum, required_unless_present_any = ["steps", "recipe"], conflicts_with_all = ["steps", "recipe"])]
+        #[arg(value_enum, required_unless_present_any = ["steps", "recipe", "list_recipes"], conflicts_with_all = ["steps", "recipe", "list_recipes"])]
         operation: Option<transforms::Operation>,
         /// Reverse key order; valid with sort and jsonl-sort (equal JSONL keys remain stable)
         #[arg(long, requires = "operation", conflicts_with_all = ["steps", "recipe"])]
@@ -169,12 +169,15 @@ enum Commands {
         /// Chain a native operation; repeat in execution order (lines-head:N, lines-tail:N, sort:reverse, json-select:/path, jsonl-select:/path, jsonl-dedupe:/path, jsonl-sort:/path, jsonl-count-by:/path and line filters are supported)
         #[arg(long = "step", conflicts_with = "recipe")]
         steps: Vec<String>,
-        /// Read an explicit versioned TOML recipe of native operations
+        /// Read a versioned TOML recipe file or a qualified builtin:NAME reference
         #[arg(long)]
         recipe: Option<PathBuf>,
         /// Validate and export a reusable TOML plan without reading data or running steps
         #[arg(long)]
         show_plan: bool,
+        /// List embedded native recipes offline, without reading stdin or model settings
+        #[arg(long, conflicts_with_all = ["operation", "steps", "recipe", "show_plan", "reverse", "pointer", "fields", "contains", "equals", "lines"])]
+        list_recipes: bool,
     },
     /// List, inspect, render, export or initialize reusable task presets (offline)
     Presets {
@@ -305,6 +308,7 @@ fn run(mut cli: Cli) -> Result<()> {
         steps,
         recipe,
         show_plan,
+        list_recipes,
     }) = &cli.command
     {
         if cli.preset.is_some()
@@ -318,6 +322,9 @@ fn run(mut cli: Cli) -> Result<()> {
             || project::enabled(&cli)
         {
             bail!("zi data accepts input and local operation options only; see zi data --help");
+        }
+        if *list_recipes && cli.input.is_some() {
+            bail!("--list-recipes does not read data; omit --input to list embedded recipes");
         }
         if *show_plan && cli.input.is_some() {
             bail!("--show-plan does not read data; omit --input to preview or export the plan");
@@ -335,13 +342,16 @@ fn run(mut cli: Cli) -> Result<()> {
                 })
             })
             .transpose()?;
-        let plan = recipes::Plan::prepare(single, steps, recipe.as_deref())?;
-        let target = prepare_output(&cli)?;
-        let output = if *show_plan {
-            plan.render()?
+        let plan = if *list_recipes {
+            None
         } else {
-            let input = read_input(&cli)?;
-            plan.run(&input)?
+            Some(recipes::Plan::prepare(single, steps, recipe.as_deref())?)
+        };
+        let target = prepare_output(&cli)?;
+        let output = match plan {
+            Some(plan) if *show_plan => plan.render()?,
+            Some(plan) => plan.run(&read_input(&cli)?)?,
+            None => recipes::list(),
         };
         if let Some(target) = target {
             return save_output(

@@ -1,5 +1,44 @@
 # Offline data pipelines / 离线处理流程
 
+## Embedded recipes / 内置配方（开发中，尚未发布）
+
+The development build embeds reviewed native recipe definitions in the executable.
+No separate recipe directory or model configuration is needed after installation.
+
+```sh
+zi data --list-recipes
+zi data --recipe builtin:severity-counts -i events.jsonl -o counts.csv
+zi data --show-plan --recipe builtin:recent-unique-events -o recent.toml
+# Edit /id, /time or lines in recent.toml, then run your explicit definition:
+zi data --recipe recent.toml -i events.jsonl
+```
+
+| Reference | Steps and assumptions |
+| --- | --- |
+| `builtin:cleanup` | Trim each line, keep first identical trimmed line, sort descending. |
+| `builtin:severity-counts` | Count raw records by decoded string `/level`, convert counts to CSV. |
+| `builtin:unique-severity-counts` | Keep first string `/id`, then count retained string `/level` as CSV. |
+| `builtin:recent-unique-events` | Keep first string `/id`, stably sort string `/time` descending, take first 20 records as JSONL. |
+
+去重保留首条，不会自动选取同一 ID 的最新记录。时间只做字符串排序，不解析日期；应先统一
+格式与时区。计数分组按首次出现顺序输出。缺失、重复歧义或非字符串字段会使整次处理失败，
+不会发布部分输出。需要别的字段或行数时，先导出、审阅并编辑配方，再以文件路径调用。
+
+`--list-recipes` is offline and never reads or waits for stdin. It rejects explicit
+`--input` (including `-i -`), operation options, `--step`, `--recipe` and `--show-plan`.
+`-o` saves the catalog using normal no-clobber rules. Exporting a builtin with
+`--show-plan` follows the same no-input, limits and output contracts as a file recipe;
+the result contains only native steps, not captured data, paths or execution grants.
+
+The `builtin:` prefix is reserved only at the start of the supplied reference; names
+are exact and case-sensitive, and unknown names fail before opening input or output.
+There is no fallback to local files and no implicit project lookup. On Unix, address
+a literal filename such as `builtin:cleanup` via `./builtin:cleanup`. Other paths,
+including non-UTF-8 Unix paths, retain normal explicit-file behavior. Embedded and
+file recipes share the same parser, validation and execution pipeline.
+
+## Compose your own definition / 编写配方
+
 Combine native data operations without a model, shell subprocess or intermediate stdout:
 
 ```sh
@@ -30,7 +69,7 @@ reverse = true
 
 Operations: `trim`, `dedupe`, `sort`, `json-format`, `json-minify`, `json-keys`,
 `jsonl-to-array`, `array-to-jsonl`. [JSONL conversion rules](json-lines.md).
-Only `sort` accepts `reverse = true`; `sort:reverse` is its CLI shorthand. Single-operation
+`sort` and `jsonl-sort` accept `reverse = true`; `sort:reverse` is the line-sort CLI shorthand. Single-operation
 `zi data sort --reverse` remains supported. Do not mix positional operations, `--step`
 and `--recipe`; pipeline direction belongs to its individual step, not a global `--reverse`.
 

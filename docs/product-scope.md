@@ -73,6 +73,12 @@ without arbitrary shell commands, includes, dynamically loaded libraries, hidden
 or secrets. Definitions contain no input/result paths and are validated before input/output.
 Limits are 16 steps, 64 KiB definition, 8 MiB initial data and 16 MiB per intermediate.
 This is reusable user-maintained computation, not persistent task memory or a plugin engine.
+
+The next unreleased batch embeds a small reviewed recipe catalog under explicit
+`builtin:NAME` references. `zi data --list-recipes` discovers it offline; `--show-plan`
+exports the same versioned steps for review and local editing. Reuse existing native
+operations and validation; do not add a template engine, automatic project lookup,
+new model tools or persistent history merely to expose these scenarios.
 `zi data --show-plan` validates and exports that definition without reading data or
 running steps. A reusable reviewed recipe fits this customization layer; it contains
 neither past inputs nor model conclusions and does not infer execution success from syntax.

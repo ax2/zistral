@@ -317,6 +317,25 @@ See [tool pipeline examples and boundaries](docs/tool-pipelines.md).
 
 ## Reusable offline pipelines
 
+Development (unreleased): installed binaries embed four reviewed recipes. Discover,
+inspect and run them without a source checkout or model configuration:
+
+```sh
+zi data --list-recipes
+zi data --recipe builtin:severity-counts -i events.jsonl
+zi data --show-plan --recipe builtin:recent-unique-events -o recent.toml
+# Edit pointers or the line limit in recent.toml, then reuse it offline:
+zi data --recipe recent.toml -i events.jsonl
+```
+
+`builtin:cleanup` trims/deduplicates/sorts lines descending; `builtin:severity-counts`
+counts raw `/level` values as CSV; `builtin:unique-severity-counts` first deduplicates
+by `/id`; `builtin:recent-unique-events` keeps first `/id`, sorts `/time` descending
+and takes 20 records. JSONL keys must be strings. Timestamp order is lexical;
+normalize formats/timezones first. Names are exact and case-sensitive. `--list-recipes`
+does not read stdin; explicit `--input` and processing options are rejected.
+
+
 ```sh
 cat lines.txt | zi data --step trim --step dedupe --step sort:reverse
 zi data --recipe docs/examples/cleanup.toml -i lines.txt -o clean.txt
@@ -324,9 +343,9 @@ zi data --show-plan --recipe docs/examples/cleanup.toml
 zi data --show-plan --step trim --step dedupe --step sort:reverse -o cleanup.toml
 ```
 
-Use one operation, repeated `--step` in execution order, or an explicit `--recipe` file.
+Use one operation, repeated `--step` in execution order, or an explicit `--recipe` file (or qualified builtin reference in development builds).
 Recipes have `version = 1` and `[[steps]]` entries with `operation` and optional `reverse`
-(sort only). All definitions are checked before reading input. Only the complete final
+(sort or jsonl-sort only). All definitions are checked before reading input. Only the complete final
 result is emitted; a failed later step emits no intermediate stdout and does not replace
 an existing output file. Shell `>` still opens/truncates its destination independently.
 

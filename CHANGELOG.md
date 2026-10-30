@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Discover four embedded offline recipes with `zi data --list-recipes`, then run
+  them directly with `--recipe builtin:NAME`. Inspect/export the same validated
+  version-1 TOML with `--show-plan` and edit it for your own fields or line limits.
+  No source checkout, companion files, configuration or model requests required.
+
 ## 0.30.0 — 2026-10-30
 
 - Analyze structured logs by explicit decoded-string fields: `jsonl-dedupe` keeps

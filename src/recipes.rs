@@ -7,6 +7,39 @@ use std::{io::Read, path::Path};
 
 const MAX_RECIPE: u64 = 64 * 1024;
 
+// Embed reviewed source examples so installed binaries need no companion recipe files.
+const BUILTINS: [(&str, &str, &str); 4] = [
+    (
+        "cleanup",
+        "Trim lines, keep unique lines, sort descending",
+        include_str!("../docs/examples/cleanup.toml"),
+    ),
+    (
+        "severity-counts",
+        "Count all JSONL records by string /level, emit CSV",
+        include_str!("../docs/examples/severity-counts.toml"),
+    ),
+    (
+        "unique-severity-counts",
+        "Keep first string /id, count retained /level, emit CSV",
+        include_str!("../docs/examples/unique-severity-counts.toml"),
+    ),
+    (
+        "recent-unique-events",
+        "Keep first string /id, sort /time descending, take 20 JSONL records",
+        include_str!("../docs/examples/recent-unique-events.toml"),
+    ),
+];
+
+pub fn list() -> String {
+    let mut output = String::from("Built-in offline recipes:\n");
+    for (name, description, _) in BUILTINS {
+        output.push_str(&format!("builtin:{name} — {description}\n"));
+    }
+    output.push_str("\nInspect/export: zi data --show-plan --recipe builtin:NAME [-o recipe.toml]\nRun: zi data --recipe builtin:NAME -i INPUT [-o OUTPUT]\n");
+    output
+}
+
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct Recipe {
@@ -21,12 +54,26 @@ impl Plan {
         let plan = if let Some(step) = single {
             vec![step]
         } else if let Some(path) = recipe {
-            let mut bytes = Vec::new();
-            std::fs::File::open(path)
-                .with_context(|| format!("cannot open recipe {}", path.display()))?
-                .take(MAX_RECIPE + 1)
-                .read_to_end(&mut bytes)
-                .context("cannot read recipe")?;
+            let bytes =
+                if let Some(name) = path.to_str().and_then(|text| text.strip_prefix("builtin:")) {
+                    let (_, _, definition) = BUILTINS
+                        .iter()
+                        .find(|(candidate, _, _)| *candidate == name)
+                        .ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "unknown builtin recipe; use zi data --list-recipes for exact names"
+                            )
+                        })?;
+                    definition.as_bytes().to_vec()
+                } else {
+                    let mut bytes = Vec::new();
+                    std::fs::File::open(path)
+                        .with_context(|| format!("cannot open recipe {}", path.display()))?
+                        .take(MAX_RECIPE + 1)
+                        .read_to_end(&mut bytes)
+                        .context("cannot read recipe")?;
+                    bytes
+                };
             if bytes.len() as u64 > MAX_RECIPE {
                 bail!("recipe exceeds 64 KiB");
             }

@@ -1259,3 +1259,330 @@ fn line_window_limits_and_later_failures_preserve_existing_output() {
         assert!(!String::from_utf8_lossy(&out.stderr).contains("PRIVATE_INVALID_JSON"));
     }
 }
+
+#[test]
+fn embedded_catalog_and_preview_finish_without_stdin_eof_or_model_configuration() {
+    use std::time::{Duration, Instant};
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join("invalid-model-config.toml"), "not valid TOML").unwrap();
+    for (args, success) in [
+        (vec!["data", "--list-recipes"], true),
+        (
+            vec!["data", "--show-plan", "--recipe", "builtin:severity-counts"],
+            true,
+        ),
+        (vec!["data", "--list-recipes", "-i", "-"], false),
+        (vec!["data", "--list-recipes", "-i", "missing-data"], false),
+        (
+            vec!["data", "--show-plan", "--recipe", "builtin:typo"],
+            false,
+        ),
+    ] {
+        let mut child = command(root)
+            .args(&args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let stdin = child.stdin.take().unwrap();
+        let end = Instant::now() + Duration::from_secs(5);
+        while child.try_wait().unwrap().is_none() {
+            if Instant::now() > end {
+                child.kill().ok();
+                let _ = child.wait();
+                panic!("offline recipe discovery waited for stdin EOF: {args:?}");
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        drop(stdin);
+        let out = child.wait_with_output().unwrap();
+        assert_eq!(
+            out.status.success(),
+            success,
+            "{args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        if success {
+            assert!(out.stderr.is_empty() && !out.stdout.is_empty());
+        } else {
+            assert!(out.stdout.is_empty());
+        }
+        if args.contains(&"--list-recipes") && success {
+            let text = String::from_utf8(out.stdout).unwrap();
+            let names: Vec<_> = text
+                .lines()
+                .filter(|line| line.starts_with("builtin:"))
+                .map(|line| line.split(' ').next().unwrap())
+                .collect();
+            assert_eq!(
+                names,
+                [
+                    "builtin:cleanup",
+                    "builtin:severity-counts",
+                    "builtin:unique-severity-counts",
+                    "builtin:recent-unique-events"
+                ]
+            );
+        }
+    }
+    assert_eq!(std::fs::read_dir(root).unwrap().count(), 1);
+}
+
+#[test]
+fn embedded_recipes_run_from_an_empty_directory_and_export_replay_exactly() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let logs = concat!(
+        "{\"id\":\"a\",\"level\":\"ERROR\",\"time\":\"02\",\"n\":1.2300E+400}\n",
+        "{\"id\":\"b\",\"level\":\"INFO\",\"time\":\"03\"}\n",
+        "{\"id\":\"a\",\"level\":\"INFO\",\"time\":\"04\"}\n",
+        "{\"id\":\"c\",\"level\":\"ERROR\",\"time\":\"01\"}\n",
+    );
+    let lines: Vec<_> = logs.lines().collect();
+    let recent = format!("{}\n{}\n{}\n", lines[1], lines[0], lines[3]);
+    for (name, input, expected) in [
+        ("cleanup", " b \r\na\nb\n a ", "b\na\n"),
+        (
+            "severity-counts",
+            logs,
+            "\"value\",\"count\"\n\"ERROR\",\"2\"\n\"INFO\",\"2\"\n",
+        ),
+        (
+            "unique-severity-counts",
+            logs,
+            "\"value\",\"count\"\n\"ERROR\",\"2\"\n\"INFO\",\"1\"\n",
+        ),
+        ("recent-unique-events", logs, recent.as_str()),
+    ] {
+        let reference = format!("builtin:{name}");
+        let out = invoke(root, &["data", "--recipe", &reference], input.as_bytes());
+        assert!(
+            out.status.success(),
+            "{name}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(out.stderr.is_empty());
+        assert_eq!(out.stdout, expected.as_bytes(), "{name}");
+        let preview = invoke(
+            root,
+            &[
+                "data",
+                "--recipe",
+                &reference,
+                "--show-plan",
+                "-o",
+                "export.toml",
+            ],
+            b"PRIVATE_IGNORED_DATA",
+        );
+        assert!(preview.status.success() && preview.stdout.is_empty() && preview.stderr.is_empty());
+        let definition = std::fs::read_to_string(root.join("export.toml")).unwrap();
+        assert!(definition.starts_with("version = 1\n") && !definition.contains("PRIVATE"));
+        let replay = invoke(root, &["data", "--recipe", "export.toml"], input.as_bytes());
+        assert!(replay.status.success() && replay.stderr.is_empty());
+        assert_eq!(replay.stdout, out.stdout);
+        std::fs::remove_file(root.join("export.toml")).unwrap();
+    }
+    assert_eq!(std::fs::read_dir(root).unwrap().count(), 0);
+}
+
+#[test]
+fn exported_builtin_is_editable_without_modifying_the_builtin() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let preview = invoke(
+        root,
+        &[
+            "data",
+            "--show-plan",
+            "--recipe",
+            "builtin:recent-unique-events",
+        ],
+        b"",
+    );
+    assert!(preview.status.success() && preview.stderr.is_empty());
+    let definition = String::from_utf8(preview.stdout)
+        .unwrap()
+        .replace("/id", "/event_id")
+        .replace("/time", "/timestamp")
+        .replace("lines = 20", "lines = 1");
+    std::fs::write(root.join("my recent.toml"), definition).unwrap();
+    let out = invoke(
+        root,
+        &["data", "--recipe", "my recent.toml"],
+        b"{\"event_id\":\"a\",\"timestamp\":\"01\"}\n{\"event_id\":\"b\",\"timestamp\":\"02\"}\n",
+    );
+    assert!(out.status.success() && out.stderr.is_empty());
+    assert_eq!(out.stdout, b"{\"event_id\":\"b\",\"timestamp\":\"02\"}\n");
+    let original = invoke(
+        root,
+        &[
+            "data",
+            "--show-plan",
+            "--recipe",
+            "builtin:recent-unique-events",
+        ],
+        b"",
+    );
+    let text = String::from_utf8(original.stdout).unwrap();
+    assert!(
+        original.status.success()
+            && text.contains("/id")
+            && text.contains("/time")
+            && text.contains("lines = 20")
+    );
+}
+
+#[test]
+fn recipe_catalog_rejects_processing_modes_before_io_and_preserves_output() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join("keep.txt"), b"original\r\n").unwrap();
+    for options in [
+        vec!["trim"],
+        vec!["--step", "trim"],
+        vec!["--recipe", "missing.toml"],
+        vec!["--show-plan"],
+        vec!["--reverse"],
+        vec!["--pointer", "/level"],
+        vec!["--field", "id=/id"],
+        vec!["--contains", "ERROR"],
+        vec!["--equals", "ERROR"],
+        vec!["--lines", "2"],
+        vec!["-i", "missing-data"],
+        vec!["--json"],
+        vec!["--stream"],
+        vec!["--count"],
+        vec!["--select", "/"],
+        vec!["--preset", "summarize"],
+        vec!["--agent"],
+        vec!["--cwd", "missing-project"],
+    ] {
+        let mut args = vec!["data", "--list-recipes", "-o", "keep.txt", "--force"];
+        args.extend(options);
+        let out = invoke(root, &args, b"PRIVATE_INPUT");
+        assert!(!out.status.success() && out.stdout.is_empty(), "{args:?}");
+        assert_eq!(
+            std::fs::read(root.join("keep.txt")).unwrap(),
+            b"original\r\n"
+        );
+        let error = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            !error.contains("PRIVATE_INPUT") && !error.contains("cannot open missing"),
+            "{error}"
+        );
+    }
+    for name in [
+        "builtin:",
+        "builtin:Cleanup",
+        "builtin:typo",
+        "builtin:../cleanup",
+        "builtin:cleanup.toml",
+    ] {
+        let out = invoke(
+            root,
+            &[
+                "data",
+                "--recipe",
+                name,
+                "-i",
+                "missing-data",
+                "-o",
+                "keep.txt",
+                "--force",
+            ],
+            b"",
+        );
+        assert!(!out.status.success() && out.stdout.is_empty());
+        let error = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            error.contains("unknown builtin recipe") && error.contains("--list-recipes"),
+            "{error}"
+        );
+        assert!(!error.contains("cannot open"));
+        assert_eq!(
+            std::fs::read(root.join("keep.txt")).unwrap(),
+            b"original\r\n"
+        );
+    }
+}
+
+#[test]
+fn builtin_failure_and_explicit_catalog_export_keep_normal_publication_rules() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join("keep.txt"), b"original").unwrap();
+    let out = invoke(
+        root,
+        &[
+            "data",
+            "--recipe",
+            "builtin:severity-counts",
+            "-o",
+            "keep.txt",
+            "--force",
+        ],
+        b"{\"level\":\"PRIVATE_VALUE\"}\n{\"level\":42}\n",
+    );
+    assert!(!out.status.success() && out.stdout.is_empty());
+    assert!(!String::from_utf8_lossy(&out.stderr).contains("PRIVATE_VALUE"));
+    assert_eq!(std::fs::read(root.join("keep.txt")).unwrap(), b"original");
+    for mut args in [
+        vec!["data", "--list-recipes"],
+        vec!["data", "--show-plan", "--recipe", "builtin:cleanup"],
+    ] {
+        let direct = invoke(root, &args, b"ignored");
+        assert!(direct.status.success());
+        args.extend(["-o", "keep.txt"]);
+        let out = invoke(root, &args, b"ignored");
+        assert!(!out.status.success() && out.stdout.is_empty());
+        assert_eq!(std::fs::read(root.join("keep.txt")).unwrap(), b"original");
+        args.push("--force");
+        let out = invoke(root, &args, b"ignored");
+        assert!(out.status.success() && out.stdout.is_empty() && out.stderr.is_empty());
+        assert_eq!(std::fs::read(root.join("keep.txt")).unwrap(), direct.stdout);
+        std::fs::write(root.join("keep.txt"), b"original").unwrap();
+    }
+    let stdout = invoke(root, &["data", "--list-recipes", "-o", "-"], b"ignored");
+    assert!(stdout.status.success() && stdout.stderr.is_empty());
+    assert!(String::from_utf8_lossy(&stdout.stdout).contains("builtin:cleanup"));
+}
+
+#[cfg(unix)]
+#[test]
+fn builtin_namespace_has_explicit_filename_escape_and_preserves_non_utf8_paths() {
+    use std::os::unix::ffi::OsStringExt;
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let definition = "version=1\n[[steps]]\noperation='json-minify'\n";
+    std::fs::write(root.join("builtin:cleanup"), definition).unwrap();
+    std::fs::write(root.join("builtin:unknown"), definition).unwrap();
+    let named = invoke(
+        root,
+        &["data", "--recipe", "./builtin:cleanup"],
+        b"{ \"n\" : 1 }",
+    );
+    assert!(named.status.success() && named.stderr.is_empty());
+    assert_eq!(named.stdout, b"{\"n\":1}\n");
+    let builtin = invoke(root, &["data", "--recipe", "builtin:cleanup"], b"b\na\n");
+    assert!(builtin.status.success());
+    assert_eq!(builtin.stdout, b"b\na\n");
+    let unknown = invoke(
+        root,
+        &["data", "--recipe", "builtin:unknown", "--show-plan"],
+        b"",
+    );
+    assert!(!unknown.status.success() && unknown.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&unknown.stderr).contains("unknown builtin recipe"));
+    let name = std::ffi::OsString::from_vec(b"recipe-\xff.toml".to_vec());
+    std::fs::write(root.join(&name), definition).unwrap();
+    let out = command(root)
+        .args(["data", "--show-plan", "--recipe"])
+        .arg(&name)
+        .output()
+        .unwrap();
+    assert!(out.status.success() && out.stderr.is_empty());
+    assert!(String::from_utf8_lossy(&out.stdout).contains("json-minify"));
+}
