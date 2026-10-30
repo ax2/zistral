@@ -17,7 +17,7 @@ git diff | zi "生成一句简洁的提交说明"
 | 平台 | 安装包 | 安装方法 |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | 双击安装，无需管理员权限，自动添加用户 PATH 和开始菜单入口 |
-| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.31.0-linux-amd64.deb` |
+| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.32.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | 双击安装，命令放到 `/usr/local/bin/zi` |
 
 安装后直接运行 `zi`。Windows 安装结束可立即启动，或在开始菜单打开 zi；
@@ -586,27 +586,27 @@ zi data jsonl-where --pointer /level --equals ERROR --show-plan -o errors.toml
 `jsonl-count-by --pointer /level` 精确统计每类记录数。共享离线配方与现有模型工具。
 对应安装包与本批变更见 v0.30.0 Release。
 
-## main 中的 v0.32.0 候选版（尚未发布）
+## v0.32.0：发送前准备结构化输入
 
-源码版本已选定，用于发版前检查；上方正式安装包和带版本号的安装命令仍指向 v0.31.0。
-详见[候选批次审阅](docs/releases/v0.32.0-candidate.md)，提交到 main 不会自动发布。
+本批将结构概览、显式值遮盖和首轮请求预览一并交付。
+安装包见 [v0.32.0 Release](https://github.com/ax2/zistral/releases/tag/v0.32.0)，
+准备过程见[候选批次审阅](docs/releases/v0.32.0-candidate.md)。
 
 新增显式 `json-redact` / `jsonl-redact`：按 RFC 6901 指针把一个值改为
 `"[REDACTED]"`，保留其他字段和数字词法，可用配方串联多个明确字段。
 缺失、歧义或无效记录使完整结果失败。需要隐去模型输入中的值时，先离线处理并审阅，
 再显式发送结果；模型工具遮盖无法收回已发送的原文。详见
-[示例与边界](docs/json-redaction.md)。这是下一批的一项完整改进，
-目前 v0.31.0 正式安装包尚不包含，不单独发布小版本。
+[示例与边界](docs/json-redaction.md)。这是 v0.32.0 的一项完整改进。
 
 同批新增 `zi --preview`，在发送前查看首轮请求的地址、解析后的提示词、输入与工具定义，
 与实际发送共用正文构造；不含认证头、不联网、不执行工具，可保存为 JSON 审阅。
 项目选项仅提供正常首轮上下文，后续请求仍取决于实际模型和工具结果。详见
-[请求预览](docs/request-preview.md)。本功能和离线值遮盖累计到下一批统一发布。
+[请求预览](docs/request-preview.md)。本功能和离线值遮盖在同一批交付。
 
 同批新增 `json-profile` / `jsonl-profile` 结构概览：汇总嵌套对象路径、类型与出现/缺失
 次数，不含样本值，数组作为叶节点；可以先明确选择数组再展开统计。报告仍包含键名，
 不推断 Schema 或自动脱敏，详见[结构概览](docs/json-profile.md)。与离线值遮盖、
-请求预览共同形成一批发送前准备改进，统一验收后再决定发版。
+请求预览共同形成一批发送前准备改进，作为一批统一验收。
 
 同批遮盖功能补充显式 `--if-present`：已有值（包括 null）仍遮盖，真正缺失时保留有效记录；
 默认继续严格报错，无效数据、歧义键和非法数组索引仍使整份结果失败。配方/工具按每步

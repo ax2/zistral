@@ -222,10 +222,10 @@ This reuses native pipelines/tool definitions, adds no dependency or tool name, 
 completes the candidate pre-sharing workflow with redaction and first-request preview.
 Review/test that coherent milestone before release; see [JSON profiles](json-profile.md).
 
-The same unreleased redaction outcome supports explicitly optional known fields for
+The same v0.32.0 redaction outcome supports explicitly optional known fields for
 heterogeneous logs. Strict remains the default; `--if-present` / per-step boolean
 `if_present=true` retains genuinely absent paths, with complete original validation.
 Do not catch generic errors, suppress ambiguous/unsupported references, claim that a
 match occurred, or infer sensitivity from profile counts. Arrays remain opaque in
 profiles and are resolved independently by redaction. This is one refinement of the
-existing outcome, not another release item. No version bump or extra tool/dependency.
+existing outcome, not another release item. No separately counted feature or extra tool/dependency.

@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.32.0 — candidate, not yet released
+## 0.32.0 — 2026-10-31
 
 - Inspect JSON/JSONL structure offline with `json-profile` / `jsonl-profile`:
   report object paths, observed types and record presence/missing counts without

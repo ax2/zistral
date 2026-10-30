@@ -20,7 +20,7 @@ Download a native installer from [Releases](https://github.com/ax2/zistral/relea
 | Platform | Package | Installation |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | Per-user installer; adds PATH and a Start menu launcher; no administrator required |
-| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.31.0-linux-amd64.deb` |
+| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.32.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | Open the package; installs `/usr/local/bin/zi` |
 
 Then type `zi`. On first launch, choose an existing Codex, WorkBuddy or dsh configuration,
@@ -56,7 +56,7 @@ Portable archives contain one executable plus documentation. Extract zi (zi.exe 
 Build from source with Rust 1.85+ (a current stable toolchain is recommended):
 
 ```sh
-cargo install --git https://github.com/ax2/zistral --tag v0.31.0 --locked
+cargo install --git https://github.com/ax2/zistral --tag v0.32.0 --locked
 ```
 
 The package is named `zistral`; the installed command is `zi`. It is not yet
@@ -768,36 +768,37 @@ zi data jsonl-where --pointer /level --equals ERROR --show-plan -o errors.toml
 `jsonl-count-by --pointer /level` produces exact frequency records. All share offline
 recipes and the existing model tool. See the v0.30.0 release for the corresponding installable packages.
 
-## v0.32.0 candidate on main (not yet released)
+## Preparing structured input for sharing (v0.32.0)
 
-The source package version is selected for release checks. Published installers and
-versioned install commands above still target v0.31.0. See the
-[candidate review](docs/releases/v0.32.0-candidate.md); a main push does not publish it.
+This batch combines structure inspection, explicit value masking and initial request
+preview. See the [release](https://github.com/ax2/zistral/releases/tag/v0.32.0) for
+installable packages and the [candidate review](docs/releases/v0.32.0-candidate.md)
+for preparation evidence.
 
 Explicit `json-redact` / `jsonl-redact` replace one RFC 6901 pointer value with
 `"[REDACTED]"`, preserving unrelated lexical JSON values. Compose explicit fields in
 a version-1 recipe and review offline before sharing data. Missing/ambiguous paths
 and malformed records fail the complete result. Model-triggered masking cannot undo
 original-input disclosure; pre-redact locally when values must be withheld.
-See [examples and boundaries](docs/json-redaction.md). This is one accumulated
-workflow improvement; the current v0.31.0 installers do not include it yet.
+See [examples and boundaries](docs/json-redaction.md). This is one complete
+workflow improvement in the v0.32.0 batch.
 
-Unreleased `zi --preview` inspects the first model request with the same protocol body
+`zi --preview` inspects the first model request with the same protocol body
 construction as normal execution: resolved preset/input/tools, selected endpoint and
 stream mode, without authentication headers, networking or tool execution. Optional
 project flags include only their normal initial scoped context. See
 [request preview](docs/request-preview.md) for limits and output/environment differences.
-This joins offline value redaction in the next batch; no new version is published yet.
+This joins offline value redaction in the same release.
 
-Unreleased `json-profile` / `jsonl-profile` report nested object paths, type counts and
+`json-profile` / `jsonl-profile` report nested object paths, type counts and
 missing values without sample values. Arrays remain opaque leaves; explicit selection
 and array expansion choose a record set. The bounded report helps review paths before
 masking or sharing input. It exposes key names, is not a schema/sanitization guarantee,
 and adds no dependency or model tool name. See [structural profiles](docs/json-profile.md).
 Together with offline redaction and request preview, it completes a candidate input-
-preparation milestone being validated together for the selected candidate.
+preparation milestone validated as one batch.
 
-The same unreleased redaction improvement now supports explicit `--if-present` for
+The same redaction improvement now supports explicit `--if-present` for
 heterogeneous records: mask present values (including null), retain valid missing paths,
 and keep malformed/ambiguous data or invalid array indexes as complete-result errors.
 Default behavior remains strict. Recipes/tools opt in per step with boolean

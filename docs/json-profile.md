@@ -1,4 +1,4 @@
-# Structural JSON profiles / JSON 结构概览（main，尚未发布）
+# Structural JSON profiles / JSON 结构概览（v0.32.0）
 
 Before choosing fields to mask or extract, inspect the structure without sending raw
 values to a model. Existing `json-keys` lists only root keys; these operations summarize
@@ -127,4 +127,4 @@ executes the model task. Inspect the report and sanitized data before proceeding
 只统计类型也不证明后续数据符合某份 Schema，或其他字段可以安全分享。三项能力各自明确
 调用，组合成发送前准备流程。
 
-当前正式 v0.31.0 安装包尚不包含结构概览；它与离线值遮盖和请求预览一起等待统一验收发布。
+结构概览自 v0.32.0 起提供，与离线值遮盖和请求预览一起交付。

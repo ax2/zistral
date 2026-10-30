@@ -1,4 +1,4 @@
-# Preview the first model request / 首轮模型请求预览（main，尚未发布）
+# Preview the first model request / 首轮模型请求预览（v0.32.0）
 
 After preparing input, inspect what zi would send before making a model request:
 
@@ -87,4 +87,4 @@ invalid UTF-8, incompatible task modes and exceeded bounds return a nonzero exit
 需要先遮盖敏感值时，先离线执行 `zi data --recipe share.toml` 并审阅结果，再把结果
 传给 `--preview` 或模型任务。预览不会自动遮盖，也不会发送请求；去掉 `--preview`
 之后是一次新的正常执行，不是对已预览请求的锁定重放。文件、配置或终端环境的改变会影响
-随后构造的请求。当前正式 v0.31.0 安装包尚不包含本功能，等待下一批统一发布。
+随后构造的请求。本功能自 v0.32.0 起提供，与离线值遮盖和结构概览一起交付。

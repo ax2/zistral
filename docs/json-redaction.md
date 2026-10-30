@@ -1,4 +1,4 @@
-# Explicit JSON value redaction / 显式 JSON 值遮盖（main，尚未发布）
+# Explicit JSON value redaction / 显式 JSON 值遮盖（v0.32.0）
 
 Before sharing a structured log, replace the values you explicitly identify without
 rebuilding every field. `json-redact` processes one JSON document; `jsonl-redact`
@@ -134,4 +134,4 @@ zi -i sanitized.jsonl -s builtin:triage
 
 只遮盖明确选中的值，不扫描其他字段、键名、嵌入文本、其他文件或之前已发送的数据。
 没有通配符、正则、自动脱敏、哈希或自定义替换。原始输入文件不会改写；输出仍需按实际
-分享要求审阅。该功能属于下一批改动，正式 v0.31.0 安装包尚不包含它。
+分享要求审阅。该功能自 v0.32.0 起提供。
