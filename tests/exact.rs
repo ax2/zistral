@@ -1082,3 +1082,68 @@ fn offline_redaction_withholds_original_value_before_each_model_protocol() {
         assert!(request.contains("[REDACTED]"));
     }
 }
+
+#[test]
+fn profile_native_results_and_exported_recipes_work_in_every_model_protocol() {
+    for api in ["chat", "responses", "anthropic"] {
+        for operation in ["json-profile", "jsonl-profile"] {
+            let root = tempfile::tempdir().unwrap();
+            let input = br#"{"x":"PRIVATE_PROFILE_INPUT","n":1.2300E+400}"#;
+            for export in [false, true] {
+                let (url, task) = server(
+                    api,
+                    vec![calls(
+                        api,
+                        vec![call(
+                            api,
+                            "profile",
+                            "transform_input",
+                            json!({"operation":operation}),
+                        )],
+                    )],
+                );
+                let options = if export {
+                    vec!["--export-plan", "--max-steps", "1"]
+                } else {
+                    vec!["--max-steps", "1"]
+                };
+                let out = invoke(root.path(), api, &url, &options, input);
+                assert!(
+                    out.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&out.stderr)
+                );
+                let requests = task.join().unwrap();
+                assert_eq!(requests.len(), 1);
+                assert!(
+                    serde_json::to_string(&requests[0])
+                        .unwrap()
+                        .contains("PRIVATE_PROFILE_INPUT")
+                );
+                let output = if export {
+                    let value: toml::Value =
+                        toml::from_str(std::str::from_utf8(&out.stdout).unwrap()).unwrap();
+                    assert_eq!(value["steps"][0]["operation"].as_str(), Some(operation));
+                    std::fs::write(root.path().join("profile.toml"), out.stdout).unwrap();
+                    let mut child = command(root.path())
+                        .args(["data", "--recipe", "profile.toml"])
+                        .stdin(Stdio::piped())
+                        .stdout(Stdio::piped())
+                        .stderr(Stdio::piped())
+                        .spawn()
+                        .unwrap();
+                    child.stdin.take().unwrap().write_all(input).unwrap();
+                    let replay = child.wait_with_output().unwrap();
+                    assert!(replay.status.success());
+                    replay.stdout
+                } else {
+                    out.stdout
+                };
+                let p: Value = serde_json::from_slice(&output).unwrap();
+                assert_eq!(p["records"], 1);
+                assert_eq!(p["paths"][1]["types"], json!({"number":1}));
+                assert!(!String::from_utf8_lossy(&output).contains("PRIVATE_PROFILE_INPUT"));
+            }
+        }
+    }
+}

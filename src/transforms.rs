@@ -39,6 +39,10 @@ pub enum Operation {
     JsonMinify,
     /// List root object keys in source order, including repeated keys
     JsonKeys,
+    /// Report JSON object paths, types and presence counts, without sample values
+    JsonProfile,
+    /// Aggregate JSONL object paths, types and missing counts, without sample values
+    JsonlProfile,
     /// Collect one JSON value per line into an array; reject blank/invalid records
     JsonlToArray,
     /// Emit each root array item as one compact JSON line, preserving numeric tokens
@@ -745,6 +749,8 @@ fn transform(input: &str, step: &Step, input_limit: usize, limit: usize) -> Resu
                 format_json(input, operation == Operation::JsonFormat, &mut out)?;
             }
         }
+        Operation::JsonProfile => crate::profile::json(input, &mut out)?,
+        Operation::JsonlProfile => crate::profile::jsonl(input, &mut out, MAX_ITEMS)?,
         Operation::JsonlToArray => jsonl_to_array(input, &mut out)?,
         Operation::ArrayToJsonl => array_to_jsonl(input, &mut out)?,
         Operation::CsvToJsonl => crate::csv_input::to_jsonl(input, &mut out, MAX_ITEMS)?,
@@ -2230,6 +2236,73 @@ mod redaction_tests {
                         .unwrap()
                         .contains(&serde_json::json!(operation))
                 );
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod profile_tests {
+    use serde_json::{Value, json};
+    #[test]
+    fn shared_profile_operations_keep_record_output_and_tool_envelope_limits() {
+        use crate::transforms::{self, Step};
+        let step: Step = serde_json::from_value(json!({"operation":"jsonl-profile"})).unwrap();
+        let input = "null\n".repeat(100000);
+        let output =
+            transforms::transform(&input, &step, 8 * 1024 * 1024, transforms::CLI_OUTPUT).unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&output).unwrap()["records"],
+            100000
+        );
+        assert!(
+            transforms::transform(
+                &(input + "null\n"),
+                &step,
+                8 * 1024 * 1024,
+                transforms::CLI_OUTPUT
+            )
+            .is_err()
+        );
+        assert!(transforms::transform("{}", &step, 8 * 1024 * 1024, 4).is_err());
+        let wide = format!(
+            "{{{}}}",
+            (0..100)
+                .map(|i| format!("\"{i}{}\":0", "x".repeat(700)))
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        assert!(
+            transforms::transform(&wide, &step, 8 * 1024 * 1024, transforms::CLI_OUTPUT).is_ok()
+        );
+        assert!(transforms::execute(r#"{"operation":"jsonl-profile"}"#, &wide).is_err());
+        for operation in ["json-profile", "jsonl-profile"] {
+            let tools = crate::data::tool_definitions();
+            for properties in [
+                &tools[2]["function"]["parameters"]["properties"],
+                &tools[2]["function"]["parameters"]["properties"]["steps"]["items"]["properties"],
+            ] {
+                assert!(
+                    properties["operation"]["enum"]
+                        .as_array()
+                        .unwrap()
+                        .contains(&json!(operation))
+                );
+            }
+            for extra in [
+                json!({"pointer":""}),
+                json!({"reverse":true}),
+                json!({"lines":1}),
+                json!({"equals":"x"}),
+                json!({"contains":"x"}),
+                json!({"fields":[]}),
+            ] {
+                let mut value = json!({"operation":operation});
+                value
+                    .as_object_mut()
+                    .unwrap()
+                    .extend(extra.as_object().unwrap().clone());
+                assert!(transforms::execute(&value.to_string(), "{}").is_err());
             }
         }
     }

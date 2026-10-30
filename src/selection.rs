@@ -238,9 +238,8 @@ fn key_value<'a>(input: &'a str, pointer: &str) -> Result<&'a RawValue> {
             } else if byte == b'"' {
                 let token = &input[begin..=index];
                 if token.contains("\\u") {
-                    serde_json::from_str::<String>(token).map_err(|_| {
-                        anyhow::anyhow!("JSONL record contains an invalid Unicode string")
-                    })?;
+                    serde_json::from_str::<String>(token)
+                        .map_err(|_| anyhow::anyhow!("JSON contains an invalid Unicode string"))?;
                 }
                 start = None;
             }
@@ -249,6 +248,11 @@ fn key_value<'a>(input: &'a str, pointer: &str) -> Result<&'a RawValue> {
         }
     }
     Ok(raw)
+}
+
+/// Validate syntax/depth and all Unicode strings, borrowing the whole lexical record.
+pub(crate) fn validated_record(input: &str) -> Result<&RawValue> {
+    key_value(input, "")
 }
 
 /// Strict decoded-string key; never coerce other JSON types.

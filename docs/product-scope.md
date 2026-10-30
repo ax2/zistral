@@ -212,3 +212,12 @@ and bypass network/tool execution. Include only normally available first-turn pr
 context when explicitly enabled. Do not call this full-session prediction, automatic
 sanitization, provider probing or frozen request replay. No extra model tool, dependency
 or persistent task history. See [request preview](request-preview.md).
+
+Unreleased JSON/JSONL structural profiles fill the gap between root-key enumeration
+and manually reading raw logs before choosing explicit fields. Report bounded object
+paths, type counts and record presence/missing counts, with arrays as opaque leaves.
+Do not include sample values, infer schemas or automatically mask fields. Keys remain
+visible; only explicit offline profiling avoids disclosing raw values to a model.
+This reuses native pipelines/tool definitions, adds no dependency or tool name, and
+completes the candidate pre-sharing workflow with redaction and first-request preview.
+Review/test that coherent milestone before release; see [JSON profiles](json-profile.md).

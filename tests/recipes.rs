@@ -1904,3 +1904,193 @@ fn redaction_uses_exact_unicode_keys_and_strict_array_indexes() {
         assert!(!out.status.success() && out.stdout.is_empty());
     }
 }
+
+#[test]
+fn json_profiles_are_offline_value_free_and_distinguish_missing_from_null() {
+    let root = tempfile::tempdir().unwrap();
+    let input =
+        b"{\"token\":\"PRIVATE_PROFILE_VALUE\",\"user\":{\"email\":null}}\r\n{\"user\":null}\n";
+    let out = invoke(root.path(), &["data", "jsonl-profile"], input);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        out.stderr.is_empty()
+            && !String::from_utf8_lossy(&out.stdout).contains("PRIVATE_PROFILE_VALUE")
+    );
+    let p: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(p["records"], 2);
+    let token = p["paths"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|x| x["pointer"] == "/token")
+        .unwrap();
+    assert_eq!(token["present"], 1);
+    assert_eq!(token["missing"], 1);
+    assert_eq!(token["types"], serde_json::json!({"string":1}));
+    let email = p["paths"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|x| x["pointer"] == "/user/email")
+        .unwrap();
+    assert_eq!(email["types"], serde_json::json!({"null":1}));
+    assert_eq!(email["missing"], 1);
+    let single = invoke(
+        root.path(),
+        &["data", "json-profile"],
+        b"{\n\"x\":1.2300E+400,\n\"empty\":\"\"\n}\n",
+    );
+    assert!(single.status.success());
+    let p: serde_json::Value = serde_json::from_slice(&single.stdout).unwrap();
+    assert_eq!(p["records"], 1);
+    assert_eq!(p["paths"][2]["types"], serde_json::json!({"number":1}));
+    let empty = invoke(root.path(), &["data", "jsonl-profile"], b"");
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&empty.stdout).unwrap(),
+        serde_json::json!({"records":0,"paths":[]})
+    );
+}
+
+#[test]
+fn structural_profile_plan_exports_replays_and_chains_explicit_array_selection() {
+    let root = tempfile::tempdir().unwrap();
+    let out = invoke(
+        root.path(),
+        &[
+            "data",
+            "--show-plan",
+            "--step",
+            "json-select:/events",
+            "--step",
+            "array-to-jsonl",
+            "--step",
+            "jsonl-profile",
+            "-o",
+            "profile.toml",
+        ],
+        b"not data",
+    );
+    assert!(out.status.success() && out.stdout.is_empty() && out.stderr.is_empty());
+    let source = br#"{"events":[{"id":1,"token":"PRIVATE_PROFILE_SAMPLE"},{"id":"s"}]}"#;
+    let out = invoke(root.path(), &["data", "--recipe", "profile.toml"], source);
+    assert!(out.status.success());
+    let p: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(p["records"], 2);
+    assert_eq!(
+        p["paths"][1]["types"],
+        serde_json::json!({"number":1,"string":1})
+    );
+    assert!(!String::from_utf8_lossy(&out.stdout).contains("PRIVATE_PROFILE_SAMPLE"));
+    let selected = invoke(
+        root.path(),
+        &[
+            "data",
+            "--step",
+            "json-select:/events",
+            "--step",
+            "array-to-jsonl",
+            "--step",
+            "jsonl-profile",
+            "--step",
+            "json-select:/records",
+        ],
+        source,
+    );
+    assert!(selected.status.success());
+    assert_eq!(selected.stdout, b"2\n");
+    let plan = std::fs::read_to_string(root.path().join("profile.toml")).unwrap();
+    assert!(
+        plan.contains("jsonl-profile")
+            && !plan.contains("PRIVATE_PROFILE_SAMPLE")
+            && !plan.contains("not data")
+    );
+}
+
+#[test]
+fn invalid_profiles_preserve_files_and_do_not_echo_values_or_ambiguous_keys() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join("keep.json"), b"old report").unwrap();
+    for tail in [
+        "",
+        r#"{"private-key-719":1,"private-key-719":"PRIVATE_PROFILE_VALUE"}"#,
+        r#"{"x":"\ud800"}"#,
+        r#"{"x":} PRIVATE_PROFILE_VALUE"#,
+    ] {
+        let input = format!("{{}}\n{tail}\n");
+        let out = invoke(
+            root.path(),
+            &["data", "jsonl-profile", "-o", "keep.json", "--force"],
+            input.as_bytes(),
+        );
+        assert!(!out.status.success() && out.stdout.is_empty());
+        let error = String::from_utf8_lossy(&out.stderr);
+        assert!(error.contains("record 2"));
+        assert!(!error.contains("private-key-719") && !error.contains("PRIVATE_PROFILE_VALUE"));
+        assert_eq!(
+            std::fs::read(root.path().join("keep.json")).unwrap(),
+            b"old report"
+        );
+    }
+    for extra in [
+        vec!["--pointer", ""],
+        vec!["--reverse"],
+        vec!["--lines", "2"],
+        vec!["--contains", "x"],
+        vec!["--equals", "x"],
+        vec!["--field", "x=/x"],
+    ] {
+        let out = invoke(
+            root.path(),
+            &[
+                vec!["data", "json-profile"],
+                extra,
+                vec!["-i", "missing-input"],
+            ]
+            .concat(),
+            b"",
+        );
+        assert!(!out.status.success() && out.stdout.is_empty());
+        assert!(!String::from_utf8_lossy(&out.stderr).contains("cannot open"));
+    }
+}
+
+#[test]
+fn profile_before_masking_exposes_missing_paths_without_automatically_modifying_input() {
+    let root = tempfile::tempdir().unwrap();
+    let data = b"{\"token\":\"PRIVATE_PROFILE_VALUE\",\"n\":1e9999}\n{\"token\":null,\"n\":-0}\n";
+    std::fs::write(root.path().join("source.jsonl"), data).unwrap();
+    let report = invoke(
+        root.path(),
+        &["data", "jsonl-profile", "-i", "source.jsonl"],
+        b"",
+    );
+    assert!(report.status.success());
+    let p: serde_json::Value = serde_json::from_slice(&report.stdout).unwrap();
+    assert_eq!(p["paths"][2]["pointer"], "/token");
+    assert_eq!(p["paths"][2]["missing"], 0);
+    let masked = invoke(
+        root.path(),
+        &[
+            "data",
+            "jsonl-redact",
+            "--pointer",
+            "/token",
+            "-i",
+            "source.jsonl",
+        ],
+        b"",
+    );
+    assert!(masked.status.success());
+    assert_eq!(
+        masked.stdout,
+        b"{\"token\":\"[REDACTED]\",\"n\":1e9999}\n{\"token\":\"[REDACTED]\",\"n\":-0}\n"
+    );
+    assert_eq!(
+        std::fs::read(root.path().join("source.jsonl")).unwrap(),
+        data
+    );
+}

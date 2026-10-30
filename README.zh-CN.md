@@ -599,3 +599,8 @@ zi data jsonl-where --pointer /level --equals ERROR --show-plan -o errors.toml
 与实际发送共用正文构造；不含认证头、不联网、不执行工具，可保存为 JSON 审阅。
 项目选项仅提供正常首轮上下文，后续请求仍取决于实际模型和工具结果。详见
 [请求预览](docs/request-preview.md)。本功能和离线值遮盖累计到下一批统一发布。
+
+同批新增 `json-profile` / `jsonl-profile` 结构概览：汇总嵌套对象路径、类型与出现/缺失
+次数，不含样本值，数组作为叶节点；可以先明确选择数组再展开统计。报告仍包含键名，
+不推断 Schema 或自动脱敏，详见[结构概览](docs/json-profile.md)。与离线值遮盖、
+请求预览共同形成一批发送前准备改进，统一验收后再决定发版。

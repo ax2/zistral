@@ -784,3 +784,11 @@ stream mode, without authentication headers, networking or tool execution. Optio
 project flags include only their normal initial scoped context. See
 [request preview](docs/request-preview.md) for limits and output/environment differences.
 This joins offline value redaction in the next batch; no new version is published yet.
+
+Unreleased `json-profile` / `jsonl-profile` report nested object paths, type counts and
+missing values without sample values. Arrays remain opaque leaves; explicit selection
+and array expansion choose a record set. The bounded report helps review paths before
+masking or sharing input. It exposes key names, is not a schema/sanitization guarantee,
+and adds no dependency or model tool name. See [structural profiles](docs/json-profile.md).
+Together with offline redaction and request preview, it completes a candidate input-
+preparation milestone to review and test together before selecting a release.

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Inspect JSON/JSONL object paths, observed types and record presence/missing counts without sample values. Keep arrays opaque, preserve complete-result failures and bounded shared CLI/recipe/tool execution; report key names explicitly.
+
 - Preview the actual first model request with `--preview`: shared protocol/context construction, resolved input/presets and explicit capabilities, credential headers omitted, no networking/tool execution, and bounded complete JSON/file output.
 
 - Add explicit JSON/JSONL value redaction for offline pre-sharing preparation: replace one pointer value with a fixed marker while preserving unrelated lexical payloads; reuse and inspect ordered recipes.
