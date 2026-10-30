@@ -79,7 +79,19 @@ Release request. It builds a Windows installer/archive and exercises install twi
 a directory containing both spaces and Chinese characters, then uninstall/PATH/config
 preservation. Its short-lived `installer-check-SHA` artifacts are CI candidates, not a
 GitHub Release. Require that exact-SHA workflow to pass when it is present, alongside
-normal CI. This does not replace the three-platform native checks in Release.
+normal CI. Each installed Windows executable also runs the offline pre-sharing workflow
+check. Release runs the same check against the native Linux/macOS installations.
+The check covers structural reports, reusable optional-field masking, pipe/file request
+preview, no model connection and preservation of existing files on failure. It uses
+synthetic data and isolated configuration, with Python only on the test host; installed
+zi itself still requires no Python. It does not replace full Rust tests or real model
+acceptance checks. This does not replace the three-platform native checks in Release.
+
+To verify an extracted portable executable without changing your installation:
+
+```sh
+python scripts/test_pre_sharing_delivery.py --binary /path/to/zi
+```
 
 ## What the explicit release action does
 

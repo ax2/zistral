@@ -23,11 +23,20 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
       - name: Rust stable
         run: rustup update stable --no-self-update && rustup default stable
       - run: rustup component add rustfmt clippy
       - run: cargo fmt --check
       - run: cargo test --locked
+      - name: Check pre-sharing executable workflow
+        shell: python
+        run: |
+          import os, subprocess, sys
+          binary = 'target/debug/zi' + ('.exe' if os.name == 'nt' else '')
+          subprocess.run([sys.executable, 'scripts/test_pre_sharing_delivery.py', '--binary', binary], check=True)
       - run: cargo clippy --locked --all-targets -- -D warnings
   msrv:
     runs-on: ubuntu-latest

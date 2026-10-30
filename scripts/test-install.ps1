@@ -34,6 +34,8 @@ function Install-Candidate {
     $count='hello world' | & "$Destination\zi.exe" --count | ConvertFrom-Json
     if($count.words -ne 2){throw 'Installed pipe input failed'}
     if(-not(Test-Path -LiteralPath "$Destination\launch.cmd")){throw 'Start menu launcher missing'}
+    & python (Join-Path $root 'scripts/test_pre_sharing_delivery.py') --binary "$Destination\zi.exe"
+    if($LASTEXITCODE -ne 0){throw 'Installed pre-sharing workflow failed'}
 }
 function Uninstall-Candidate {
     if(Test-Path -LiteralPath "$Destination\unins000.exe"){

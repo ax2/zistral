@@ -2,9 +2,9 @@ name: Installer checks
 on:
   push:
     branches: [main]
-    paths: ['packaging/**', 'scripts/package.py', 'scripts/test-install.ps1', '.github/workflows/installer-checks.yml']
+    paths: ['packaging/**', 'scripts/package.py', 'scripts/test-install.ps1', 'scripts/test_pre_sharing_delivery.py', '.github/workflows/installer-checks.yml']
   pull_request:
-    paths: ['packaging/**', 'scripts/package.py', 'scripts/test-install.ps1', '.github/workflows/installer-checks.yml']
+    paths: ['packaging/**', 'scripts/package.py', 'scripts/test-install.ps1', 'scripts/test_pre_sharing_delivery.py', '.github/workflows/installer-checks.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -18,6 +18,9 @@ jobs:
       TARGET: x86_64-pc-windows-msvc
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
       - name: Rust stable
         run: rustup update stable --no-self-update && rustup default stable
       - name: Build candidate executable
