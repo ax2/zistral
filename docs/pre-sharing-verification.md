@@ -47,6 +47,17 @@ justify replacing the existing traversal algorithms. They are not a statistical 
 cross-platform performance guarantee, allocator-only measurement, or measurement of
 the future official release assets. Keep the raw source/binary identity when citing them.
 
+## Separate terminal display check
+
+The pipe/file measurements above exclude terminal display escaping. A separate
+regression uses an actual terminal with 3 Mi C1 characters: its raw preview fits,
+but its escaped representation exceeds 16 MiB. It must exit with an error and
+without a partial JSON body. The renderer now counts the complete escaped UTF-8
+length before allocating the display buffer and writes escapes directly into it.
+Unit tests cover exact byte boundaries, multibyte text and preserved JSON tokens.
+This refinement does not change pipe/file JSON or the actual request body, and
+is not an additional batch outcome or an official-package performance claim.
+
 ## Delivery boundaries
 
 Local 308 Rust tests and nine release-rule tests passed for the runtime source above;

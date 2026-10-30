@@ -72,7 +72,9 @@ The preview is UTF-8 JSON on stdout, including in a terminal, with no rich resul
 or activity display. Terminal display uses JSON Unicode escapes for literal DEL/C1
 controls, preserving parsed values and legal formatting whitespace; pipe/file bytes
 and the actual request body retain their original values. The 16 MiB cap also applies
-after terminal escaping. `-o FILE` uses normal complete-result publication: no overwrite by
+after terminal escaping. The escaped byte length is checked before allocating the
+terminal display buffer; oversized previews fail without printing a JSON prefix.
+`-o FILE` uses normal complete-result publication: no overwrite by
 default, `--force` replaces only after successful preparation/serialization, and failure
 preserves an existing result. Input limits still apply; encoded preview output is capped
 at 16 MiB while serializing (control characters can expand). No partial JSON is emitted.

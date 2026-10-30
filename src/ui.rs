@@ -49,19 +49,47 @@ pub fn clean(text: &str) -> String {
     out
 }
 
-// Only for already validated JSON sent to a terminal. Keep legal JSON whitespace. Escaping keeps
-// literal DEL/C1 string values and keys intact without parsing/reserializing
-// numbers, duplicate keys, or existing escape tokens. Raw pipe/file text bypasses it.
-pub fn json_display(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
+// Only for already validated JSON sent to a terminal. Keep legal JSON whitespace.
+// Escaping keeps literal DEL/C1 values without changing original number/key tokens.
+fn escaped_json_control(c: char) -> bool {
+    c.is_control() && !matches!(c, '\n' | '\r' | '\t')
+}
+
+fn render_json_display(text: &str, out: &mut String) {
+    use std::fmt::Write as _;
     for c in text.chars() {
-        if c.is_control() && !matches!(c, '\n' | '\r' | '\t') {
-            out.push_str(&format!("\\u{:04x}", u32::from(c)));
+        if escaped_json_control(c) {
+            write!(out, "\\u{:04x}", u32::from(c)).expect("writing to String cannot fail");
         } else {
             out.push(c);
         }
     }
+}
+
+pub fn json_display(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    render_json_display(text, &mut out);
     out
+}
+
+/// Check the complete escaped length before allocating the display buffer.
+/// Raw pipe/file JSON bypasses this terminal-only representation.
+pub fn json_display_with_limit(text: &str, limit: usize) -> Option<String> {
+    let mut needed = text.len();
+    if needed > limit {
+        return None;
+    }
+    for c in text.chars() {
+        if escaped_json_control(c) {
+            needed = needed.checked_add(6 - c.len_utf8())?;
+            if needed > limit {
+                return None;
+            }
+        }
+    }
+    let mut out = String::with_capacity(needed);
+    render_json_display(text, &mut out);
+    Some(out)
 }
 
 pub fn heading(title: &str) {
@@ -456,5 +484,51 @@ mod tests {
         );
         assert!(shown.contains("{\n\t") && shown.contains("\r\n}"));
         assert!(shown.contains("\\u009b") && !shown.contains('\u{009b}'));
+    }
+}
+
+#[cfg(test)]
+mod display_limit_tests {
+    use super::*;
+    #[test]
+    fn display_preflight_counts_utf8_and_escapes_without_changing_json_tokens() {
+        let text = format!(
+            "{{\n\t\"{}\":\"L{}{}中文😀\",\"n\":1.2300E+400,\"n\":-0.00,\"escaped\":\"\\u0080\"\r\n}}",
+            '\u{0080}', '\u{009b}', '\u{007f}'
+        );
+        let expected = text
+            .replace('\u{0080}', "\\u0080")
+            .replace('\u{009b}', "\\u009b")
+            .replace('\u{007f}', "\\u007f");
+        crate::transforms::validate_json(&text).unwrap();
+        let shown = json_display_with_limit(&text, expected.len()).unwrap();
+        assert_eq!(shown, expected);
+        assert_eq!(shown, json_display(&text));
+        crate::transforms::validate_json(&shown).unwrap();
+        assert!(shown.contains("{\n\t") && shown.contains("\r\n}"));
+        assert!(shown.contains("1.2300E+400,\"n\":-0.00"));
+        assert!(json_display_with_limit(&text, expected.len() - 1).is_none());
+        assert!(json_display_with_limit("null", 3).is_none());
+        assert_eq!(json_display_with_limit("null", 4).unwrap(), "null");
+        let plain = "{\"s\":\"中文😀\"}";
+        assert_eq!(json_display_with_limit(plain, plain.len()).unwrap(), plain);
+        assert!(json_display_with_limit(plain, plain.chars().count()).is_none());
+    }
+    #[test]
+    fn display_preflight_rejects_control_expansion_and_handles_fitting_payloads() {
+        let large = format!("{{\"s\":\"{}\"}}", "\u{0080}".repeat(3 * 1024 * 1024));
+        assert!(large.len() < crate::transforms::CLI_OUTPUT);
+        assert!(json_display_with_limit(&large, crate::transforms::CLI_OUTPUT).is_none());
+        let count = 32768;
+        let fitting = format!("{{\"s\":\"{}\"}}", "\u{009b}".repeat(count));
+        let expected = 8 + 6 * count;
+        let shown = json_display_with_limit(&fitting, expected).unwrap();
+        assert_eq!(shown.len(), expected);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&shown).unwrap(),
+            serde_json::from_str::<serde_json::Value>(&fitting).unwrap()
+        );
+        assert!(!shown.contains('\u{009b}'));
+        assert!(json_display_with_limit(&fitting, expected - 1).is_none());
     }
 }

@@ -800,3 +800,112 @@ fn request_preview_remains_json_in_real_terminal_without_setup_or_activity() {
     assert!(!shown.contains("Let's connect") && !shown.contains("API key:"));
     assert!(!root.path().join("config").exists());
 }
+
+#[test]
+fn preview_display_overflow_emits_only_error_in_real_terminal() {
+    let root = tempfile::tempdir().unwrap();
+    let input = root.path().join("display-overflow.txt");
+    std::fs::write(&input, "\u{0080}".repeat(3 * 1024 * 1024)).unwrap();
+    let pair = native_pty_system()
+        .openpty(PtySize {
+            rows: 40,
+            cols: 120,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .unwrap();
+    let binary =
+        std::env::var_os("ZISTRAL_TEST_BINARY").unwrap_or_else(|| env!("CARGO_BIN_EXE_zi").into());
+    let mut cmd = CommandBuilder::new(binary);
+    cmd.args([
+        "--preview",
+        "--no-tools",
+        "--model",
+        "fixture",
+        "-i",
+        input.to_str().unwrap(),
+        "task",
+    ]);
+    cmd.cwd(root.path());
+    for (name, _) in std::env::vars() {
+        if name.starts_with("ZI_")
+            || matches!(
+                name.to_uppercase().as_str(),
+                "OPENAI_API_KEY" | "ANTHROPIC_API_KEY" | "HTTP_PROXY" | "HTTPS_PROXY" | "ALL_PROXY"
+            )
+        {
+            cmd.env_remove(name);
+        }
+    }
+    cmd.env("HOME", root.path());
+    cmd.env("USERPROFILE", root.path());
+    cmd.env("APPDATA", root.path().join("config"));
+    cmd.env("XDG_CONFIG_HOME", root.path().join("config"));
+    cmd.env("TERM", "xterm-256color");
+    let mut child = pair.slave.spawn_command(cmd).unwrap();
+    drop(pair.slave);
+    let mut reader = pair.master.try_clone_reader().unwrap();
+    let mut writer = pair.master.take_writer().unwrap();
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut buf = [0; 4096];
+        while let Ok(n) = reader.read(&mut buf) {
+            if n == 0 || tx.send(buf[..n].to_vec()).is_err() {
+                break;
+            }
+        }
+    });
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let mut output = String::new();
+    let mut queries = 0;
+    let mut exit = None;
+    let mut quiet = Instant::now();
+    loop {
+        if exit.is_none() {
+            exit = child.try_wait().unwrap();
+        }
+        match rx.recv_timeout(Duration::from_millis(50)) {
+            Ok(bytes) => {
+                quiet = Instant::now();
+                output.push_str(&String::from_utf8_lossy(&bytes));
+                if output.len() > 65536 {
+                    child.kill().ok();
+                    panic!("preview leaked partial terminal output");
+                }
+                let found = output.matches("\x1b[6n").count();
+                for _ in queries..found {
+                    writer.write_all(b"\x1b[1;1R").unwrap();
+                }
+                writer.flush().unwrap();
+                queries = found;
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                break;
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+        }
+        if exit.is_some() && quiet.elapsed() > Duration::from_millis(250) {
+            break;
+        }
+        if Instant::now() >= deadline {
+            child.kill().ok();
+            panic!("preview display boundary did not finish: {output}");
+        }
+    }
+    let status = exit
+        .or_else(|| child.try_wait().unwrap())
+        .expect("preview did not exit");
+    assert!(!status.success());
+    let shown = console::strip_ansi_codes(&output);
+    assert!(
+        shown.contains("terminal request preview exceeds 16 MiB"),
+        "{shown}"
+    );
+    assert!(
+        !shown.contains("first-model-request-preview")
+            && !shown.contains("\"authentication\"")
+            && !shown.contains("Input data")
+    );
+    assert!(!output.contains('\u{0080}'));
+    assert!(!root.path().join("config").exists());
+}
