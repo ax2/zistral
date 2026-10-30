@@ -1,6 +1,6 @@
 # Offline data pipelines / 离线处理流程
 
-## Embedded recipes / 内置配方（开发中，尚未发布）
+## Embedded recipes / 内置配方（v0.31.0）
 
 The development build embeds reviewed native recipe definitions in the executable.
 No separate recipe directory or model configuration is needed after installation.

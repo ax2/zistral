@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.31.0 — 2026-10-30
 
 - Rank native frequency results and other exact JSON integer literals with
   `jsonl-sort-int`: stable ties in both directions, no float conversion or fixed

@@ -74,7 +74,7 @@ or secrets. Definitions contain no input/result paths and are validated before i
 Limits are 16 steps, 64 KiB definition, 8 MiB initial data and 16 MiB per intermediate.
 This is reusable user-maintained computation, not persistent task memory or a plugin engine.
 
-The next unreleased batch embeds a small reviewed recipe catalog under explicit
+Since v0.31.0, zi embeds a small reviewed recipe catalog under explicit
 `builtin:NAME` references. `zi data --list-recipes` discovers it offline; `--show-plan`
 exports the same versioned steps for review and local editing. Reuse existing native
 operations and validation; do not add a template engine, automatic project lookup,
@@ -90,7 +90,7 @@ original input only, 16 MiB intermediate text and 64 KiB final JSON envelope. It
 need for a model to reconstruct a compound deterministic transformation. It does not load
 recipe files, execute expressions or carry tool output into another invocation implicitly.
 
-The unreleased batch also supports explicit preset-library import with a no-write
+Since v0.31.0, zi also supports explicit preset-library import with a no-write
 preview, collision checks and bounded merge/publication. It installs declarative task
 instructions, never model settings, executable code, project permissions or past input.
 Provide safe line/column diagnostics for editing definitions; do not print raw parser

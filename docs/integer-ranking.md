@@ -1,4 +1,4 @@
-# Exact integer ranking / 精确整数排名（开发中，尚未发布）
+# Exact integer ranking / 精确整数排名（v0.31.0）
 
 Frequency counts are integers. The existing `jsonl-sort` compares JSON strings and
 intentionally rejects numeric fields, so it cannot rank `jsonl-count-by` output.

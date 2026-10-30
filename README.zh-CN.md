@@ -17,7 +17,7 @@ git diff | zi "生成一句简洁的提交说明"
 | 平台 | 安装包 | 安装方法 |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | 双击安装，无需管理员权限，自动添加用户 PATH 和开始菜单入口 |
-| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.30.0-linux-amd64.deb` |
+| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.31.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | 双击安装，命令放到 `/usr/local/bin/zi` |
 
 安装后直接运行 `zi`。Windows 安装结束可立即启动，或在开始菜单打开 zi；
@@ -238,14 +238,14 @@ Agent 可通过现有 `transform_input` 的有序 `steps` 一次完成“去空�
 
 ## 可复用的离线处理流程
 
-开发中（尚未发布）：`zi data jsonl-sort-int --pointer /count --reverse` 按 JSON 整数字面值
+v0.31.0 起：`zi data jsonl-sort-int --pointer /count --reverse` 按 JSON 整数字面值
 对完整记录精确排序，可直接接在频次统计后。超出机器整数范围的位数不丢精度（仍受输入大小上限
 约束），正反序同值均保持原顺序；不转换字符串，不接受小数或指数写法。
 `--recipe builtin:top-severity-counts` 可直接输出频次前 20 组 CSV。
 [规则与配方示例](docs/integer-ranking.md)。
 
 
-开发中（尚未发布）：程序已内嵌五份经过审阅的配方，无需下载源码或另行放置配方文件：
+v0.31.0 起：程序已内嵌五份经过审阅的配方，无需下载源码或另行放置配方文件：
 
 ```sh
 zi data --list-recipes
@@ -286,7 +286,7 @@ shell `>` 的创建/截断行为仍由 shell 决定。
 
 ## 场景命令与自定义提示词
 
-开发中（尚未发布）：导出的场景可直接合并到个人场景库，不再手工拼接 TOML：
+v0.31.0 起：导出的场景可直接合并到个人场景库，不再手工拼接 TOML：
 
 ```sh
 zi presets import team-fr.toml --dry-run

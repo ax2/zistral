@@ -20,7 +20,7 @@ Download a native installer from [Releases](https://github.com/ax2/zistral/relea
 | Platform | Package | Installation |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | Per-user installer; adds PATH and a Start menu launcher; no administrator required |
-| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.30.0-linux-amd64.deb` |
+| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.31.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | Open the package; installs `/usr/local/bin/zi` |
 
 Then type `zi`. On first launch, choose an existing Codex, WorkBuddy or dsh configuration,
@@ -56,7 +56,7 @@ Portable archives contain one executable plus documentation. Extract zi (zi.exe 
 Build from source with Rust 1.85+ (a current stable toolchain is recommended):
 
 ```sh
-cargo install --git https://github.com/ax2/zistral --tag v0.9.0 --locked
+cargo install --git https://github.com/ax2/zistral --tag v0.31.0 --locked
 ```
 
 The package is named `zistral`; the installed command is `zi`. It is not yet
@@ -317,7 +317,7 @@ See [tool pipeline examples and boundaries](docs/tool-pipelines.md).
 
 ## Reusable offline pipelines
 
-Development (unreleased): `zi data jsonl-sort-int --pointer /count --reverse` ranks
+Since v0.31.0: `zi data jsonl-sort-int --pointer /count --reverse` ranks
 whole records by exact JSON integer literals. `2` precedes `10` ascending; arbitrarily
 long digits retain precision within existing size limits, and ties (including -0/0)
 stay stable both ways. Decimal/exponent syntax and string coercion are rejected.
@@ -325,7 +325,7 @@ Use `--recipe builtin:top-severity-counts` for a ready-to-run top20 frequency re
 [Semantics, limits and reusable examples](docs/integer-ranking.md).
 
 
-Development (unreleased): installed binaries embed five reviewed recipes. Discover,
+Since v0.31.0: installed binaries embed five reviewed recipes. Discover,
 inspect and run them without a source checkout or model configuration:
 
 ```sh
@@ -370,7 +370,7 @@ recipes, not dry-run results or a guarantee that future data will pass each oper
 
 ## Reusable task presets
 
-Development (unreleased): import an exported version-1 preset into your library:
+Since v0.31.0: import an exported version-1 preset into your library:
 
 ```sh
 zi presets import team-fr.toml --dry-run

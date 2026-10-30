@@ -1,4 +1,4 @@
-# Import reusable task presets / 导入可复用场景（开发中，尚未发布）
+# Import reusable task presets / 导入可复用场景（v0.31.0）
 
 An exported task definition can be installed in your user library without editing or
 concatenating TOML by hand. This is offline customization of explicit instructions:
@@ -57,7 +57,7 @@ transaction against arbitrary concurrent changes by other processes.
 
 ## Locate definition errors / 定位定义错误
 
-The development build reports a parser-provided line/column for invalid recipe and
+Since v0.31.0, zi reports a parser-provided line/column for invalid recipe and
 preset TOML, without echoing source excerpts, unknown field values, prompt text or
 raw parser messages. Lines and columns start at 1. Columns count Unicode characters
 (a tab counts as one), with an initial BOM excluded; editor visual columns may differ.
