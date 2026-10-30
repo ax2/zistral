@@ -1552,8 +1552,7 @@ fn builtin_failure_and_explicit_catalog_export_keep_normal_publication_rules() {
 
 #[cfg(unix)]
 #[test]
-fn builtin_namespace_has_explicit_filename_escape_and_preserves_non_utf8_paths() {
-    use std::os::unix::ffi::OsStringExt;
+fn builtin_namespace_has_explicit_filename_escape() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
     let definition = "version=1\n[[steps]]\noperation='json-minify'\n";
@@ -1576,6 +1575,25 @@ fn builtin_namespace_has_explicit_filename_escape_and_preserves_non_utf8_paths()
     );
     assert!(!unknown.status.success() && unknown.stdout.is_empty());
     assert!(String::from_utf8_lossy(&unknown.stderr).contains("unknown builtin recipe"));
+    std::fs::write(root.join("配方 recent.toml"), definition).unwrap();
+    let unicode = invoke(
+        root,
+        &["data", "--show-plan", "--recipe", "配方 recent.toml"],
+        b"",
+    );
+    assert!(unicode.status.success() && unicode.stderr.is_empty());
+    assert!(String::from_utf8_lossy(&unicode.stdout).contains("json-minify"));
+}
+
+// The macOS runner's filesystem rejects creating invalid UTF-8 filenames.
+// Exercise that filename contract where the test filesystem supports it.
+#[cfg(target_os = "linux")]
+#[test]
+fn explicit_recipe_preserves_non_utf8_linux_paths() {
+    use std::os::unix::ffi::OsStringExt;
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let definition = "version=1\n[[steps]]\noperation='json-minify'\n";
     let name = std::ffi::OsString::from_vec(b"recipe-\xff.toml".to_vec());
     std::fs::write(root.join(&name), definition).unwrap();
     let out = command(root)

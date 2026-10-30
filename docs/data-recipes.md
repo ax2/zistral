@@ -34,7 +34,8 @@ The `builtin:` prefix is reserved only at the start of the supplied reference; n
 are exact and case-sensitive, and unknown names fail before opening input or output.
 There is no fallback to local files and no implicit project lookup. On Unix, address
 a literal filename such as `builtin:cleanup` via `./builtin:cleanup`. Other paths,
-including non-UTF-8 Unix paths, retain normal explicit-file behavior. Embedded and
+including non-UTF-8 names on filesystems that permit them, retain normal explicit-file
+behavior. Embedded and
 file recipes share the same parser, validation and execution pipeline.
 
 ## Compose your own definition / 编写配方
