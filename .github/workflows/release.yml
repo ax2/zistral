@@ -98,6 +98,7 @@ jobs:
           test "$(zi --version)" = "zi ${RELEASE_TAG#v}"
           echo hello | zi --count | python -c 'import json,sys; assert json.load(sys.stdin)["words"] == 1'
           python scripts/test_pre_sharing_delivery.py --binary /usr/bin/zi
+          python scripts/test_table_preparation_delivery.py --binary /usr/bin/zi
           sudo dpkg -r zistral
       - name: Test macOS installation
         if: runner.os == 'macOS'
@@ -106,6 +107,7 @@ jobs:
           test "$(/usr/local/bin/zi --version)" = "zi ${RELEASE_TAG#v}"
           echo hello | /usr/local/bin/zi --count | python -c 'import json,sys; assert json.load(sys.stdin)["words"] == 1'
           python scripts/test_pre_sharing_delivery.py --binary /usr/local/bin/zi
+          python scripts/test_table_preparation_delivery.py --binary /usr/local/bin/zi
       - uses: actions/upload-artifact@v4
         with:
           name: release-${{ matrix.target }}

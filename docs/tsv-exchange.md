@@ -47,3 +47,12 @@ header name. Model tools additionally cap the serialized final JSON envelope at
 is bounded in memory, not a streaming table engine. Invalid later rows fail the
 complete task without stdout intermediates or replacement of an existing `-o` file.
 Shell redirection has the shell's own truncation behavior; prefer `-o FILE`.
+
+
+The same development batch adds [exact integer field filtering](integer-filtering.md)
+and [explicit optional projection values](jsonl-projection.md#explicit-defaults-for-absent-fields--显式缺失值未发布).
+For a heterogeneous nested table, inspect/edit
+[`optional-event-table.toml`](examples/optional-event-table.toml) and then choose it
+explicitly with `--recipe`. These are accumulated related outcomes, not separate
+TSV/import/export patch releases. The example is a user-maintained definition;
+installed zi still needs no companion recipe files for ordinary operations.

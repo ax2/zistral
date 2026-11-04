@@ -1,0 +1,11 @@
+version = 1
+
+[[steps]]
+operation = "jsonl-project"
+fields = [
+  { name = "id", pointer = "/payload/id" },
+  { name = "tag", pointer = "/payload/tag", default_json = '""' },
+]
+
+[[steps]]
+operation = "jsonl-to-tsv"

@@ -1,0 +1,111 @@
+"""Check an installed executable's complete table-preparation workflow offline.
+
+Uses only the Python standard library and synthetic inputs. This is a delivery
+check, not a zi runtime dependency or a model-service quality evaluation.
+"""
+import argparse
+import json
+import os
+from pathlib import Path
+import socket
+import subprocess
+import tempfile
+
+
+def verify(binary):
+    checks = []
+    with tempfile.TemporaryDirectory(prefix='zi table-测试 ') as temporary:
+        root = Path(temporary)
+        env = {k: v for k, v in os.environ.items()
+               if not k.upper().startswith('ZI_') and k.upper() not in {
+                   'OPENAI_API_KEY', 'ANTHROPIC_API_KEY',
+                   'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY'}}
+        env.update(HOME=str(root), USERPROFILE=str(root), APPDATA=str(root/'config'),
+                   XDG_CONFIG_HOME=str(root/'config'), NO_PROXY='*')
+        broken = root/'unused model.toml'
+        broken.write_text('invalid model configuration', encoding='utf-8')
+        env['ZI_CONFIG'] = str(broken)
+        with socket.socket() as listener:
+            listener.bind(('127.0.0.1', 0))
+            listener.listen()
+            listener.setblocking(False)
+            env['ZI_BASE_URL'] = f'http://127.0.0.1:{listener.getsockname()[1]}/v1'
+            env['ZI_MODEL'] = 'delivery-fixture'
+
+            def run(args, data=b'', success=True):
+                result = subprocess.run([str(binary), *map(str, args)], input=data,
+                                        capture_output=True, cwd=root, env=env, timeout=30)
+                assert (result.returncode == 0) == success, (args[:3], result.returncode)
+                try:
+                    connection, _ = listener.accept()
+                except BlockingIOError:
+                    pass
+                else:
+                    connection.close()
+                    raise AssertionError('Offline table workflow attempted a model connection')
+                return result
+
+            recipe = root/'table recipe-测试.toml'
+            recipe.write_text("""version=1
+[[steps]]
+operation="tsv-to-jsonl"
+[[steps]]
+operation="jsonl-count-by"
+pointer="/level"
+[[steps]]
+operation="jsonl-where-int"
+pointer="/count"
+equals="2"
+[[steps]]
+operation="jsonl-project"
+fields=[{name="level",pointer="/value"},{name="count",pointer="/count"},{name="note",pointer="/note",default_json='""'}]
+[[steps]]
+operation="jsonl-to-tsv"
+""", encoding='utf-8')
+            raw = b'id\tlevel\r\na\tERROR\r\nb\tINFO\r\nc\tERROR\r\n'
+            expected = b'"level"\t"count"\t"note"\n"ERROR"\t"2"\t""\n'
+            result = run(['data', '--recipe', recipe], raw)
+            assert result.stdout == expected and not result.stderr
+            checks.append('compound recipe: TSV/count/exact integer equality/explicit default/TSV')
+            source = root/'input 表格.tsv'
+            source.write_bytes(raw)
+            destination = root/'output 表格.tsv'
+            result = run(['data', '--recipe', recipe, '-i', source, '-o', destination])
+            assert not result.stdout and not result.stderr and destination.read_bytes() == expected
+            checks.append('file input/output: exact pipe bytes with Unicode paths')
+            exported = run(['data', '--show-plan', '--recipe', recipe], b'not table data')
+            assert not exported.stderr
+            replay = root/'reviewed.toml'
+            replay.write_bytes(exported.stdout)
+            assert run(['data', '--recipe', replay], raw).stdout == expected
+            checks.append('plan export: ignored stdin and executable definition replay')
+            projected = run(['data', 'jsonl-project', '--field', 'tag=/tag',
+                             '--field-default', 'tag=""'], b'{"tag":null}\n{}\n')
+            assert projected.stdout == b'{"tag":null}\n{"tag":""}\n' and not projected.stderr
+            checks.append('default: present null retained, absent value explicitly filled')
+            sentinel = b'previous complete result\n'
+            destination.write_bytes(sentinel)
+            for name, args, data in [
+                ('selected noninteger', ['data', 'jsonl-where-int', '--pointer', '/n', '--equals', '2'],
+                 b'{"n":2}\n{"n":2.0}\n'),
+                ('malformed original Unicode', ['data', 'jsonl-project', '--field', 'x=/missing', '--field-default', 'x=null'],
+                 b'{}\n{"private":"\\ud800"}\n'),
+                ('invalid literal before input', ['data', 'jsonl-project', '--field', 'x=/missing',
+                 '--field-default', 'x=PRIVATE_LITERAL', '-i', 'DO_NOT_READ'], b''),
+            ]:
+                result = run([*args, '-o', destination, '--force'], data, success=False)
+                assert not result.stdout and destination.read_bytes() == sentinel
+                assert b'PRIVATE_LITERAL' not in result.stderr
+                if name == 'invalid literal before input':
+                    assert b'cannot open DO_NOT_READ' not in result.stderr
+                checks.append(name+': no prefix output, old file preserved')
+            assert not (root/'config').exists()
+    return checks
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--binary', type=Path, required=True)
+    args = parser.parse_args()
+    checked = verify(args.binary.resolve(strict=True))
+    print(json.dumps({'passed': len(checked), 'checks': checked}, ensure_ascii=True))

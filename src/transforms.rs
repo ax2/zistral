@@ -57,6 +57,8 @@ pub enum Operation {
     JsonlRedact,
     /// Keep complete JSONL records whose selected JSON string equals a literal
     JsonlWhere,
+    /// Keep complete JSONL records whose selected integer exactly equals an explicit integer
+    JsonlWhereInt,
     /// Keep the first whole JSONL record for each decoded string at an explicit pointer
     JsonlDedupe,
     /// Stably sort whole JSONL records by a decoded string field; reverse changes key order
@@ -170,15 +172,21 @@ impl Step {
             bail!("if_present is only valid for json-redact or jsonl-redact");
         }
         match (&self.equals, self.operation) {
-            (Some(value), Operation::JsonlWhere) if value.len() <= 4096 => (),
-            (Some(_), Operation::JsonlWhere) => {
+            (Some(value), Operation::JsonlWhere | Operation::JsonlWhereInt)
+                if value.len() <= 4096 => {}
+            (Some(_), Operation::JsonlWhere | Operation::JsonlWhereInt) => {
                 bail!("equals must contain at most 4096 UTF-8 bytes")
             }
-            (None, Operation::JsonlWhere) => bail!(
-                "jsonl-where requires explicit equals text; use --equals TEXT or recipe equals (empty is allowed)"
+            (None, Operation::JsonlWhere | Operation::JsonlWhereInt) => bail!(
+                "{} requires explicit equals text; use --equals TEXT or recipe equals",
+                self.operation
             ),
-            (Some(_), _) => bail!("equals is only valid for jsonl-where"),
+            (Some(_), _) => bail!("equals is only valid for jsonl-where or jsonl-where-int"),
             (None, _) => (),
+        }
+        if self.operation == Operation::JsonlWhereInt {
+            crate::integer::Key::parse(self.equals.as_deref().expect("validated equals"))
+                .context("jsonl-where-int equals must be a JSON integer literal")?;
         }
         match (self.lines, self.operation) {
             (Some(n), Operation::LinesHead | Operation::LinesTail)
@@ -230,6 +238,7 @@ impl Step {
                 | Operation::JsonRedact
                 | Operation::JsonlRedact
                 | Operation::JsonlWhere
+                | Operation::JsonlWhereInt
                 | Operation::JsonlDedupe
                 | Operation::JsonlSort
                 | Operation::JsonlSortInt
@@ -242,6 +251,7 @@ impl Step {
                 | Operation::JsonRedact
                 | Operation::JsonlRedact
                 | Operation::JsonlWhere
+                | Operation::JsonlWhereInt
                 | Operation::JsonlDedupe
                 | Operation::JsonlSort
                 | Operation::JsonlSortInt
@@ -254,7 +264,7 @@ impl Step {
             }
             (Some(_), _) => {
                 bail!(
-                    "pointer is only valid for JSON selection/redaction, jsonl-where, jsonl-dedupe, jsonl-sort, jsonl-sort-int or jsonl-count-by"
+                    "pointer is only valid for JSON selection/redaction, jsonl-where, jsonl-where-int, jsonl-dedupe, jsonl-sort, jsonl-sort-int or jsonl-count-by"
                 )
             }
             (None, _) => Ok(()),
@@ -423,13 +433,24 @@ fn jsonl_to_array(input: &str, out: &mut Buffer) -> Result<()> {
         .context("collected JSON array exceeds supported nesting")
 }
 
-fn jsonl_where(input: &str, pointer: &str, equals: &str, out: &mut Buffer) -> Result<()> {
+fn jsonl_where(input: &str, step: &Step, out: &mut Buffer) -> Result<()> {
+    let pointer = step.pointer.as_deref().expect("validated pointer");
+    let equals = step.equals.as_deref().expect("validated equals");
+    let integer = if step.operation == Operation::JsonlWhereInt {
+        Some(crate::integer::Key::parse(equals)?)
+    } else {
+        None
+    };
     for (index, line) in input.lines().enumerate() {
         if index == MAX_ITEMS {
             bail!("JSONL filtering accepts at most 100000 records");
         }
-        let matched = crate::selection::string_equals(line, pointer, equals)
-            .with_context(|| format!("cannot filter JSONL record {}", index + 1))?;
+        let matched = if let Some(expected) = integer {
+            crate::selection::integer_key(line, pointer).map(|value| value == expected)
+        } else {
+            crate::selection::string_equals(line, pointer, equals)
+        }
+        .with_context(|| format!("cannot filter JSONL record {}", index + 1))?;
         if matched {
             format_json(line, false, out)?;
             out.write_all(b"\n")?;
@@ -559,11 +580,12 @@ fn jsonl_project(input: &str, fields: &[crate::projection::Field], out: &mut Buf
             serde_json::to_writer(&mut *out, &field.name)
                 .context("cannot encode projection name within output limit")?;
             out.write_all(b":")?;
-            let selected = crate::selection::select_json(
-                line,
-                &field.pointer,
-                out.limit.saturating_sub(out.bytes.len()),
-            )
+            let available = out.limit.saturating_sub(out.bytes.len());
+            let selected = if let Some(default) = &field.default_json {
+                crate::selection::select_json_or_default(line, &field.pointer, default, available)
+            } else {
+                crate::selection::select_json(line, &field.pointer, available)
+            }
             .with_context(|| {
                 format!(
                     "cannot project JSONL record {}, field {}",
@@ -787,12 +809,7 @@ fn transform(input: &str, step: &Step, input_limit: usize, limit: usize) -> Resu
             step.fields.as_deref().expect("validated fields"),
             &mut out,
         )?,
-        Operation::JsonlWhere => jsonl_where(
-            input,
-            step.pointer.as_deref().expect("validated pointer"),
-            step.equals.as_deref().expect("validated equals"),
-            &mut out,
-        )?,
+        Operation::JsonlWhere | Operation::JsonlWhereInt => jsonl_where(input, step, &mut out)?,
         Operation::JsonlSortInt => {
             jsonl_sort_int(input, step, &mut out)?;
         }
@@ -918,6 +935,7 @@ mod tests {
         let field = crate::projection::Field {
             name: "x".into(),
             pointer: "".into(),
+            default_json: None,
         };
         let step = Step {
             if_present: None,
@@ -987,6 +1005,7 @@ mod tests {
             }],
             vec![crate::projection::Field {
                 pointer: "/PRIVATE~2".into(),
+                default_json: None,
                 ..field.clone()
             }],
         ] {
@@ -1043,6 +1062,77 @@ mod tests {
             .contains("128")
         );
     }
+    #[test]
+    fn integer_filter_limits_include_discarded_rows_and_encoded_tool_output() {
+        let step: Step = serde_json::from_value(
+            serde_json::json!({"operation":"jsonl-where-int","pointer":"/n","equals":"2"}),
+        )
+        .unwrap();
+        let input = "{\"n\":1}\n".repeat(MAX_ITEMS);
+        assert_eq!(transform(&input, &step, MAX_INPUT, CLI_OUTPUT).unwrap(), "");
+        assert!(transform(&(input + "{\"n\":1}\n"), &step, MAX_INPUT, CLI_OUTPUT).is_err());
+        let escaped = serde_json::json!({"n":2,"text":"\\".repeat(20000)}).to_string();
+        assert!(
+            transform(&escaped, &step, MAX_INPUT, TOOL_OUTPUT)
+                .unwrap()
+                .len()
+                < TOOL_OUTPUT
+        );
+        assert!(
+            execute(
+                r#"{"operation":"jsonl-where-int","pointer":"/n","equals":"2"}"#,
+                &escaped
+            )
+            .is_err()
+        );
+        let mut invalid = step.clone();
+        invalid.equals = Some("9".repeat(4097));
+        assert!(invalid.validate().is_err());
+    }
+
+    #[test]
+    fn projection_literal_defaults_enforce_type_utf8_depth_and_encoded_output_caps() {
+        let make_step = |literal: &str| {
+            serde_json::from_value::<Step>(serde_json::json!({"operation":"jsonl-project","fields":[{"name":"x","pointer":"/missing","default_json":literal}]})).unwrap()
+        };
+        let limit = format!("\"{}\"", "界".repeat(1364) + "xx");
+        assert_eq!(limit.len(), 4096);
+        assert!(make_step(&limit).validate().is_ok());
+        assert!(make_step(&(limit + " ")).validate().is_err());
+        assert!(
+            make_step(&format!("{}0{}", "[".repeat(127), "]".repeat(127)))
+                .validate()
+                .is_ok()
+        );
+        assert!(
+            make_step(&format!("{}0{}", "[".repeat(128), "]".repeat(128)))
+                .validate()
+                .is_err()
+        );
+        for value in [
+            serde_json::Value::Null,
+            serde_json::json!(false),
+            serde_json::json!({}),
+        ] {
+            assert!(serde_json::from_value::<Step>(serde_json::json!({"operation":"jsonl-project","fields":[{"name":"x","pointer":"/x","default_json":value}]})).is_err());
+        }
+        let literal = serde_json::to_string(&"\\".repeat(1000)).unwrap();
+        let step = make_step(&literal);
+        assert!(transform("{}", &step, MAX_INPUT, 5).is_err());
+        let input = "{}\n".repeat(20);
+        assert!(
+            transform(&input, &step, MAX_INPUT, TOOL_OUTPUT)
+                .unwrap()
+                .len()
+                < TOOL_OUTPUT
+        );
+        let arguments = serde_json::to_string(&step).unwrap();
+        assert!(execute(&arguments, &input).is_err());
+        let input = "{}\n".repeat(MAX_ITEMS);
+        assert!(transform(&input, &make_step("null"), MAX_INPUT, CLI_OUTPUT).is_ok());
+        assert!(transform(&(input + "{}\n"), &make_step("null"), MAX_INPUT, CLI_OUTPUT).is_err());
+    }
+
     #[test]
     fn tsv_import_export_keep_record_and_encoded_envelope_limits() {
         for operation in [Operation::TsvToJsonl, Operation::JsonlToTsv] {

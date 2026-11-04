@@ -1134,6 +1134,11 @@ fn model_turns(api: &str, calls: Vec<(Value, Value)>) -> (String, std::thread::J
                 assert!(ops.contains(&json!("tsv-to-jsonl")));
                 assert!(ops.contains(&json!("jsonl-to-tsv")));
                 assert!(ops.contains(&json!("jsonl-project")));
+                assert!(ops.contains(&json!("jsonl-where-int")));
+                assert_eq!(
+                    schema["properties"]["fields"]["items"]["properties"]["default_json"]["type"],
+                    "string"
+                );
                 assert!(ops.contains(&json!("lines-include")));
                 assert!(ops.contains(&json!("lines-exclude")));
                 assert_eq!(schema["properties"]["contains"]["type"], "string");
@@ -3076,6 +3081,419 @@ fn tsv_model_tools_recover_and_compose_on_original_input_in_all_protocols() {
             String::from_utf8_lossy(&result.stderr)
         );
         assert_eq!(result.stdout, b"verified\n");
+        server.join().unwrap();
+    }
+}
+
+#[test]
+fn integer_equality_filters_keep_exact_lexical_records_and_zero_equivalence() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let input = b"{\"n\":-0,\"id\":\"a\",\"payload\":1.2300E+400}\r\n{\"n\":0,\"id\":\"b\"}\n{\"n\":9007199254740993,\"id\":\"c\"}\n{\"n\":9007199254740992,\"id\":\"d\"}\n";
+    for expected in ["0", "-0"] {
+        let arg = format!("--equals={expected}");
+        let out = invoke(
+            root,
+            &["data", "jsonl-where-int", "--pointer", "/n", &arg],
+            input,
+        );
+        assert!(
+            out.status.success() && out.stderr.is_empty(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(
+            out.stdout,
+            b"{\"n\":-0,\"id\":\"a\",\"payload\":1.2300E+400}\n{\"n\":0,\"id\":\"b\"}\n"
+        );
+    }
+    let out = invoke(
+        root,
+        &[
+            "data",
+            "jsonl-where-int",
+            "--pointer",
+            "/n",
+            "--equals",
+            "9007199254740993",
+        ],
+        input,
+    );
+    assert!(out.status.success());
+    assert_eq!(out.stdout, b"{\"n\":9007199254740993,\"id\":\"c\"}\n");
+    let huge = "9".repeat(4096);
+    let huge_input = format!("{{\"n\":{huge},\"escaped\":\"\\u4e2d\"}}\n{{\"n\":-{huge}}}\n");
+    let out = invoke(
+        root,
+        &[
+            "data",
+            "jsonl-where-int",
+            "--pointer",
+            "/n",
+            "--equals",
+            &huge,
+        ],
+        huge_input.as_bytes(),
+    );
+    assert!(out.status.success());
+    assert_eq!(
+        out.stdout,
+        format!("{{\"n\":{huge},\"escaped\":\"\\u4e2d\"}}\n").as_bytes()
+    );
+    let plan = invoke(
+        root,
+        &[
+            "data",
+            "jsonl-where-int",
+            "--pointer",
+            "/n",
+            "--equals",
+            "9007199254740993",
+            "--show-plan",
+        ],
+        b"ignored",
+    );
+    assert!(plan.status.success() && plan.stderr.is_empty());
+    std::fs::write(root.join("filter.toml"), plan.stdout).unwrap();
+    let replay = invoke(
+        root,
+        &["data", "--recipe", "filter.toml", "-o", "selected.jsonl"],
+        input,
+    );
+    assert!(replay.status.success() && replay.stdout.is_empty());
+    assert_eq!(
+        std::fs::read(root.join("selected.jsonl")).unwrap(),
+        b"{\"n\":9007199254740993,\"id\":\"c\"}\n"
+    );
+}
+
+#[test]
+fn integer_equality_rejects_invalid_definitions_before_io_and_bad_discarded_records() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join("keep"), b"unchanged").unwrap();
+    for expected in [
+        "",
+        "+2",
+        "02",
+        "-01",
+        "2.0",
+        "2e0",
+        "true",
+        "null",
+        "\"2\"",
+        "PRIVATE_VALUE",
+    ] {
+        let arg = format!("--equals={expected}");
+        let result = invoke(
+            root,
+            &[
+                "data",
+                "jsonl-where-int",
+                "--pointer",
+                "/n",
+                &arg,
+                "-i",
+                "DO_NOT_READ",
+                "-o",
+                "keep",
+                "--force",
+            ],
+            b"",
+        );
+        assert!(!result.status.success() && result.stdout.is_empty());
+        let error = String::from_utf8_lossy(&result.stderr);
+        assert!(
+            !error.contains("cannot open DO_NOT_READ") && !error.contains("PRIVATE_VALUE"),
+            "{error}"
+        );
+    }
+    for bad in [
+        r#"{"n":"2","private":"PRIVATE_VALUE"}"#,
+        r#"{"n":2.0}"#,
+        r#"{"n":2e0}"#,
+        r#"{"n":null}"#,
+        r#"{"n":false}"#,
+        r#"{"n":[]}"#,
+        r#"{}"#,
+        r#"{"n":3,"n":3}"#,
+        r#"{"n":3,"private":"\ud800"}"#,
+        r#"{"n":3,"private":[1,]}"#,
+        "",
+    ] {
+        let input = format!("{{\"n\":2}}\n{bad}\n");
+        let result = invoke(
+            root,
+            &[
+                "data",
+                "jsonl-where-int",
+                "--pointer",
+                "/n",
+                "--equals",
+                "2",
+                "-o",
+                "keep",
+                "--force",
+            ],
+            input.as_bytes(),
+        );
+        assert!(
+            !result.status.success() && result.stdout.is_empty(),
+            "{bad}"
+        );
+        let error = String::from_utf8_lossy(&result.stderr);
+        assert!(
+            error.contains("record 2") && !error.contains("PRIVATE_VALUE"),
+            "{error}"
+        );
+        assert_eq!(std::fs::read(root.join("keep")).unwrap(), b"unchanged");
+    }
+    let out = invoke(
+        root,
+        &["data", "jsonl-where-int", "--pointer", "", "--equals=2"],
+        b"1\r\n2\n3",
+    );
+    assert!(out.status.success());
+    assert_eq!(out.stdout, b"2\n");
+    let out = invoke(
+        root,
+        &["data", "jsonl-where-int", "--pointer", "/n", "--equals=2"],
+        b"",
+    );
+    assert!(out.status.success() && out.stdout.is_empty());
+}
+
+#[test]
+fn projection_defaults_are_explicit_typed_literals_and_roundtrip_through_plans_and_tsv() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let args = [
+        "data",
+        "jsonl-project",
+        "--field",
+        "id=/id",
+        "--field",
+        "tag=/tag",
+        "--field-default",
+        "tag=\"not supplied\"",
+    ];
+    let input =
+        b"{\"id\":\"a\",\"tag\":null}\n{\"id\":\"b\"}\n{\"id\":\"c\",\"tag\":\"{{input}}\"}\n";
+    let expected = b"{\"id\":\"a\",\"tag\":null}\n{\"id\":\"b\",\"tag\":\"not supplied\"}\n{\"id\":\"c\",\"tag\":\"{{input}}\"}\n";
+    let out = invoke(root, &args, input);
+    assert!(
+        out.status.success() && out.stderr.is_empty(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(out.stdout, expected);
+    let mut preview_args = args.to_vec();
+    preview_args.push("--show-plan");
+    let plan = invoke(root, &preview_args, b"ignored");
+    assert!(plan.status.success());
+    let definition = String::from_utf8(plan.stdout).unwrap();
+    assert!(definition.contains("default_json"));
+    std::fs::write(
+        root.join("optional.toml"),
+        definition + "\n[[steps]]\noperation='jsonl-to-tsv'\n",
+    )
+    .unwrap();
+    let replay = invoke(
+        root,
+        &["data", "--recipe", "optional.toml", "-o", "table.tsv"],
+        input,
+    );
+    assert!(replay.status.success() && replay.stdout.is_empty());
+    assert_eq!(
+        std::fs::read(root.join("table.tsv")).unwrap(),
+        b"\"id\"\t\"tag\"\n\"a\"\t\"null\"\n\"b\"\t\"not supplied\"\n\"c\"\t\"{{input}}\"\n"
+    );
+    let structured = "version=1\n[[steps]]\noperation='jsonl-project'\nfields=[{name='n',pointer='/missing',default_json='123456789012345678901234567890'},{name='e',pointer='/missing',default_json='1.2300E+400'},{name='obj',pointer='/missing',default_json='{\"z\":-0,\"z\":1}'},{name='flag',pointer='/missing',default_json='true'},{name='empty',pointer='/missing',default_json='null'}]\n";
+    std::fs::write(root.join("typed.toml"), structured).unwrap();
+    let out = invoke(root, &["data", "--recipe", "typed.toml"], b"{}\n");
+    assert!(out.status.success());
+    assert_eq!(out.stdout, b"{\"n\":123456789012345678901234567890,\"e\":1.2300E+400,\"obj\":{\"z\":-0,\"z\":1},\"flag\":true,\"empty\":null}\n");
+    let args = [
+        "data",
+        "jsonl-project",
+        "--field",
+        "v=/parent/0/id",
+        "--field-default",
+        "v=7",
+    ];
+    let out = invoke(root, &args, b"{}\n{\"parent\":null}\n{\"parent\":1e9999}\n{\"parent\":[]}\n{\"parent\":[{\"id\":null}]}\n");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        out.stdout,
+        b"{\"v\":7}\n{\"v\":7}\n{\"v\":7}\n{\"v\":7}\n{\"v\":null}\n"
+    );
+}
+
+#[test]
+fn projection_default_definition_errors_fail_before_stdin_files_or_config() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join("keep"), b"unchanged").unwrap();
+    for defaults in [
+        vec!["x=PRIVATE_VALUE"],
+        vec!["unknown=null"],
+        vec!["x=null", "x=0"],
+        vec!["x=\"\\ud800\""],
+        vec!["x="],
+        vec!["x=01"],
+        vec!["x"],
+    ] {
+        let mut args = vec![
+            "data",
+            "jsonl-project",
+            "--field",
+            "x=/x",
+            "-i",
+            "DO_NOT_READ",
+            "-o",
+            "keep",
+            "--force",
+        ];
+        for value in defaults {
+            args.extend(["--field-default", value]);
+        }
+        let result = invoke(root, &args, b"");
+        assert!(!result.status.success() && result.stdout.is_empty());
+        let error = String::from_utf8_lossy(&result.stderr);
+        assert!(
+            !error.contains("cannot open DO_NOT_READ") && !error.contains("PRIVATE_VALUE"),
+            "{error}"
+        );
+        assert_eq!(std::fs::read(root.join("keep")).unwrap(), b"unchanged");
+    }
+    for args in [
+        vec!["data", "jsonl-project", "--field-default", "x=null"],
+        vec![
+            "data",
+            "trim",
+            "--field",
+            "x=/x",
+            "--field-default",
+            "x=null",
+        ],
+        vec!["data", "--step", "trim", "--field-default", "x=null"],
+    ] {
+        let result = invoke(root, &args, b"ignored");
+        assert!(!result.status.success() && result.stdout.is_empty());
+    }
+}
+
+#[test]
+fn projection_defaults_cannot_hide_ambiguous_malformed_or_invalid_original_records() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join("keep"), b"unchanged").unwrap();
+    for (pointer, bad) in [
+        ("/x/id", r#"{"x":{},"x":{}}"#),
+        ("/x/01", r#"{"x":[]}"#),
+        ("/x/-", r#"{"x":[]}"#),
+        (
+            "/x/99999999999999999999999999999999999999999999999999999999999999",
+            r#"{"x":[]}"#,
+        ),
+        ("/missing", r#"{"private":"\ud800"}"#),
+        ("/missing", r#"{"PRIVATE_VALUE":[1,]}"#),
+    ] {
+        let result = invoke(
+            root,
+            &[
+                "data",
+                "jsonl-project",
+                "--field",
+                &format!("v={pointer}"),
+                "--field-default",
+                "v=null",
+                "-o",
+                "keep",
+                "--force",
+            ],
+            format!("{{}}\n{bad}\n").as_bytes(),
+        );
+        assert!(
+            !result.status.success() && result.stdout.is_empty(),
+            "{pointer} {bad}"
+        );
+        let error = String::from_utf8_lossy(&result.stderr);
+        assert!(
+            error.contains("record 2") && !error.contains("PRIVATE_VALUE"),
+            "{error}"
+        );
+        assert_eq!(std::fs::read(root.join("keep")).unwrap(), b"unchanged");
+    }
+    // Defaults apply only to the named field; another mapping remains strict.
+    let result = invoke(
+        root,
+        &[
+            "data",
+            "jsonl-project",
+            "--field",
+            "id=/id",
+            "--field",
+            "tag=/tag",
+            "--field-default",
+            "tag=null",
+        ],
+        b"{\"id\":\"a\"}\n{}\n",
+    );
+    assert!(!result.status.success() && result.stdout.is_empty());
+}
+
+#[test]
+fn integer_filters_and_optional_projections_compose_in_all_model_protocols() {
+    for api in ["chat", "responses", "anthropic"] {
+        let dir = tempfile::tempdir().unwrap();
+        let input = b"{\"id\":\"a\",\"n\":2,\"tag\":null}\n{\"id\":\"b\",\"n\":2}\n{\"id\":\"c\",\"n\":1}\n";
+        let filtered = "{\"id\":\"a\",\"n\":2,\"tag\":null}\n{\"id\":\"b\",\"n\":2}\n";
+        let pipeline = json!({"steps":[{"operation":"jsonl-where-int","pointer":"/n","equals":"2"},{"operation":"jsonl-project","fields":[{"name":"id","pointer":"/id"},{"name":"tag","pointer":"/tag","default_json":"\"not supplied\""}]},{"operation":"jsonl-to-tsv"}]});
+        let (url, server) = model_turns(
+            api,
+            vec![
+                (
+                    json!({"operation":"jsonl-where-int","pointer":"/n","equals":"2.0"}),
+                    Value::Null,
+                ),
+                (
+                    json!({"operation":"jsonl-project","fields":[{"name":"tag","pointer":"/tag","default_json":null}]}),
+                    Value::Null,
+                ),
+                (
+                    pipeline,
+                    json!("\"id\"\t\"tag\"\n\"a\"\t\"null\"\n\"b\"\t\"not supplied\"\n"),
+                ),
+                (
+                    json!({"operation":"jsonl-where-int","pointer":"/n","equals":"2"}),
+                    json!(filtered),
+                ),
+            ],
+        );
+        let out = invoke(
+            dir.path(),
+            &[
+                "--api",
+                api,
+                "--base-url",
+                &url,
+                "--model",
+                "fixture",
+                "filter integers and explicitly fill an optional column",
+            ],
+            input,
+        );
+        assert!(
+            out.status.success() && out.stderr.is_empty(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(out.stdout, b"verified\n");
         server.join().unwrap();
     }
 }

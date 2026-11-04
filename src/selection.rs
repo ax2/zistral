@@ -320,6 +320,20 @@ pub(crate) fn redact_json(
     crate::transforms::compact_valid_json(&redacted, limit)
 }
 
+/// Only an explicitly optional projection field may replace a genuinely absent path.
+pub(crate) fn select_json_or_default(
+    input: &str,
+    pointer: &str,
+    default: &str,
+    limit: usize,
+) -> Result<String> {
+    let selected = locate(input, pointer, true)?;
+    // A fallback must not hide malformed Unicode in the original record.
+    validate_strings(input)?;
+    let raw = selected.map_or(default, RawValue::get);
+    crate::transforms::compact_valid_json(raw, limit)
+}
+
 /// Pipeline selection always returns a JSON value, including quoted string tokens.
 pub(crate) fn select_json(input: &str, pointer: &str, limit: usize) -> Result<String> {
     crate::transforms::compact_valid_json(find(input, pointer)?.get(), limit)

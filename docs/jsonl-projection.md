@@ -40,10 +40,11 @@ validator or JSON canonicalization. Existing `jsonl-select` still selects just o
   nested output or execute anything. No trimming, case folding or Unicode normalization.
 - Every field requires an explicit plain RFC 6901 pointer, even empty for the root. Existing
   4096 UTF-8 byte / 128 reference-token limits, `~0`/`~1` escapes and array-index rules apply.
-  No JSONPath, filters, wildcards, interpolation, calculated fields or missing-value defaults.
+  No JSONPath, filters, wildcards, interpolation or calculated fields. Mappings remain strict
+  unless an explicit default is supplied (unreleased; see below).
 - All fields select from the **same source record**, not a previous output alias. A later
   pipeline step can consume the newly projected objects; fields within a step cannot chain.
-- Missing paths, ambiguous referenced duplicate keys, invalid indices or malformed JSON fail
+- Missing paths without an explicit default, ambiguous referenced duplicate keys, invalid indices or malformed JSON fail
   the entire invocation. An existing `null` is a selected value; a missing field is an error.
   Every complete record is syntax-checked, including unselected data. Unreferenced duplicate
   keys are not globally rejected; the inherited selector rejects ambiguity on referenced paths.
@@ -123,3 +124,66 @@ the 64-field limit; this is buffered processing, not an unlimited stream.
 No dependencies, new tool names, network requests in offline commands, project permissions,
 Agent-loop changes or task memory are introduced. Pointer semantics reuse the existing
 selector based on [RFC 6901](https://www.rfc-editor.org/rfc/rfc6901).
+
+
+## Explicit defaults for absent fields / 显式缺失值（未发布）
+
+Development on main adds per-field defaults. Published v0.32.0 remains strict and
+does not accept `--field-default` / `default_json` yet. Defaults are user-selected
+JSON literal text, rather than inferred values or captured task history:
+
+```sh
+zi data jsonl-project --field id=/id --field tag=/tag --field-default 'tag=""' -i events.jsonl
+zi data jsonl-project --field id=/id --field tag=/tag --field-default tag=null --show-plan -o optional.toml
+zi data --recipe optional.toml -i events.jsonl
+```
+
+Repeat `--field-default NAME=JSON_LITERAL` for different explicitly mapped output
+names. Separate arguments must refer to unique names, with at most one default per
+field; unknown names, duplicate defaults and default-only invocations fail. The
+first equals sign separates the output name and literal. Existing names containing
+`=` can still be defined in TOML/tool objects. For portable compound definitions:
+
+```toml
+version = 1
+
+[[steps]]
+operation = "jsonl-project"
+fields = [
+  { name = "id", pointer = "/id" },
+  { name = "tag", pointer = "/tag", default_json = '""' },
+  { name = "n", pointer = "/optional/n", default_json = "123456789012345678901234567890" },
+]
+
+[[steps]]
+operation = "jsonl-to-tsv"
+```
+
+The `default_json` attribute is a **string containing JSON**, both in TOML and in
+model-tool arguments. `default_json = "null"` supplies a JSON null; a raw boolean,
+number, object or JSON null attribute is rejected. Literal text must be valid JSON
+with valid Unicode, 1–4096 UTF-8 bytes, and fit the nesting cap after adding the
+projected object. Known-invalid definitions fail before reading data or preparing
+output. Export preserves this explicit literal and ordinary version-1 step layout;
+older binaries reject the new field instead of silently ignoring it.
+
+Use the default only when the path is absent, including a missing/noncontainer
+ancestor or an out-of-range canonical array index. Present null stays null; false,
+zero and empty string also remain their original selected values. An invalid or
+unsupported array index and an ambiguous referenced key are errors, including when
+another ancestor/record could use a default. If no default is declared for a field,
+it keeps the original strict lookup. All fields still select from the same source
+record; defaults do not create values for later mappings in that step.
+
+Original JSON syntax and Unicode strings are checked before using a default, even
+in unselected data. A fallback cannot hide an unpaired surrogate or malformed
+record. Default number/string tokens, key order and duplicate members inside an
+explicit container literal survive compact formatting. Text such as `{{input}}`,
+shell syntax or a path is literal JSON string content, never interpolation or IO.
+
+The optional default supports any JSON value. Existing CSV/TSV export still requires
+scalar columns, so a container default fails a later export step rather than being
+flattened or stringified automatically. Scalar null exports as the text `null`;
+choose the explicit JSON empty-string literal if an empty table cell is wanted.
+Byte/record/depth, 64-field and serialized tool-envelope caps remain unchanged.
+Late failures publish no stdout intermediate and do not replace an existing output.

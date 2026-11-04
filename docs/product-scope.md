@@ -238,3 +238,14 @@ failure and existing resource caps. This is one interoperability outcome, not tw
 release items. Do not infer delimiters/types or add a query language, new tool name,
 runtime dependency or task memory. Accumulate it into a coherent future batch;
 see [TSV exchange](tsv-exchange.md). Keep v0.32.0 until that batch is ready.
+
+
+Unreleased table-preparation work also fills two concrete gaps: exact integer field
+equality for native count results, and explicit per-field JSON literal defaults for
+absent projection paths. Reuse the existing integer key and optional lexical pointer
+traversal; no float coercion, general predicate language, inferred values, new tool
+names or task memory. Present null stays null and malformed/ambiguous input remains
+an error. Ordinary projections and string filtering retain their strict contracts.
+Together with TSV interoperability these form three related user outcomes; examples,
+protocol coverage and CI maintenance do not count as extra features. See
+[integer filtering](integer-filtering.md) and [projection](jsonl-projection.md).

@@ -36,6 +36,8 @@ function Install-Candidate {
     if(-not(Test-Path -LiteralPath "$Destination\launch.cmd")){throw 'Start menu launcher missing'}
     & python (Join-Path $root 'scripts/test_pre_sharing_delivery.py') --binary "$Destination\zi.exe"
     if($LASTEXITCODE -ne 0){throw 'Installed pre-sharing workflow failed'}
+    & python (Join-Path $root 'scripts/test_table_preparation_delivery.py') --binary "$Destination\zi.exe"
+    if($LASTEXITCODE -ne 0){throw 'Installed table-preparation workflow failed'}
 }
 function Uninstall-Candidate {
     if(Test-Path -LiteralPath "$Destination\unins000.exe"){

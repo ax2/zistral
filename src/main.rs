@@ -166,10 +166,13 @@ enum Commands {
         /// Name and JSON pointer for jsonl-project; repeat NAME=/path or NAME= for root
         #[arg(long = "field", requires = "operation", conflicts_with_all = ["steps", "recipe"])]
         fields: Vec<String>,
+        /// Explicit JSON literal for an absent projected field; repeat NAME=JSON_LITERAL
+        #[arg(long = "field-default", requires = "fields", conflicts_with_all = ["steps", "recipe"])]
+        field_defaults: Vec<String>,
         /// Case-sensitive literal substring for lines-include/lines-exclude; no CR/LF
         #[arg(long, requires = "operation", conflicts_with_all = ["steps", "recipe"])]
         contains: Option<String>,
-        /// Exact decoded JSON string for jsonl-where; empty is allowed, max4096 UTF-8 bytes
+        /// Exact string for jsonl-where, or JSON integer literal for jsonl-where-int (max4096 bytes)
         #[arg(long, requires = "operation", conflicts_with_all = ["steps", "recipe"])]
         equals: Option<String>,
         /// Number of first/last lines; required for lines-head/lines-tail (1-100000)
@@ -185,7 +188,7 @@ enum Commands {
         #[arg(long)]
         show_plan: bool,
         /// List embedded native recipes offline, without reading stdin or model settings
-        #[arg(long, conflicts_with_all = ["operation", "steps", "recipe", "show_plan", "reverse", "if_present", "pointer", "fields", "contains", "equals", "lines"])]
+        #[arg(long, conflicts_with_all = ["operation", "steps", "recipe", "show_plan", "reverse", "if_present", "pointer", "fields", "field_defaults", "contains", "equals", "lines"])]
         list_recipes: bool,
     },
     /// List, inspect, render, export, import or initialize reusable task presets (offline)
@@ -326,6 +329,7 @@ fn run(mut cli: Cli) -> Result<()> {
         if_present,
         pointer,
         fields,
+        field_defaults,
         contains,
         equals,
         lines,
@@ -360,7 +364,7 @@ fn run(mut cli: Cli) -> Result<()> {
                     operation,
                     reverse: *reverse,
                     pointer: pointer.clone(),
-                    fields: projection::parse(fields)?,
+                    fields: projection::parse(fields, field_defaults)?,
                     contains: contains.clone(),
                     equals: equals.clone(),
                     lines: *lines,
