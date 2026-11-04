@@ -32,6 +32,11 @@ fn command() -> Command {
 }
 
 fn accept(listener: &TcpListener) -> (TcpStream, Value) {
+    let (stream, body, _) = accept_with_headers(listener);
+    (stream, body)
+}
+
+fn accept_with_headers(listener: &TcpListener) -> (TcpStream, Value, Vec<(String, String)>) {
     let deadline = Instant::now() + Duration::from_secs(15);
     let stream = loop {
         match listener.accept() {
@@ -49,6 +54,7 @@ fn accept(listener: &TcpListener) -> (TcpStream, Value) {
         .unwrap();
     let mut reader = BufReader::new(stream.try_clone().unwrap());
     let mut len = 0;
+    let mut headers = Vec::new();
     loop {
         let mut line = String::new();
         assert!(reader.read_line(&mut line).unwrap() > 0);
@@ -56,6 +62,7 @@ fn accept(listener: &TcpListener) -> (TcpStream, Value) {
             break;
         }
         if let Some((k, v)) = line.split_once(':') {
+            headers.push((k.trim().to_ascii_lowercase(), v.trim().to_owned()));
             if k.eq_ignore_ascii_case("content-length") {
                 len = v.trim().parse().unwrap();
             }
@@ -63,7 +70,7 @@ fn accept(listener: &TcpListener) -> (TcpStream, Value) {
     }
     let mut body = vec![0; len];
     reader.read_exact(&mut body).unwrap();
-    (stream, serde_json::from_slice(&body).unwrap())
+    (stream, serde_json::from_slice(&body).unwrap(), headers)
 }
 
 fn listener() -> (TcpListener, String) {
@@ -341,6 +348,280 @@ fn profiles_switch_preserves_legacy_and_redacts_keys() {
             .unwrap()
             .contains("active_profile")
     );
+}
+
+#[test]
+fn doctor_credential_source_matches_actual_authentication() {
+    const CUSTOM: &str = "ZISTRAL_DIAG_TEST_KEY";
+    let cases = [
+        (
+            Some(CUSTOM),
+            Some("saved-secret"),
+            Some("custom-secret"),
+            Some("unused-openai-secret"),
+            None,
+            Some("custom-secret"),
+            "environment variable \"ZISTRAL_DIAG_TEST_KEY\" (value hidden)",
+        ),
+        (
+            Some(CUSTOM),
+            Some("saved-secret"),
+            Some("  "),
+            Some("unused-openai-secret"),
+            None,
+            Some("saved-secret"),
+            "saved profile (value hidden)",
+        ),
+        (
+            Some(CUSTOM),
+            Some("saved-secret"),
+            Some("custom-secret"),
+            Some("unused-openai-secret"),
+            Some("zi-secret"),
+            Some("zi-secret"),
+            "environment variable \"ZI_API_KEY\" (value hidden)",
+        ),
+        (
+            Some(CUSTOM),
+            Some("saved-secret"),
+            Some("custom-secret"),
+            None,
+            Some(" \t"),
+            Some("custom-secret"),
+            "environment variable \"ZISTRAL_DIAG_TEST_KEY\" (value hidden)",
+        ),
+        (
+            None,
+            Some("saved-secret"),
+            None,
+            Some("openai-secret"),
+            None,
+            Some("openai-secret"),
+            "environment variable \"OPENAI_API_KEY\" (value hidden)",
+        ),
+        (
+            Some(CUSTOM),
+            None,
+            None,
+            Some("unused-openai-secret"),
+            None,
+            None,
+            "not configured",
+        ),
+        (
+            None,
+            Some("  "),
+            None,
+            Some(" \t"),
+            Some("  "),
+            None,
+            "not configured",
+        ),
+        (
+            Some("ZI_API_KEY"),
+            Some("saved-secret"),
+            None,
+            Some("unused-openai-secret"),
+            Some("zi-secret"),
+            Some("zi-secret"),
+            "environment variable \"ZI_API_KEY\" (value hidden)",
+        ),
+    ];
+    for api in ["chat", "responses", "anthropic"] {
+        for (key_env, saved, custom, openai, zi, expected_key, source) in cases {
+            let (l, url) = listener();
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("config.toml");
+            let mut config = format!("model='fixture'\nbase_url='{url}'\napi='{api}'\n");
+            if let Some(name) = key_env {
+                config += &format!("api_key_env='{name}'\n");
+            }
+            if let Some(key) = saved {
+                config += &format!("api_key='{key}'\n");
+            }
+            std::fs::write(&path, &config).unwrap();
+            let protocol = api.to_owned();
+            let server = std::thread::spawn(move || {
+                let (mut stream, _, headers) = accept_with_headers(&l);
+                let auth = headers.iter().find(|(name, _)| {
+                    name == if protocol == "anthropic" {
+                        "x-api-key"
+                    } else {
+                        "authorization"
+                    }
+                });
+                match expected_key {
+                    Some(key) => {
+                        let expected = if protocol == "anthropic" {
+                            key.into()
+                        } else {
+                            format!("Bearer {key}")
+                        };
+                        assert!(
+                            auth.is_some_and(|(_, value)| value == &expected),
+                            "actual authentication precedence changed"
+                        );
+                    }
+                    None => assert!(auth.is_none(), "unexpected authentication header"),
+                }
+                let body = match protocol.as_str() {
+                    "anthropic" => json!({"stop_reason":"end_turn", "content":[{"type":"text", "text":"OK"}]}),
+                    "responses" => json!({"status":"completed", "output":[{"type":"message", "content":[{"type":"output_text", "text":"OK"}]}]}),
+                    _ => json!({"choices":[{"message":{"content":"OK"}, "finish_reason":"stop"}]}),
+                }.to_string();
+                write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+            });
+            let configured = || {
+                let mut c = command();
+                c.env_remove(CUSTOM);
+                for (name, value) in [
+                    (CUSTOM, custom),
+                    ("OPENAI_API_KEY", openai),
+                    ("ZI_API_KEY", zi),
+                ] {
+                    if let Some(value) = value {
+                        c.env(name, value);
+                    }
+                }
+                c.args(["--config", path.to_str().unwrap()]);
+                c
+            };
+            let actual = configured()
+                .args(["--no-tools", "--no-stream", "Reply with OK."])
+                .output()
+                .unwrap();
+            server.join().unwrap();
+            assert!(actual.status.success());
+            assert_eq!(actual.stdout, b"OK\n");
+            let doctor = configured().arg("doctor").output().unwrap();
+            assert!(doctor.status.success());
+            let report = String::from_utf8(doctor.stdout).unwrap();
+            assert!(
+                report.contains(&format!("API Key source: {source}")),
+                "missing effective credential source: {report}"
+            );
+            assert!(!report.contains("secret"));
+            if !source.contains("OPENAI_API_KEY") {
+                assert!(!report.contains("OPENAI_API_KEY"));
+            }
+            if !source.contains(CUSTOM) {
+                assert!(!report.contains(CUSTOM));
+            }
+            assert!(!report.contains("Environment overrides:"));
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), config);
+        }
+    }
+}
+
+#[test]
+fn doctor_reports_profile_and_environment_presence_without_claiming_cli_overrides() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    let config = "model='saved-model'\nbase_url='http://localhost:1/v1'\napi_key='saved-secret'\nactive_profile='work'\n[profiles.work]\nmodel='work-model'\nbase_url='http://localhost:2/v1'\napi_key_env='ZISTRAL_DIAG_TEST_KEY'\n";
+    std::fs::write(&path, config).unwrap();
+    for (args, env_profile, expected_profile, expected_model, key_source, custom_present) in [
+        (
+            vec![],
+            None,
+            "work",
+            "work-model",
+            "environment variable \"ZISTRAL_DIAG_TEST_KEY\" (value hidden)",
+            true,
+        ),
+        (
+            vec![],
+            Some("default"),
+            "default",
+            "saved-model",
+            "saved profile (value hidden)",
+            true,
+        ),
+        (
+            vec![
+                "--profile",
+                "default",
+                "--model",
+                "cli-model",
+                "--api",
+                "chat",
+                "--base-url",
+                "http://localhost:3/v1",
+            ],
+            Some("work"),
+            "default",
+            "cli-model",
+            "saved profile (value hidden)",
+            true,
+        ),
+        (vec![], None, "work", "work-model", "not configured", false),
+    ] {
+        let mut c = command();
+        c.env_remove("ZISTRAL_DIAG_TEST_KEY");
+        if custom_present {
+            c.env("ZISTRAL_DIAG_TEST_KEY", "custom-secret");
+        } else {
+            c.env("OPENAI_API_KEY", "unused-openai-secret");
+        }
+        if let Some(profile) = env_profile {
+            c.env("ZI_PROFILE", profile);
+        }
+        if args.contains(&"--model") {
+            c.env("ZI_MODEL", "unused-env-model")
+                .env("ZI_API", "responses")
+                .env("ZI_BASE_URL", "https://unused.example/v1");
+        }
+        let result = c
+            .env("ZI_CONFIG", dir.path().join("must-not-read.toml"))
+            .args(["--config", path.to_str().unwrap()])
+            .args(&args)
+            .arg("doctor")
+            .output()
+            .unwrap();
+        assert!(result.status.success());
+        let report = String::from_utf8(result.stdout).unwrap();
+        assert!(report.contains(&format!("Profile: {expected_profile}\n")));
+        assert!(report.contains(&format!("Model: {expected_model}\n")));
+        assert!(report.contains(&format!("API Key source: {key_source}")));
+        assert!(report.contains("Environment settings present (CLI flags may override):"));
+        assert!(report.contains("ZI_CONFIG"));
+        assert!(!report.contains("Environment overrides:"));
+        assert!(!report.contains("unused-env-model"));
+        assert!(!report.contains("secret"));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), config);
+    }
+}
+
+#[test]
+fn doctor_escapes_control_characters_in_credential_environment_names() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    for (name, encoded) in [
+        ("ZISTRAL_DIAG\nKEY", r#""ZISTRAL_DIAG\nKEY""#),
+        ("ZISTRAL_DIAG\x1b[2JKEY", r#""ZISTRAL_DIAG\u001b[2JKEY""#),
+        ("ZISTRAL_DIAG\u{009b}2JKEY", r#""ZISTRAL_DIAG\u009b2JKEY""#),
+        ("ZISTRAL_DIAG\u{007f}KEY", r#""ZISTRAL_DIAG\u007fKEY""#),
+        ("ZISTRAL_中\"KEY", r#""ZISTRAL_中\"KEY""#),
+    ] {
+        std::fs::write(
+            &path,
+            format!("model='fixture'\nbase_url='http://localhost:1/v1'\napi_key_env={encoded}\n"),
+        )
+        .unwrap();
+        let result = command()
+            .env(name, "control-name-secret")
+            .args(["--config", path.to_str().unwrap(), "doctor"])
+            .output()
+            .unwrap();
+        assert!(result.status.success());
+        let report = String::from_utf8(result.stdout).unwrap();
+        assert!(report.contains(&format!(
+            "API Key source: environment variable {encoded} (value hidden)"
+        )));
+        if name.chars().any(char::is_control) {
+            assert!(!report.contains(name));
+        }
+        assert!(!report.contains("control-name-secret"));
+    }
 }
 
 #[test]

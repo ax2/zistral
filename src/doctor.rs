@@ -13,7 +13,7 @@ pub fn run(cli: &Cli, probe: bool) -> Result<()> {
     );
     let settings =
         config::Settings::load(cli).context("configuration check failed; run zi config")?;
-    report!("Profile: {}", ui::clean(&config::active_name(cli)?));
+    report!("Profile: {}", ui::clean(&settings.profile_name));
     report!("Model: {}", ui::clean(&settings.model));
     report!("Protocol: {}", settings.api);
     let url = config::validate_url(&settings.base_url)?;
@@ -26,19 +26,31 @@ pub fn run(cli: &Cli, probe: bool) -> Result<()> {
             "not set; local/custom services may not require one"
         }
     );
-    let overrides: Vec<_> = [
+    match &settings.api_key_source {
+        config::ApiKeySource::Environment(name) => report!(
+            "API Key source: environment variable {} (value hidden)",
+            ui::json_display(&serde_json::to_string(name)?)
+        ),
+        config::ApiKeySource::SavedProfile => {
+            report!("API Key source: saved profile (value hidden)")
+        }
+        config::ApiKeySource::NotConfigured => report!("API Key source: not configured"),
+    }
+    let environment: Vec<_> = [
+        "ZI_CONFIG",
         "ZI_PROFILE",
         "ZI_MODEL",
         "ZI_BASE_URL",
         "ZI_API",
-        "ZI_API_KEY",
-        "OPENAI_API_KEY",
     ]
     .into_iter()
     .filter(|key| std::env::var(key).is_ok_and(|v| !v.trim().is_empty()))
     .collect();
-    if !overrides.is_empty() {
-        report!("Environment overrides: {}", overrides.join(", "));
+    if !environment.is_empty() {
+        report!(
+            "Environment settings present (CLI flags may override): {}",
+            environment.join(", ")
+        );
     }
     report!("Configuration: OK");
     if probe {

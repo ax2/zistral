@@ -104,15 +104,6 @@ fn selected(document: &FileConfig, name: &str) -> Result<FileConfig> {
         .into())
 }
 
-pub fn active_name(cli: &Cli) -> Result<String> {
-    let document = read_config(&path(cli)?, cli.config.is_none())?;
-    Ok(cli
-        .profile
-        .clone()
-        .or(document.active_profile)
-        .unwrap_or_else(|| "default".into()))
-}
-
 pub fn models(cli: &Cli) -> Result<()> {
     let document = read_config(&path(cli)?, cli.config.is_none())?;
     let active = cli
@@ -165,7 +156,15 @@ pub fn use_profile(cli: &Cli, name: &str) -> Result<()> {
     Ok(())
 }
 
+pub enum ApiKeySource {
+    Environment(String),
+    SavedProfile,
+    NotConfigured,
+}
+
 pub struct Settings {
+    pub profile_name: String,
+    pub api_key_source: ApiKeySource,
     pub model: String,
     pub base_url: String,
     pub api: String,
@@ -555,8 +554,9 @@ impl Settings {
             .profile
             .as_deref()
             .or(file.active_profile.as_deref())
-            .unwrap_or("default");
-        let file = selected(&file, name)?;
+            .unwrap_or("default")
+            .to_owned();
+        let file = selected(&file, &name)?;
         let model = nonempty(cli.model.clone().or(file.model))
             .context("run zi config first, or set ZI_MODEL / --model")?;
         let base_url = cli
@@ -574,9 +574,18 @@ impl Settings {
             bail!("api must be chat or responses or anthropic");
         }
         let key_env = file.api_key_env.unwrap_or_else(|| "OPENAI_API_KEY".into());
-        let api_key = nonempty(std::env::var("ZI_API_KEY").ok())
-            .or_else(|| nonempty(std::env::var(&key_env).ok()))
-            .or_else(|| nonempty(file.api_key));
+        // Keep provenance beside the value selected by the actual request path.
+        // Do not infer it later from a second config/environment read.
+        let (api_key, api_key_source) =
+            if let Some(key) = nonempty(std::env::var("ZI_API_KEY").ok()) {
+                (Some(key), ApiKeySource::Environment("ZI_API_KEY".into()))
+            } else if let Some(key) = nonempty(std::env::var(&key_env).ok()) {
+                (Some(key), ApiKeySource::Environment(key_env.clone()))
+            } else if let Some(key) = nonempty(file.api_key) {
+                (Some(key), ApiKeySource::SavedProfile)
+            } else {
+                (None, ApiKeySource::NotConfigured)
+            };
         if matches!(url.host_str(), Some("api.openai.com" | "api.anthropic.com"))
             && api_key.is_none()
             && !cli.preview
@@ -595,6 +604,8 @@ impl Settings {
             }
         }
         Ok(Self {
+            profile_name: name,
+            api_key_source,
             model,
             base_url: base_url.trim_end_matches('/').into(),
             api,

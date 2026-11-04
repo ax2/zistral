@@ -168,8 +168,10 @@ You can also save `zi --config-example` as:
 
 Flags override `ZI_*` environment variables, which override the configuration
 file. `--config PATH` / `ZI_CONFIG` selects another file. Keys are read from
-`ZI_API_KEY`, otherwise `OPENAI_API_KEY` (or `api_key_env` in the config).
-If neither environment variable is set, the saved `api_key` is used.
+a nonblank `ZI_API_KEY`, otherwise the selected profile's `api_key_env` variable
+(default `OPENAI_API_KEY`), otherwise its nonblank saved `api_key`. A custom
+`api_key_env` replaces the `OPENAI_API_KEY` fallback; blank/whitespace-only values
+are skipped. Named profiles do not inherit the default profile's key.
 Do not put keys in source control. Remote endpoints require HTTPS; plain HTTP
 is allowed on localhost/127.0.0.1/::1 only.
 
@@ -192,8 +194,14 @@ Names contain 1–64 ASCII letters/digits/underscores/hyphens; at most 128 named
 Selection precedence: `--profile` > `ZI_PROFILE` > saved active profile. Existing model/service/API/key
 overrides still apply. Interactive shortcuts: `/models`, `/use NAME`, `/doctor`.
 
-Doctor reports the config path, selected profile, model, protocol, service host, key presence and
-override variable names. Only `--probe` sends a model request: one minimal non-streaming turn,
+Doctor reports the config path, selected profile, model, protocol, service host and key presence.
+`API Key source` identifies the actual winning environment-variable name, saved profile, or no
+key; it never prints a key value or lists inactive key variables as overrides. Variable names are
+JSON-quoted so control characters cannot add terminal commands or extra report lines. Other
+nonblank `ZI_CONFIG`/profile/model/service/protocol environment settings are listed as present,
+with a reminder that CLI flags can override them; their values are not printed in that list.
+The profile and credential source come from the same configuration read used by requests.
+Only `--probe` sends a model request: one minimal non-streaming turn,
 no tools or task/project instructions, no retries, and a timeout of at most 15 seconds.
 It requests at most 16 output tokens (`max_tokens` for Chat/Anthropic, `max_output_tokens`
 for Responses); the selected service must support that field and return a complete text answer.
