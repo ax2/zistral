@@ -10,8 +10,10 @@ need mock-server integration tests; local transformations need deterministic
 tests. Never commit API keys or real private inputs. Use small milestone commits.
 
 Keep commits small and frequent, but collect related improvements into a complete
-release milestone. The default is a batch of 3–5 substantial user-facing changes;
-small fixes, performance tuning and documentation normally wait for that batch.
+release milestone, normally 5–8 substantial related user-facing changes that complete
+a use case. The count is a planning guide, not a quota; small fixes, performance tuning
+and documentation normally wait for that batch. Review normal release candidates at
+most once a week, and keep accumulating work when value or validation is insufficient.
 Do not split a change artificially or add unrelated features to meet a count.
 Only urgent issues affecting normal use, data safety or security justify a standalone
 patch; record the concrete reason in its release notes.

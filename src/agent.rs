@@ -186,6 +186,7 @@ fn request_body(
     system: &str,
     messages: &[Value],
     tools: &[Value],
+    output_limit: Option<u32>,
 ) -> Value {
     let anthropic = settings.api == "anthropic";
     let responses = settings.api == "responses";
@@ -203,6 +204,13 @@ fn request_body(
     if !cli.no_tools {
         body["tools"] = json!(tools);
     }
+    if let Some(limit) = output_limit {
+        body[if responses {
+            "max_output_tokens"
+        } else {
+            "max_tokens"
+        }] = json!(limit);
+    }
     body
 }
 
@@ -215,6 +223,7 @@ pub fn preview(settings: &Settings, cli: &Cli, input: &str) -> Result<String> {
         &request.system,
         &request.messages,
         &request.tools,
+        None,
     );
     let value = json!({
         "version": 1,
@@ -247,13 +256,53 @@ pub fn preview(settings: &Settings, cli: &Cli, input: &str) -> Result<String> {
 }
 
 pub fn run(settings: &Settings, cli: &Cli, input: &str) -> Result<Answer> {
+    run_prepared(settings, cli, input, prepare(settings, cli, input)?, None)
+}
+
+pub fn probe(settings: &Settings, cli: &Cli) -> Result<()> {
+    let mut test = cli.clone();
+    test.prompt = vec!["Reply with OK.".into()];
+    test.exact = false;
+    test.export_plan = false;
+    test.json = false;
+    test.no_tools = true;
+    test.no_stream = true;
+    test.stream = false;
+    test.plain = true;
+    test.verbose = false;
+    test.max_steps = Some(1);
+    test.retries = 0;
+    test.max_output_tokens = 16;
+    test.timeout = cli.timeout.min(15);
+    let mut request = prepare(settings, &test, "")?;
+    // Probe only the selected service. Do not disclose task/tool instructions,
+    // input or project context; retain the same endpoint/auth/response handling.
+    request.system = "Reply with OK.".into();
+    request.messages = vec![json!({"role":"user", "content":"Reply with OK."})];
+    if settings.api != "anthropic" {
+        request
+            .messages
+            .insert(0, json!({"role":"system", "content":request.system}));
+    }
+    request.tools.clear();
+    run_prepared(settings, &test, "", request, Some(16))?;
+    Ok(())
+}
+
+fn run_prepared(
+    settings: &Settings,
+    cli: &Cli,
+    input: &str,
+    request: InitialRequest,
+    output_limit: Option<u32>,
+) -> Result<Answer> {
     let InitialRequest {
         system,
         mut messages,
         tools,
         endpoint,
         mut session,
-    } = prepare(settings, cli, input)?;
+    } = request;
     let streaming = streaming(cli);
     let mut display = crate::ui::StreamDisplay::new();
     let activity = Activity::new(settings, cli, input.len());
@@ -270,7 +319,15 @@ pub fn run(settings: &Settings, cli: &Cli, input: &str) -> Result<Answer> {
     let responses = settings.api == "responses";
     let anthropic = settings.api == "anthropic";
     for step in 0..max_steps {
-        let body = request_body(settings, cli, streaming, &system, &messages, &tools);
+        let body = request_body(
+            settings,
+            cli,
+            streaming,
+            &system,
+            &messages,
+            &tools,
+            output_limit,
+        );
         let mut retried = 0;
         let response = loop {
             activity.request(step + 1, max_steps);
@@ -306,7 +363,8 @@ pub fn run(settings: &Settings, cli: &Cli, input: &str) -> Result<Answer> {
             }
             // Provider error bodies can echo credentials or input; never print them.
             let advice = match status.as_u16() {
-                401 | 403 => "check your API key and model access",
+                401 => "check your API key and model access",
+                403 => "access denied; check model/account permissions and any network proxy",
                 404 => "check --base-url, --api, and --model",
                 429 => "rate limit or quota reached; retry later",
                 500..=599 => "provider unavailable; retry later",

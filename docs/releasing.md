@@ -7,17 +7,22 @@ often as useful, then choose the exact reviewed commit for publication.
 ## Choose a release milestone
 
 Continue frequent, focused commits and normal CI while developing a batch. The
-default release contains 3–5 substantial, related user-facing improvements or
-fixes that make a coherent milestone. Count useful outcomes, not changed files,
-test cases or individual functions. Do not split one improvement into artificial
+default release normally collects 5–8 substantial, related user-facing improvements
+or fixes that complete a coherent use case. This is a planning guide, not a quota.
+Count useful outcomes, not changed files, test cases or individual functions. Do not split one improvement into artificial
 items or add unrelated features to reach a number. Assess the whole milestone
 before publication; a completed commit or agent session is not a release trigger.
 
 Small performance changes, minor fixes and documentation normally accumulate on
 main for the next batch. An urgent defect that prevents normal use, risks data
 loss, or needs a security fix can justify a standalone patch. Its release notes
-must state the concrete reason. There is no fixed release schedule and no recurring
-automation requirement. Avoid multiple minor releases in a day.
+must state the concrete reason. Review a normal release candidate at most once a
+week; a review is not a publication deadline. If the batch has too little practical
+value or validation is incomplete, keep developing rather than publish. Do not use
+unrelated features, several directions of one operation, tests or documentation to
+inflate the batch. An explicit request for an urgent release may override the normal
+review cadence. No recurring automation is required; avoid multiple minor releases
+in a day.
 
 Keep the current package version during ordinary development. Only bump it when
 the batch is ready for release checks. Before creating a release branch, summarize

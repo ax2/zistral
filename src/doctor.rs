@@ -42,22 +42,9 @@ pub fn run(cli: &Cli, probe: bool) -> Result<()> {
     }
     report!("Configuration: OK");
     if probe {
-        let mut test = cli.clone();
-        test.prompt = vec!["Reply with OK.".into()];
-        test.exact = false;
-        test.export_plan = false;
-        test.no_tools = true;
-        test.no_stream = true;
-        test.stream = false;
-        test.plain = true;
-        test.verbose = false;
-        test.max_steps = Some(1);
-        test.retries = 0;
-        test.max_output_tokens = 16;
-        test.timeout = cli.timeout.min(15);
         output.flush()?;
         let start = Instant::now();
-        crate::agent::run(&settings, &test, "")
+        crate::agent::probe(&settings, cli)
             .context("model probe failed (provider response bodies are hidden)")?;
         report!("Model probe: OK ({:.2}s)", start.elapsed().as_secs_f64());
     } else {

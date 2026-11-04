@@ -193,8 +193,14 @@ Selection precedence: `--profile` > `ZI_PROFILE` > saved active profile. Existin
 overrides still apply. Interactive shortcuts: `/models`, `/use NAME`, `/doctor`.
 
 Doctor reports the config path, selected profile, model, protocol, service host, key presence and
-override variable names. Only `--probe` sends a model request; it has a short timeout and disables
-tools. Failed configuration/probes exit nonzero, with HTTP/authentication/rate-limit/network guidance.
+override variable names. Only `--probe` sends a model request: one minimal non-streaming turn,
+no tools or task/project instructions, no retries, and a timeout of at most 15 seconds.
+It requests at most 16 output tokens (`max_tokens` for Chat/Anthropic, `max_output_tokens`
+for Responses); the selected service must support that field and return a complete text answer.
+Reasoning models may exhaust this small budget; a failed probe does not prove that normal tasks
+will fail. This tests basic model access, not tool support or model quality. Failed configuration/probes
+exit nonzero, with HTTP/authentication/rate-limit/network guidance. A 403 can involve model/account
+permissions or a network proxy; it does not by itself prove the key is invalid.
 Keys, provider error bodies and probe answers are never printed. Use `zi -p work doctor --probe`
 to check one profile without switching the default.
 

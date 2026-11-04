@@ -379,6 +379,157 @@ fn doctor_probe_is_explicit_and_never_prints_provider_errors_or_answers() {
 }
 
 #[test]
+fn doctor_probe_is_minimal_and_bounded_in_each_protocol() {
+    for api in ["chat", "responses", "anthropic"] {
+        let (l, url) = listener();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let config =
+            format!("model='fixture'\nbase_url='{url}'\napi='{api}'\napi_key='probe-key-secret'\n");
+        std::fs::write(&path, &config).unwrap();
+        let protocol = api.to_owned();
+        let server = std::thread::spawn(move || {
+            let (mut stream, request) = accept(&l);
+            assert_eq!(request["model"], "fixture");
+            assert_eq!(request["stream"], false);
+            assert!(request.get("tools").is_none());
+            assert!(
+                request.to_string().len() < 1024,
+                "probe contains task instructions"
+            );
+            let messages = &request[if protocol == "responses" {
+                "input"
+            } else {
+                "messages"
+            }];
+            assert_eq!(
+                messages.as_array().unwrap().len(),
+                if protocol == "anthropic" { 1 } else { 2 }
+            );
+            assert_eq!(
+                messages.as_array().unwrap().last().unwrap()["content"],
+                "Reply with OK."
+            );
+            assert_eq!(
+                request[if protocol == "responses" {
+                    "max_output_tokens"
+                } else {
+                    "max_tokens"
+                }],
+                16
+            );
+            if protocol == "responses" {
+                assert_eq!(request["store"], false);
+            }
+            let body = match protocol.as_str() {
+                "anthropic" => json!({"stop_reason":"end_turn", "content":[{"type":"text", "text":"probe-answer-secret"}]}),
+                "responses" => json!({"status":"completed", "output":[{"type":"message", "status":"completed", "role":"assistant", "content":[{"type":"output_text", "text":"probe-answer-secret"}]}]}),
+                _ => json!({"choices":[{"message":{"role":"assistant", "content":"probe-answer-secret"}, "finish_reason":"stop"}]}),
+            }.to_string();
+            write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+        });
+        let result = command()
+            .args(["doctor", "--probe", "--config", path.to_str().unwrap()])
+            .output()
+            .unwrap();
+        server.join().unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let output = format!(
+            "{}{}",
+            String::from_utf8_lossy(&result.stdout),
+            String::from_utf8_lossy(&result.stderr)
+        );
+        assert!(output.contains("Model probe: OK"));
+        assert!(!output.contains("probe-key-secret"));
+        assert!(!output.contains("probe-answer-secret"));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), config);
+    }
+}
+
+#[test]
+fn doctor_probe_does_not_follow_redirects_or_retry_errors() {
+    for status in [302, 403, 429] {
+        let (l, url) = listener();
+        let first = l.try_clone().unwrap();
+        let (redirected, redirect_url) = listener();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            format!("model='fixture'\nbase_url='{url}'\napi_key='probe-key-secret'\n"),
+        )
+        .unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = accept(&first);
+            let body = "probe-key-secret response-body-secret";
+            write!(stream, "HTTP/1.1 {status} Fixture\r\nLocation: {redirect_url}/redirected\r\nRetry-After: 0\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+        });
+        let result = command()
+            .args(["doctor", "--probe", "--config", path.to_str().unwrap()])
+            .output()
+            .unwrap();
+        server.join().unwrap();
+        assert!(!result.status.success());
+        assert!(l.accept().is_err(), "probe retried a denied request");
+        assert!(redirected.accept().is_err(), "probe followed a redirect");
+        let output = format!(
+            "{}{}",
+            String::from_utf8_lossy(&result.stdout),
+            String::from_utf8_lossy(&result.stderr)
+        );
+        assert!(output.contains(&format!("HTTP {status}")));
+        assert!(!output.contains("probe-key-secret"));
+        assert!(!output.contains("response-body-secret"));
+        assert!(!output.contains("Model probe: OK"));
+        if status == 403 {
+            assert!(output.contains("model/account permissions"));
+            assert!(output.contains("proxy"));
+        }
+    }
+}
+
+#[test]
+fn doctor_probe_does_not_report_truncated_answers_as_healthy() {
+    for api in ["chat", "responses", "anthropic"] {
+        let (l, url) = listener();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            format!("model='fixture'\nbase_url='{url}'\napi='{api}'\n"),
+        )
+        .unwrap();
+        let protocol = api.to_owned();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = accept(&l);
+            let body = match protocol.as_str() {
+                "anthropic" => json!({"stop_reason":"max_tokens", "content":[{"type":"text", "text":"partial-answer-secret"}]}),
+                "responses" => json!({"status":"incomplete", "incomplete_details":{"reason":"max_output_tokens"}, "output":[{"type":"message", "content":[{"type":"output_text", "text":"partial-answer-secret"}]}]}),
+                _ => json!({"choices":[{"message":{"role":"assistant", "content":"partial-answer-secret"}, "finish_reason":"length"}]}),
+            }.to_string();
+            write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+        });
+        let result = command()
+            .args(["doctor", "--probe", "--config", path.to_str().unwrap()])
+            .output()
+            .unwrap();
+        server.join().unwrap();
+        assert!(!result.status.success());
+        let output = format!(
+            "{}{}",
+            String::from_utf8_lossy(&result.stdout),
+            String::from_utf8_lossy(&result.stderr)
+        );
+        assert!(!output.contains("partial-answer-secret"));
+        assert!(!output.contains("Model probe: OK"));
+    }
+}
+
+#[test]
 fn many_stream_fragments_keep_complete_unicode_pipe_output_in_all_protocols() {
     let part = "x".repeat(121) + "中🙂";
     let expected = part.repeat(2048);
