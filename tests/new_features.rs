@@ -79,8 +79,15 @@ fn chat(text: &str, reason: Value) -> String {
     event(json!({"choices":[{"index":0,"delta":{"content":text},"finish_reason":reason}]}))
 }
 fn send(mut stream: TcpStream, body: &str) {
-    write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream; charset=utf-8\r\nConnection: close\r\n\r\n{body}").unwrap();
+    write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
     stream.flush().unwrap();
+    // A large queued response must finish before the fixture closes both halves.
+    // Send FIN after the body, then wait for the client to close (bounded by the
+    // read timeout set in accept). Some protocol-complete clients reset a socket
+    // with unread trailing events; output/error assertions remain on the client.
+    stream.shutdown(std::net::Shutdown::Write).unwrap();
+    let mut ignored = Vec::new();
+    let _ = stream.read_to_end(&mut ignored);
 }
 
 #[test]
