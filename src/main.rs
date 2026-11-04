@@ -8,6 +8,7 @@ mod doctor;
 mod imports;
 mod integer;
 mod last_result;
+mod models;
 mod output;
 mod presets;
 mod process;
@@ -202,8 +203,15 @@ enum Commands {
         #[command(subcommand)]
         action: Option<PresetAction>,
     },
-    /// List saved model profiles without displaying keys
-    Models,
+    /// List saved profiles, or explicitly query the selected service for model IDs
+    Models {
+        /// Contact the selected service; do not change saved configuration
+        #[arg(long)]
+        remote: bool,
+        /// Emit a versioned model catalogue (requires --remote)
+        #[arg(long = "json", requires = "remote")]
+        json_catalogue: bool,
+    },
     /// Choose the default saved model profile
     Use { name: String },
     /// Diagnose configuration; --probe sends a small model request
@@ -492,7 +500,16 @@ fn run(mut cli: Cli) -> Result<()> {
                 bail!("this command does not accept input data or an instruction");
             }
             return match command {
-                Commands::Models => config::models(&cli),
+                Commands::Models {
+                    remote,
+                    json_catalogue,
+                } => {
+                    if *remote {
+                        models::run(&cli, *json_catalogue)
+                    } else {
+                        config::models(&cli)
+                    }
+                }
                 Commands::Use { name } => config::use_profile(&cli, name),
                 Commands::Doctor { probe, json_report } => {
                     if *json_report {

@@ -1081,3 +1081,71 @@ fn doctor_json_terminal_escapes_metadata_and_checks_display_limit_before_probe()
     assert!(console::strip_ansi_codes(&output).contains("not_run"));
     assert!(l.accept().is_err());
 }
+
+#[test]
+fn remote_model_catalogue_terminal_keeps_ids_and_json_without_task_panels() {
+    for json_mode in [false, true] {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("models.toml");
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        l.set_nonblocking(true).unwrap();
+        std::fs::write(
+            &path,
+            format!(
+                "base_url='http://{}/v1'\napi_key='CATALOGUE_SECRET_993'\n",
+                l.local_addr().unwrap()
+            ),
+        )
+        .unwrap();
+        let worker = std::thread::spawn(move || {
+            let end = Instant::now() + Duration::from_secs(15);
+            let mut stream = loop {
+                match l.accept() {
+                    Ok((s, _)) => break s,
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        assert!(Instant::now() < end);
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(e) => panic!("{e}"),
+                }
+            };
+            stream.set_nonblocking(false).unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut first = String::new();
+            reader.read_line(&mut first).unwrap();
+            assert_eq!(first, "GET /v1/models HTTP/1.1\r\n");
+            loop {
+                let mut line = String::new();
+                assert!(reader.read_line(&mut line).unwrap() > 0);
+                if line == "\r\n" {
+                    break;
+                }
+            }
+            let body = r#"{"data":[{"id":"catalogue-fixture-993"}]}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+        });
+        let mut args = vec!["--config", path.to_str().unwrap(), "models", "--remote"];
+        if json_mode {
+            args.push("--json");
+        }
+        let output = terminal(&args, home.path(), false, &[("catalogue-fixture-993", "")]);
+        let shown = prompt_sync_text(&output);
+        assert!(shown.contains("catalogue-fixture-993"));
+        assert!(!shown.contains("CATALOGUE_SECRET_993"));
+        assert!(
+            !shown.contains("zi>") && !shown.contains("Thinking") && !shown.contains("Zistral ")
+        );
+        if json_mode {
+            assert!(shown.contains("\"kind\":\"model-catalogue\""));
+            assert!(shown.contains("\"complete\":true"));
+        }
+        worker.join().unwrap();
+    }
+}

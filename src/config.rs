@@ -687,6 +687,16 @@ pub fn set_output_budget(
 
 impl Settings {
     pub fn load(cli: &Cli) -> Result<Self> {
+        Self::load_inner(cli, false)
+    }
+
+    // The catalogue uses the same profile, URL, protocol and credential selection,
+    // but does not generate text: neither a model ID nor generation budgets apply.
+    pub fn load_for_models(cli: &Cli) -> Result<Self> {
+        Self::load_inner(cli, true)
+    }
+
+    fn load_inner(cli: &Cli, catalogue: bool) -> Result<Self> {
         let path = cli.config.clone().or_else(config_path);
         let file: FileConfig = match path {
             Some(p) => read_config(&p, cli.config.is_none())?,
@@ -699,8 +709,12 @@ impl Settings {
             .unwrap_or("default")
             .to_owned();
         let file = selected(&file, &name)?;
-        let model = nonempty(cli.model.clone().or(file.model))
-            .context("run zi config first, or set ZI_MODEL / --model")?;
+        let model = nonempty(cli.model.clone().or(file.model));
+        let model = if catalogue {
+            model.unwrap_or_default()
+        } else {
+            model.context("run zi config first, or set ZI_MODEL / --model")?
+        };
         let base_url = cli
             .base_url
             .clone()
@@ -715,12 +729,12 @@ impl Settings {
         if !matches!(api.as_str(), "chat" | "responses" | "anthropic") {
             bail!("api must be chat or responses or anthropic");
         }
-        let profile_tokens = if cli.no_profile_budget {
+        let profile_tokens = if catalogue || cli.no_profile_budget {
             None
         } else {
             file.max_output_tokens
         };
-        let profile_field = if cli.no_profile_budget {
+        let profile_field = if catalogue || cli.no_profile_budget {
             None
         } else {
             file.chat_token_limit_field.as_deref()
@@ -766,7 +780,7 @@ impl Settings {
         {
             bail!("set ZI_API_KEY or {key_env}; local servers may run without a key");
         }
-        let endpoint = if cli.base_url.is_none() && cli.api.is_none() {
+        let endpoint = if !catalogue && cli.base_url.is_none() && cli.api.is_none() {
             file.endpoint
         } else {
             None
