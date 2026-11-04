@@ -187,6 +187,7 @@ zi use work                 # Persist the default selection
 zi -p local 'Explain pipes' # One invocation only
 zi doctor                   # Offline configuration diagnostics
 zi doctor --probe           # Small model request to test access (charges may apply)
+zi doctor --json            # Unreleased: versioned JSON diagnostics for scripts
 ```
 
 Each profile has its own model, service, protocol, key/key reference, and optional exact endpoint.
@@ -220,6 +221,12 @@ exit nonzero, with HTTP/authentication/rate-limit/network guidance. A 403 can in
 permissions or a network proxy; it does not by itself prove the key is invalid.
 Keys, provider error bodies and probe answers are never printed. Use `zi -p work doctor --probe`
 to check one profile without switching the default.
+
+Unreleased `main` provides `zi doctor --json` for versioned, bounded diagnostic
+reports on success and diagnosed failure. Default checks remain offline; add
+`--probe` explicitly for network access. Keys, answers and provider error bodies
+stay hidden. See [structured diagnostics](docs/doctor-json.md) for fields, safe
+error categories and exit-status behavior.
 
 Unreleased `main` also supports saving budget preferences for an existing model:
 `zi config --name work --max-output-tokens 512` (Chat defaults to its modern field).

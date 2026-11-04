@@ -210,6 +210,9 @@ enum Commands {
     Doctor {
         #[arg(long)]
         probe: bool,
+        /// Emit one versioned JSON diagnostic report (keys and response bodies hidden)
+        #[arg(long = "json")]
+        json_report: bool,
     },
     /// Save or import a model configuration (optionally named)
     Config {
@@ -291,7 +294,10 @@ fn read_input(cli: &Cli) -> Result<String> {
 }
 
 fn run(mut cli: Cli) -> Result<()> {
-    let doctor_probe = matches!(cli.command.as_ref(), Some(Commands::Doctor { probe: true }));
+    let doctor_probe = matches!(
+        cli.command.as_ref(),
+        Some(Commands::Doctor { probe: true, .. })
+    );
     let management_or_local =
         cli.command.is_some() || cli.count || cli.select.is_some() || cli.config_example;
     if cli.max_output_tokens.is_some() && management_or_local {
@@ -488,7 +494,13 @@ fn run(mut cli: Cli) -> Result<()> {
             return match command {
                 Commands::Models => config::models(&cli),
                 Commands::Use { name } => config::use_profile(&cli, name),
-                Commands::Doctor { probe } => doctor::run(&cli, *probe),
+                Commands::Doctor { probe, json_report } => {
+                    if *json_report {
+                        doctor::run_json(&cli, *probe)
+                    } else {
+                        doctor::run(&cli, *probe)
+                    }
+                }
                 _ => unreachable!(),
             };
         }

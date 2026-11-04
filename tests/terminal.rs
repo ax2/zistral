@@ -39,6 +39,17 @@ fn terminal_with_environment(
     answers: &[(&str, &str)],
     environment: &[(&str, &str)],
 ) -> String {
+    terminal_outcome(args, home, plain, answers, environment, true)
+}
+
+fn terminal_outcome(
+    args: &[&str],
+    home: &std::path::Path,
+    plain: bool,
+    answers: &[(&str, &str)],
+    environment: &[(&str, &str)],
+    expected_success: bool,
+) -> String {
     let pair = native_pty_system()
         .openpty(PtySize {
             rows: 40,
@@ -134,7 +145,7 @@ fn terminal_with_environment(
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         if let Some(status) = child.try_wait().unwrap() {
-            assert!(status.success(), "{transcript}");
+            assert_eq!(status.success(), expected_success, "{transcript}");
             break;
         }
         if Instant::now() >= deadline {
@@ -1016,4 +1027,57 @@ fn interactive_model_switches_apply_each_saved_budget_without_cli_repetition() {
         saved["profiles"]["work"]["max_output_tokens"].as_integer(),
         Some(32)
     );
+}
+
+#[test]
+fn doctor_json_terminal_escapes_metadata_and_checks_display_limit_before_probe() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("config.toml");
+    let model = "MODEL\u{009b}31m\u{007f}END";
+    let encoded = serde_json::to_string(model)
+        .unwrap()
+        .replace('\u{007f}', "\\u007f");
+    std::fs::write(
+        &path,
+        format!("model={encoded}\nbase_url='http://localhost:1/v1'\n"),
+    )
+    .unwrap();
+    let output = terminal(
+        &["--config", path.to_str().unwrap(), "doctor", "--json"],
+        root.path(),
+        false,
+        &[("doctor-report", "")],
+    );
+    assert!(!output.contains(['\u{009b}', '\u{007f}']));
+    let shown = console::strip_ansi_codes(&output);
+    assert!(shown.contains("\\u009b") && shown.contains("\\u007f"));
+    assert!(!shown.contains("zi doctor ") && !shown.contains("Thinking"));
+    let l = TcpListener::bind("127.0.0.1:0").unwrap();
+    l.set_nonblocking(true).unwrap();
+    let model = serde_json::to_string(&"\u{009b}".repeat(12000)).unwrap();
+    std::fs::write(
+        &path,
+        format!(
+            "model={model}\nbase_url='http://{}/v1'\n",
+            l.local_addr().unwrap()
+        ),
+    )
+    .unwrap();
+    let output = terminal_outcome(
+        &[
+            "--config",
+            path.to_str().unwrap(),
+            "doctor",
+            "--json",
+            "--probe",
+        ],
+        root.path(),
+        false,
+        &[("report_limit", "")],
+        &[],
+        false,
+    );
+    assert!(!output.contains('\u{009b}'));
+    assert!(console::strip_ansi_codes(&output).contains("not_run"));
+    assert!(l.accept().is_err());
 }

@@ -744,7 +744,7 @@ impl Settings {
             cli.chat_token_limit_field.is_some()
                 && matches!(
                     cli.command.as_ref(),
-                    Some(crate::Commands::Doctor { probe: true })
+                    Some(crate::Commands::Doctor { probe: true, .. })
                 ),
         )?;
         let key_env = file.api_key_env.unwrap_or_else(|| "OPENAI_API_KEY".into());
