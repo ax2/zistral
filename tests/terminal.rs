@@ -5,6 +5,24 @@ use std::net::TcpListener;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+// Prompt synchronization only, not a screen renderer. On a fresh output line,
+// ConPTY may encode a single blank as cursor-forward instead of a literal space.
+// Keep the original transcript for control-sequence and result/file assertions.
+fn prompt_sync_text(transcript: &str) -> String {
+    let gaps = transcript.replace("\x1b[1C", " ").replace("\x1b[C", " ");
+    console::strip_ansi_codes(&gaps).into_owned()
+}
+
+#[test]
+fn prompt_sync_preserves_conpty_single_blank_gaps_and_raw_output() {
+    let captured = "Saved\x1b[1Ctail.toml (58 bytes).";
+    assert!(prompt_sync_text(captured).contains("Saved tail.toml"));
+    assert!(prompt_sync_text("Saved\x1b[Ctail.toml").contains("Saved tail.toml"));
+    assert!(prompt_sync_text("\x1b[32mSaved\x1b[0m plan.toml").contains("Saved plan.toml"));
+    assert!(!prompt_sync_text(captured).contains("Saved stale.toml"));
+    assert_eq!(captured, "Saved\x1b[1Ctail.toml (58 bytes).");
+}
+
 fn terminal(
     args: &[&str],
     home: &std::path::Path,
@@ -85,7 +103,7 @@ fn terminal_with_environment(
     for (prompt, answer) in answers {
         let deadline = Instant::now() + Duration::from_secs(20);
         loop {
-            if console::strip_ansi_codes(&transcript[offset..]).contains(prompt) {
+            if prompt_sync_text(&transcript[offset..]).contains(prompt) {
                 // ConPTY may insert cursor controls inside a visible message.
                 // Keep raw output for security assertions; match only displayed text.
                 offset = transcript.len();
