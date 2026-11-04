@@ -20,7 +20,7 @@ Download a native installer from [Releases](https://github.com/ax2/zistral/relea
 | Platform | Package | Installation |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | Per-user installer; adds PATH and a Start menu launcher; no administrator required |
-| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.32.0-linux-amd64.deb` |
+| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.33.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | Open the package; installs `/usr/local/bin/zi` |
 
 Then type `zi`. On first launch, choose an existing Codex, WorkBuddy or dsh configuration,
@@ -56,7 +56,7 @@ Portable archives contain one executable plus documentation. Extract zi (zi.exe 
 Build from source with Rust 1.85+ (a current stable toolchain is recommended):
 
 ```sh
-cargo install --git https://github.com/ax2/zistral --tag v0.32.0 --locked
+cargo install --git https://github.com/ax2/zistral --tag v0.33.0 --locked
 ```
 
 The package is named `zistral`; the installed command is `zi`. It is not yet
@@ -795,7 +795,7 @@ missing values without sample values. Arrays remain opaque leaves; explicit sele
 and array expansion choose a record set. The bounded report helps review paths before
 masking or sharing input. It exposes key names, is not a schema/sanitization guarantee,
 and adds no dependency or model tool name. See [structural profiles](docs/json-profile.md).
-Together with offline redaction and request preview, it completes a candidate input-
+Together with offline redaction and request preview, it completes an input-
 preparation milestone validated as one batch.
 
 The same redaction improvement now supports explicit `--if-present` for
@@ -805,14 +805,16 @@ Default behavior remains strict. Recipes/tools opt in per step with boolean
 `if_present = true`; successful zero-match runs do not prove sanitization.
 
 
-Development on main groups [quoted TSV exchange](docs/tsv-exchange.md),
+## Preparing tables with explicit rules (v0.33.0)
+
+This batch combines [quoted TSV exchange](docs/tsv-exchange.md),
 [exact integer filtering](docs/integer-filtering.md) and
 [explicit optional projection values](docs/jsonl-projection.md) into one table-preparation
-milestone. These additions are unreleased and are not available in the v0.32.0
-installation above. Definitions, pipes and the existing model tool share one native pipeline.
+milestone. Definitions, pipes and the existing model tool share one native pipeline.
+See the [release](https://github.com/ax2/zistral/releases/tag/v0.33.0) for publication
+status and installable packages.
 
 
-The source package is now selected as a **v0.33.0 candidate, not yet published**.
-The installation commands above still target stable v0.32.0. See the
-[grouped candidate review](docs/releases/v0.33.0-candidate.md) for validation and
-remaining delivery gates. Main commits run checks; they do not publish a release.
+The [grouped candidate review](docs/releases/v0.33.0-candidate.md) records version
+selection and validation evidence. Main commits run checks; explicit release actions
+publish installable versions after their gates pass.

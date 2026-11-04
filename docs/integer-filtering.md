@@ -1,7 +1,6 @@
-# Exact integer field filtering / 精确整数条件筛选（未发布）
+# Exact integer field filtering / 精确整数条件筛选（v0.33.0）
 
-Development on main adds `jsonl-where-int`. The published v0.32.0 does not contain
-this operation yet. It addresses a concrete gap: `jsonl-count-by` produces integer
+Since v0.33.0, `jsonl-where-int` addresses a concrete gap: `jsonl-count-by` produces integer
 counts, while the existing `jsonl-where` compares strings only.
 
 ```sh

@@ -1,8 +1,8 @@
-# Explicit TSV exchange / 显式 TSV 表格交换（未发布）
+# Explicit TSV exchange / 显式 TSV 表格交换（v0.33.0）
 
-The next development batch adds `tsv-to-jsonl` and `jsonl-to-tsv` for tab-separated
-tables. Installed v0.32.0 does not contain these operations yet. This is one
-interoperability improvement, accumulated with other useful work before release.
+Since v0.33.0, `tsv-to-jsonl` and `jsonl-to-tsv` exchange tab-separated tables.
+This interoperability improvement ships with integer equality filtering and explicit
+optional projection values as one coherent table-preparation milestone.
 
 ```sh
 zi data tsv-to-jsonl -i table.tsv -o records.jsonl
@@ -49,10 +49,10 @@ complete task without stdout intermediates or replacement of an existing `-o` fi
 Shell redirection has the shell's own truncation behavior; prefer `-o FILE`.
 
 
-The same development batch adds [exact integer field filtering](integer-filtering.md)
-and [explicit optional projection values](jsonl-projection.md#explicit-defaults-for-absent-fields--显式缺失值未发布).
+The same v0.33.0 batch includes [exact integer field filtering](integer-filtering.md)
+and [explicit optional projection values](jsonl-projection.md).
 For a heterogeneous nested table, inspect/edit
 [`optional-event-table.toml`](examples/optional-event-table.toml) and then choose it
-explicitly with `--recipe`. These are accumulated related outcomes, not separate
-TSV/import/export patch releases. The example is a user-maintained definition;
+explicitly with `--recipe`. All three user outcomes were reviewed and validated
+together. The example is a user-maintained definition;
 installed zi still needs no companion recipe files for ordinary operations.

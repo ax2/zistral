@@ -17,7 +17,7 @@ git diff | zi "生成一句简洁的提交说明"
 | 平台 | 安装包 | 安装方法 |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | 双击安装，无需管理员权限，自动添加用户 PATH 和开始菜单入口 |
-| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.32.0-linux-amd64.deb` |
+| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.33.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | 双击安装，命令放到 `/usr/local/bin/zi` |
 
 安装后直接运行 `zi`。Windows 安装结束可立即启动，或在开始菜单打开 zi；
@@ -613,9 +613,9 @@ zi data jsonl-where --pointer /level --equals ERROR --show-plan -o errors.toml
 `if_present = true` 选择，成功但零匹配不代表已脱敏。这是原有遮盖改进的细化，不另算功能。
 
 
-## v0.33.0 候选批次（尚未发布）
+## v0.33.0：按明确规则整理表格
 
 本批次集中提供 TSV/JSONL 双向互操作、JSONL 精确整数筛选，以及投影字段的显式缺失值。
 三项可以组成同一条离线表格整理管道；已有的 null 值保持原样，默认值只对明确指定的缺失路径生效。
-源码版本已选为 v0.33.0，用于版本与安装验证；上方正式安装命令仍指向 v0.32.0。
-详见[候选批次审阅](docs/releases/v0.33.0-candidate.md)。普通开发提交不会自动发布。
+安装包及发布状态见 [v0.33.0 Release](https://github.com/ax2/zistral/releases/tag/v0.33.0)，
+验证过程见[候选批次审阅](docs/releases/v0.33.0-candidate.md)。普通开发提交不会自动发布。

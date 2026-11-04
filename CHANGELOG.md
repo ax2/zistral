@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.33.0 — candidate, not yet released
+## 0.33.0 — 2026-11-04
 
 - Exchange explicitly quoted tab-separated tables with `tsv-to-jsonl` and
   `jsonl-to-tsv`, through pipes or saved recipes. Reuse strict CSV-style quoting,

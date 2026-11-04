@@ -231,16 +231,16 @@ profiles and are resolved independently by redaction. This is one refinement of 
 existing outcome, not another release item. No separately counted feature or extra tool/dependency.
 
 
-Unreleased on main: explicit quoted TSV import/export extends the existing bounded
+Since v0.33.0, explicit quoted TSV import/export extends the existing bounded
 table-exchange workflow beyond comma CSV. Reuse the strict parser/serializer with
 a fixed tab separator; retain all-string import, exact scalar-text export, complete
 failure and existing resource caps. This is one interoperability outcome, not two
 release items. Do not infer delimiters/types or add a query language, new tool name,
-runtime dependency or task memory. Accumulate it into a coherent future batch;
-see [TSV exchange](tsv-exchange.md). Keep v0.32.0 until that batch is ready.
+runtime dependency or task memory. It belongs to the coherent v0.33.0 batch;
+see [TSV exchange](tsv-exchange.md).
 
 
-Unreleased table-preparation work also fills two concrete gaps: exact integer field
+The same v0.33.0 table-preparation batch fills two concrete gaps: exact integer field
 equality for native count results, and explicit per-field JSON literal defaults for
 absent projection paths. Reuse the existing integer key and optional lexical pointer
 traversal; no float coercion, general predicate language, inferred values, new tool

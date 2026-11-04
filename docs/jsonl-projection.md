@@ -41,7 +41,7 @@ validator or JSON canonicalization. Existing `jsonl-select` still selects just o
 - Every field requires an explicit plain RFC 6901 pointer, even empty for the root. Existing
   4096 UTF-8 byte / 128 reference-token limits, `~0`/`~1` escapes and array-index rules apply.
   No JSONPath, filters, wildcards, interpolation or calculated fields. Mappings remain strict
-  unless an explicit default is supplied (unreleased; see below).
+  unless an explicit default is supplied (since v0.33.0; see below).
 - All fields select from the **same source record**, not a previous output alias. A later
   pipeline step can consume the newly projected objects; fields within a step cannot chain.
 - Missing paths without an explicit default, ambiguous referenced duplicate keys, invalid indices or malformed JSON fail
@@ -126,11 +126,11 @@ Agent-loop changes or task memory are introduced. Pointer semantics reuse the ex
 selector based on [RFC 6901](https://www.rfc-editor.org/rfc/rfc6901).
 
 
-## Explicit defaults for absent fields / 显式缺失值（未发布）
+## Explicit defaults for absent fields / 显式缺失值（v0.33.0）
 
-Development on main adds per-field defaults. Published v0.32.0 remains strict and
-does not accept `--field-default` / `default_json` yet. Defaults are user-selected
-JSON literal text, rather than inferred values or captured task history:
+Since v0.33.0, per-field defaults use `--field-default` / `default_json`.
+Older releases retain strict mappings and reject these additions. Defaults are
+user-selected JSON literal text, rather than inferred values or captured task history:
 
 ```sh
 zi data jsonl-project --field id=/id --field tag=/tag --field-default 'tag=""' -i events.jsonl

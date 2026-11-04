@@ -26,8 +26,11 @@ notes contain this batch only. Write one illustrated Feishu article per actual
 release after verifying the official binaries; do not generate articles for every
 commit or internal checkpoint.
 
-For the unreleased pre-sharing candidate, see the [boundary verification note](pre-sharing-verification.md)
+For historical pre-sharing validation, see the [boundary verification note](pre-sharing-verification.md)
 for reproducible checks and the distinction between development measurements and official delivery.
+
+The [v0.33.0 grouped table milestone](releases/v0.33.0-candidate.md) records the
+three outcomes and candidate-specific delivery evidence under the same gates.
 
 ## Validate and publish the chosen batch
 
