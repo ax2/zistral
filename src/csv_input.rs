@@ -1,10 +1,32 @@
-//! One explicit CSV dialect, decoded in memory. No file, model or shell access.
+//! Explicit comma CSV and quoted tab-separated dialects, decoded in memory. No file, model or shell access.
 use anyhow::{Context, Result, bail};
 use serde::{Serializer as _, ser::SerializeMap};
 use std::{collections::HashSet, io::Write};
 
 pub(crate) const MAX_COLUMNS: usize = 1024;
 pub(crate) const MAX_HEADER: usize = 4096;
+
+#[derive(Clone, Copy)]
+pub(crate) enum Dialect {
+    Csv,
+    Tsv,
+}
+
+impl Dialect {
+    pub(crate) fn delimiter(self) -> u8 {
+        match self {
+            Self::Csv => b',',
+            Self::Tsv => b'\t',
+        }
+    }
+
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Csv => "CSV",
+            Self::Tsv => "TSV",
+        }
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum State {
@@ -16,16 +38,17 @@ enum State {
 
 // csv deliberately accepts malformed quoting and skips empty lines. Check our narrower
 // dialect first so decoding cannot silently repair a field or omit a logical record.
-fn validate(input: &str, max_records: usize) -> Result<()> {
+fn validate(input: &str, max_records: usize, dialect: Dialect) -> Result<()> {
+    let label = dialect.label();
     if input.starts_with('\u{feff}') {
-        bail!("unexpected BOM before CSV header; CLI input removes one leading UTF-8 BOM");
+        bail!("unexpected BOM before {label} header; CLI input removes one leading UTF-8 BOM");
     }
     let bytes = input.as_bytes();
     let (mut state, mut record, mut columns, mut started, mut index) =
         (State::Start, 1usize, 1usize, false, 0usize);
     while index < bytes.len() {
         if record > max_records + 1 {
-            bail!("CSV accepts at most {max_records} data records plus a header");
+            bail!("{label} accepts at most {max_records} data records plus a header");
         }
         let byte = bytes[index];
         if state == State::Quoted {
@@ -38,26 +61,26 @@ fn validate(input: &str, max_records: usize) -> Result<()> {
         match byte {
             b'"' => {
                 if !matches!(state, State::Start | State::Closed) {
-                    bail!("invalid quote in CSV record {record}");
+                    bail!("invalid quote in {label} record {record}");
                 }
                 state = State::Quoted;
             }
-            b',' => {
+            separator if separator == dialect.delimiter() => {
                 columns += 1;
                 if columns > MAX_COLUMNS {
-                    bail!("CSV record {record} exceeds 1024 columns");
+                    bail!("{label} record {record} exceeds 1024 columns");
                 }
                 state = State::Start;
             }
             b'\r' | b'\n' => {
                 if byte == b'\r' {
                     if bytes.get(index + 1) != Some(&b'\n') {
-                        bail!("bare CR outside quoted field in CSV record {record}");
+                        bail!("bare CR outside quoted field in {label} record {record}");
                     }
                     index += 1;
                 }
                 if !started {
-                    bail!("blank CSV record {record}; quote an empty single-column cell");
+                    bail!("blank {label} record {record}; quote an empty single-column cell");
                 }
                 state = State::Start;
                 columns = 1;
@@ -68,7 +91,7 @@ fn validate(input: &str, max_records: usize) -> Result<()> {
             }
             _ => {
                 if state == State::Closed {
-                    bail!("unexpected text after closing quote in CSV record {record}");
+                    bail!("unexpected text after closing quote in {label} record {record}");
                 }
                 state = State::Unquoted;
             }
@@ -77,15 +100,24 @@ fn validate(input: &str, max_records: usize) -> Result<()> {
         index += 1;
     }
     if state == State::Quoted {
-        bail!("unclosed quoted field in CSV record {record}");
+        bail!("unclosed quoted field in {label} record {record}");
     }
     Ok(())
 }
 
 pub fn to_jsonl(input: &str, out: &mut impl Write, max_records: usize) -> Result<()> {
-    validate(input, max_records)?;
+    convert(input, out, max_records, Dialect::Csv)
+}
+
+pub fn tsv_to_jsonl(input: &str, out: &mut impl Write, max_records: usize) -> Result<()> {
+    convert(input, out, max_records, Dialect::Tsv)
+}
+
+fn convert(input: &str, out: &mut impl Write, max_records: usize, dialect: Dialect) -> Result<()> {
+    let label = dialect.label();
+    validate(input, max_records, dialect)?;
     let mut reader = csv::ReaderBuilder::new()
-        .delimiter(b',')
+        .delimiter(dialect.delimiter())
         .has_headers(false)
         .flexible(true) // Check lengths ourselves to keep diagnostics free of cell values.
         .trim(csv::Trim::None)
@@ -93,33 +125,39 @@ pub fn to_jsonl(input: &str, out: &mut impl Write, max_records: usize) -> Result
     let mut headers = csv::StringRecord::new();
     if !reader
         .read_record(&mut headers)
-        .map_err(|_| anyhow::anyhow!("cannot decode CSV header"))?
+        .map_err(|_| anyhow::anyhow!("cannot decode {label} header"))?
     {
-        bail!("csv-to-jsonl requires a header record");
+        bail!(
+            "{}-to-jsonl requires a header record",
+            label.to_ascii_lowercase()
+        );
     }
     let mut seen = HashSet::new();
     for name in &headers {
         if name.is_empty() || name.len() > MAX_HEADER {
-            bail!("CSV header names must contain 1-4096 UTF-8 bytes");
+            bail!("{label} header names must contain 1-4096 UTF-8 bytes");
         }
         if !seen.insert(name) {
-            bail!("CSV header names must be unique");
+            bail!("{label} header names must be unique");
         }
     }
     let mut row = csv::StringRecord::new();
     let mut record = 2;
     while reader
         .read_record(&mut row)
-        .map_err(|_| anyhow::anyhow!("cannot decode CSV record {record}"))?
+        .map_err(|_| anyhow::anyhow!("cannot decode {label} record {record}"))?
     {
         if row.len() != headers.len() {
-            bail!("CSV record {record} must have {} columns", headers.len());
+            bail!(
+                "{label} record {record} must have {} columns",
+                headers.len()
+            );
         }
         let mut serializer = serde_json::Serializer::new(&mut *out);
         let mut object = serializer.serialize_map(Some(headers.len()))?;
         for (name, cell) in headers.iter().zip(row.iter()) {
             object.serialize_entry(name, cell).with_context(|| {
-                format!("cannot encode CSV record {record} within output limit")
+                format!("cannot encode {label} record {record} within output limit")
             })?;
         }
         object.end()?;

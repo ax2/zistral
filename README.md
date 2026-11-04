@@ -803,3 +803,8 @@ heterogeneous records: mask present values (including null), retain valid missin
 and keep malformed/ambiguous data or invalid array indexes as complete-result errors.
 Default behavior remains strict. Recipes/tools opt in per step with boolean
 `if_present = true`; successful zero-match runs do not prove sanitization.
+
+
+Development on main: [quoted TSV exchange](docs/tsv-exchange.md) adds explicit
+tab-separated import/export using the same native pipeline. These operations are
+unreleased and are not available in the v0.32.0 installation above.

@@ -198,29 +198,29 @@ expressions, numeric/date inference, new tool names, project access or task memo
 See [keyed log analysis](jsonl-key-analysis.md). Publish this coherent batch only after
 combined validation, following the batched-release rule in [releasing](releasing.md).
 
-Unreleased on main: explicit JSON/JSONL value redaction fits pre-sharing preparation,
+Since v0.32.0, explicit JSON/JSONL value redaction fits pre-sharing preparation,
 using one literal pointer per native step and a fixed replacement. It preserves other
 lexical values, validates the original, and fails complete on missing/ambiguous paths.
 It is not automatic secret discovery; model-side masking cannot retract original-input
 disclosure, so withhold values by offline processing before any request. No tool names,
 runtime, project permissions, Agent-loop branches or implicit history are added.
-See [JSON redaction](json-redaction.md). Accumulate it into the next coherent batch.
+See [JSON redaction](json-redaction.md). It shipped in the grouped pre-sharing milestone.
 
-Unreleased first-request preview supports explicit disclosure review before model use.
+Since v0.32.0, first-request preview supports explicit disclosure review before model use.
 Reuse actual context/body preparation for all3protocols; omit authentication headers
 and bypass network/tool execution. Include only normally available first-turn project
 context when explicitly enabled. Do not call this full-session prediction, automatic
 sanitization, provider probing or frozen request replay. No extra model tool, dependency
 or persistent task history. See [request preview](request-preview.md).
 
-Unreleased JSON/JSONL structural profiles fill the gap between root-key enumeration
+Since v0.32.0, JSON/JSONL structural profiles fill the gap between root-key enumeration
 and manually reading raw logs before choosing explicit fields. Report bounded object
 paths, type counts and record presence/missing counts, with arrays as opaque leaves.
 Do not include sample values, infer schemas or automatically mask fields. Keys remain
 visible; only explicit offline profiling avoids disclosing raw values to a model.
 This reuses native pipelines/tool definitions, adds no dependency or tool name, and
-completes the candidate pre-sharing workflow with redaction and first-request preview.
-Review/test that coherent milestone before release; see [JSON profiles](json-profile.md).
+completes the released pre-sharing workflow with redaction and first-request preview.
+See [JSON profiles](json-profile.md) and the [v0.32.0 release](https://github.com/ax2/zistral/releases/tag/v0.32.0).
 
 The same v0.32.0 redaction outcome supports explicitly optional known fields for
 heterogeneous logs. Strict remains the default; `--if-present` / per-step boolean
@@ -229,3 +229,12 @@ Do not catch generic errors, suppress ambiguous/unsupported references, claim th
 match occurred, or infer sensitivity from profile counts. Arrays remain opaque in
 profiles and are resolved independently by redaction. This is one refinement of the
 existing outcome, not another release item. No separately counted feature or extra tool/dependency.
+
+
+Unreleased on main: explicit quoted TSV import/export extends the existing bounded
+table-exchange workflow beyond comma CSV. Reuse the strict parser/serializer with
+a fixed tab separator; retain all-string import, exact scalar-text export, complete
+failure and existing resource caps. This is one interoperability outcome, not two
+release items. Do not infer delimiters/types or add a query language, new tool name,
+runtime dependency or task memory. Accumulate it into a coherent future batch;
+see [TSV exchange](tsv-exchange.md). Keep v0.32.0 until that batch is ready.

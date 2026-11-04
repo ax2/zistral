@@ -67,8 +67,12 @@ pub enum Operation {
     JsonlCountBy,
     /// Convert header-based comma CSV to JSONL objects; keep every cell as a string
     CsvToJsonl,
+    /// Convert header-based quoted tab-separated text to string-valued JSONL objects
+    TsvToJsonl,
     /// Export flat scalar JSONL objects as quoted CSV; first object defines column order
     JsonlToCsv,
+    /// Export flat scalar JSONL objects as quoted tab-separated text
+    JsonlToTsv,
     /// Select and rename multiple values into one ordered JSON object per JSONL record
     JsonlProject,
 }
@@ -775,7 +779,9 @@ fn transform(input: &str, step: &Step, input_limit: usize, limit: usize) -> Resu
         Operation::JsonlToArray => jsonl_to_array(input, &mut out)?,
         Operation::ArrayToJsonl => array_to_jsonl(input, &mut out)?,
         Operation::CsvToJsonl => crate::csv_input::to_jsonl(input, &mut out, MAX_ITEMS)?,
+        Operation::TsvToJsonl => crate::csv_input::tsv_to_jsonl(input, &mut out, MAX_ITEMS)?,
         Operation::JsonlToCsv => crate::csv_output::from_jsonl(input, &mut out, MAX_ITEMS)?,
+        Operation::JsonlToTsv => crate::csv_output::to_tsv(input, &mut out, MAX_ITEMS)?,
         Operation::JsonlProject => jsonl_project(
             input,
             step.fields.as_deref().expect("validated fields"),
@@ -1036,6 +1042,35 @@ mod tests {
             )
             .contains("128")
         );
+    }
+    #[test]
+    fn tsv_import_export_keep_record_and_encoded_envelope_limits() {
+        for operation in [Operation::TsvToJsonl, Operation::JsonlToTsv] {
+            let step: Step =
+                serde_json::from_value(serde_json::json!({"operation":operation})).unwrap();
+            let input = if operation == Operation::TsvToJsonl {
+                format!("h\n{}", "x\n".repeat(MAX_ITEMS))
+            } else {
+                "{\"h\":\"x\"}\n".repeat(MAX_ITEMS)
+            };
+            assert!(transform(&input, &step, MAX_INPUT, CLI_OUTPUT).is_ok());
+            let extra = if operation == Operation::TsvToJsonl {
+                "x\n"
+            } else {
+                "{\"h\":\"x\"}\n"
+            };
+            assert!(transform(&(input + extra), &step, MAX_INPUT, CLI_OUTPUT).is_err());
+            let escaped = if operation == Operation::TsvToJsonl {
+                format!("h\n\"{}\"\n", "\t".repeat(24000))
+            } else {
+                serde_json::json!({"h":"\\".repeat(40000)}).to_string()
+            };
+            let raw = transform(&escaped, &step, MAX_INPUT, TOOL_OUTPUT).unwrap();
+            assert!(raw.len() < TOOL_OUTPUT);
+            let arguments = serde_json::json!({"operation":operation}).to_string();
+            assert!(execute(&arguments, &escaped).is_err());
+            assert!(transform(&escaped, &step, MAX_INPUT, 5).is_err());
+        }
     }
     #[test]
     fn csv_limits_keep_record_counts_and_serialized_tool_envelope_bounded() {

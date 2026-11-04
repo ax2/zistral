@@ -1131,6 +1131,8 @@ fn model_turns(api: &str, calls: Vec<(Value, Value)>) -> (String, std::thread::J
                 assert!(ops.contains(&json!("jsonl-select")));
                 assert!(ops.contains(&json!("csv-to-jsonl")));
                 assert!(ops.contains(&json!("jsonl-to-csv")));
+                assert!(ops.contains(&json!("tsv-to-jsonl")));
+                assert!(ops.contains(&json!("jsonl-to-tsv")));
                 assert!(ops.contains(&json!("jsonl-project")));
                 assert!(ops.contains(&json!("lines-include")));
                 assert!(ops.contains(&json!("lines-exclude")));
@@ -2830,6 +2832,250 @@ fn integer_sort_tools_rank_counts_recover_errors_and_keep_original_input_in_all_
             String::from_utf8_lossy(&out.stderr)
         );
         assert_eq!(out.stdout, b"verified\n");
+        server.join().unwrap();
+    }
+}
+
+#[test]
+fn tsv_import_and_real_pipe_export_preserve_quoted_cells_without_model_config() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join("broken.toml"), "not model configuration").unwrap();
+    let input =
+        "\u{feff}id\tnote\tempty\r\n0007\t\"中,文\t\"\"quoted\"\"\r\nline\"\t\r\n-0\t\\t\\n\t\"\"";
+    std::fs::write(root.join("table.tsv"), input).unwrap();
+    let imported = invoke(
+        root,
+        &[
+            "--config",
+            "broken.toml",
+            "data",
+            "tsv-to-jsonl",
+            "-i",
+            "table.tsv",
+        ],
+        b"ignored",
+    );
+    assert!(
+        imported.status.success() && imported.stderr.is_empty(),
+        "{}",
+        String::from_utf8_lossy(&imported.stderr)
+    );
+    let expected = "{\"id\":\"0007\",\"note\":\"中,文\\t\\\"quoted\\\"\\r\\nline\",\"empty\":\"\"}\n{\"id\":\"-0\",\"note\":\"\\\\t\\\\n\",\"empty\":\"\"}\n";
+    assert_eq!(imported.stdout, expected.as_bytes());
+    let mut export = command(root)
+        .args(["data", "jsonl-to-tsv"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let reimport = command(root)
+        .args(["data", "tsv-to-jsonl"])
+        .stdin(Stdio::from(export.stdout.take().unwrap()))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    export
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(&imported.stdout)
+        .unwrap();
+    assert!(export.wait().unwrap().success());
+    let result = reimport.wait_with_output().unwrap();
+    assert!(result.status.success() && result.stderr.is_empty());
+    assert_eq!(result.stdout, imported.stdout);
+    assert!(!root.join("config").exists());
+}
+
+#[test]
+fn tsv_export_keeps_lexical_scalars_and_column_order_and_recipe_export_replays() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let input = b"{\"id\":123456789012345678901234567890,\"amount\":1.2300E+400,\"flag\":true,\"empty\":null}\n{\"empty\":\"\",\"flag\":false,\"amount\":-0,\"id\":\"=1+2\"}\n";
+    let expected = b"\"id\"\t\"amount\"\t\"flag\"\t\"empty\"\n\"123456789012345678901234567890\"\t\"1.2300E+400\"\t\"true\"\t\"null\"\n\"=1+2\"\t\"-0\"\t\"false\"\t\"\"\n";
+    let output = invoke(root, &["data", "jsonl-to-tsv"], input);
+    assert!(output.status.success() && output.stderr.is_empty());
+    assert_eq!(output.stdout, expected);
+    let plan = invoke(
+        root,
+        &[
+            "data",
+            "--step",
+            "jsonl-to-tsv",
+            "--step",
+            "tsv-to-jsonl",
+            "--show-plan",
+        ],
+        b"ignored",
+    );
+    assert!(plan.status.success() && plan.stderr.is_empty());
+    std::fs::write(root.join("plan.toml"), &plan.stdout).unwrap();
+    let replay = invoke(
+        root,
+        &["data", "--recipe", "plan.toml", "-o", "result.jsonl"],
+        input,
+    );
+    assert!(replay.status.success() && replay.stdout.is_empty() && replay.stderr.is_empty());
+    let result = std::fs::read(root.join("result.jsonl")).unwrap();
+    assert!(
+        result
+            .starts_with(b"{\"id\":\"123456789012345678901234567890\",\"amount\":\"1.2300E+400\"")
+    );
+    assert_eq!(
+        serde_json::from_slice::<Value>(result.split(|b| *b == b'\n').next().unwrap()).unwrap()["empty"],
+        "null"
+    );
+    let csv = invoke(
+        root,
+        &["data", "--step", "tsv-to-jsonl", "--step", "jsonl-to-csv"],
+        expected,
+    );
+    let back = invoke(
+        root,
+        &["data", "--step", "csv-to-jsonl", "--step", "jsonl-to-tsv"],
+        &csv.stdout,
+    );
+    assert!(csv.status.success() && back.status.success());
+    assert_eq!(back.stdout, expected);
+}
+
+#[test]
+fn tsv_malformed_late_records_preserve_old_files_and_do_not_disclose_values() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join("keep"), b"unchanged").unwrap();
+    for input in [
+        b"".as_slice(),
+        b"a\ta\n1\t2",
+        b"a\t\n1\t2",
+        b"a\tb\n1\t2\nPRIVATE_VALUE",
+        b"a\nvalid\n\"PRIVATE_VALUE",
+        b"a\nvalid\nPRIVATE_VALUE\"",
+        b"a\nvalid\n\"x\"PRIVATE_VALUE",
+        b"a\nvalid\n\n",
+        b"a\nvalid\rPRIVATE_VALUE",
+        b"a\nvalid\n\xff",
+    ] {
+        for args in [
+            vec!["data", "tsv-to-jsonl"],
+            vec!["data", "tsv-to-jsonl", "-o", "keep", "--force"],
+        ] {
+            let result = invoke(root, &args, input);
+            assert!(
+                !result.status.success() && result.stdout.is_empty(),
+                "{input:?}"
+            );
+            assert!(!String::from_utf8_lossy(&result.stderr).contains("PRIVATE_VALUE"));
+            assert_eq!(std::fs::read(root.join("keep")).unwrap(), b"unchanged");
+        }
+    }
+    for input in [
+        "",
+        "{}",
+        "{\"id\":1}\n{\"id\":[]}",
+        "{\"id\":1}\n{\"PRIVATE_KEY\":2}",
+        "{\"id\":1,\"i\\u0064\":2}",
+        "{\"id\":1}\n\n",
+    ] {
+        let result = invoke(
+            root,
+            &["data", "jsonl-to-tsv", "-o", "keep", "--force"],
+            input.as_bytes(),
+        );
+        assert!(!result.status.success() && result.stdout.is_empty());
+        assert!(!String::from_utf8_lossy(&result.stderr).contains("PRIVATE_KEY"));
+        assert_eq!(std::fs::read(root.join("keep")).unwrap(), b"unchanged");
+    }
+    let header_only = invoke(root, &["data", "tsv-to-jsonl"], b"id\tnote\n");
+    assert!(header_only.status.success() && header_only.stdout.is_empty());
+    let csv_one_column = invoke(root, &["data", "csv-to-jsonl"], b"a\tb\nx\ty");
+    assert!(csv_one_column.status.success());
+    assert_eq!(csv_one_column.stdout, b"{\"a\\tb\":\"x\\ty\"}\n");
+    let tsv_one_column = invoke(root, &["data", "tsv-to-jsonl"], b"a,b\nx,y");
+    assert!(tsv_one_column.status.success());
+    assert_eq!(tsv_one_column.stdout, b"{\"a,b\":\"x,y\"}\n");
+}
+
+#[test]
+fn tsv_modes_reject_inapplicable_options_before_reading_stdin_or_output() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join("keep"), b"unchanged").unwrap();
+    for op in ["tsv-to-jsonl", "jsonl-to-tsv"] {
+        for options in [
+            vec!["--reverse"],
+            vec!["--pointer", ""],
+            vec!["--if-present"],
+            vec!["--lines", "2"],
+        ] {
+            let mut args = vec!["data", op, "-i", "DO_NOT_READ", "-o", "keep", "--force"];
+            args.extend(options);
+            let mut child = command(root)
+                .args(args)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap();
+            let start = Instant::now();
+            while child.try_wait().unwrap().is_none() {
+                if start.elapsed() > Duration::from_secs(5) {
+                    child.kill().unwrap();
+                    panic!("invalid TSV definition waited for stdin");
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            let result = child.wait_with_output().unwrap();
+            assert!(!result.status.success() && result.stdout.is_empty());
+            assert!(!String::from_utf8_lossy(&result.stderr).contains("cannot open DO_NOT_READ"));
+            assert_eq!(std::fs::read(root.join("keep")).unwrap(), b"unchanged");
+        }
+    }
+}
+
+#[test]
+fn tsv_model_tools_recover_and_compose_on_original_input_in_all_protocols() {
+    for api in ["chat", "responses", "anthropic"] {
+        let dir = tempfile::tempdir().unwrap();
+        let input = b"id\tlevel\tnote\n0007\tERROR\t\"a,b\tquoted\"\n0008\tINFO\tplain\n";
+        let jsonl = "{\"id\":\"0007\",\"level\":\"ERROR\",\"note\":\"a,b\\tquoted\"}\n{\"id\":\"0008\",\"level\":\"INFO\",\"note\":\"plain\"}\n";
+        let (url, server) = model_turns(
+            api,
+            vec![
+                (
+                    json!({"operation":"tsv-to-jsonl","reverse":true}),
+                    Value::Null,
+                ),
+                (json!({"operation":"tsv-to-jsonl"}), json!(jsonl)),
+                (
+                    json!({"steps":[{"operation":"tsv-to-jsonl"},{"operation":"jsonl-where","pointer":"/level","equals":"ERROR"},{"operation":"jsonl-to-tsv"}]}),
+                    json!("\"id\"\t\"level\"\t\"note\"\n\"0007\"\t\"ERROR\"\t\"a,b\tquoted\"\n"),
+                ),
+                (json!({"operation":"tsv-to-jsonl"}), json!(jsonl)),
+            ],
+        );
+        let result = invoke(
+            dir.path(),
+            &[
+                "--api",
+                api,
+                "--base-url",
+                &url,
+                "--model",
+                "fixture",
+                "filter explicit TSV records",
+            ],
+            input,
+        );
+        assert!(
+            result.status.success() && result.stderr.is_empty(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        assert_eq!(result.stdout, b"verified\n");
         server.join().unwrap();
     }
 }

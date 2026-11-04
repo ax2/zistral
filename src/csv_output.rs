@@ -1,5 +1,5 @@
-//! Flat JSONL objects to CSV text. No file access or spreadsheet type/formula inference.
-use crate::csv_input::{MAX_COLUMNS, MAX_HEADER};
+//! Flat JSONL objects to CSV or quoted TSV text. No file access or spreadsheet type/formula inference.
+use crate::csv_input::{Dialect, MAX_COLUMNS, MAX_HEADER};
 use anyhow::{Context, Result, bail};
 use serde::{
     Deserialize,
@@ -48,7 +48,7 @@ impl<'de> Deserialize<'de> for Row<'de> {
                         ),
                         b'{' | b'[' => {
                             return Err(de::Error::custom(
-                                "CSV cells require scalar values; nested objects/arrays are unsupported",
+                                "tabular cells require scalar values; nested objects/arrays are unsupported",
                             ));
                         }
                         _ => Cow::Borrowed(raw), // Validated JSON number, boolean or null, with exact token spelling.
@@ -58,7 +58,7 @@ impl<'de> Deserialize<'de> for Row<'de> {
                 }
                 if row.names.is_empty() {
                     return Err(de::Error::custom(
-                        "a nonempty object is required to define CSV columns",
+                        "a nonempty object is required to define tabular columns",
                     ));
                 }
                 Ok(row)
@@ -69,8 +69,17 @@ impl<'de> Deserialize<'de> for Row<'de> {
 }
 
 pub fn from_jsonl(input: &str, out: &mut impl Write, max_records: usize) -> Result<()> {
+    convert(input, out, max_records, Dialect::Csv)
+}
+
+pub fn to_tsv(input: &str, out: &mut impl Write, max_records: usize) -> Result<()> {
+    convert(input, out, max_records, Dialect::Tsv)
+}
+
+fn convert(input: &str, out: &mut impl Write, max_records: usize, dialect: Dialect) -> Result<()> {
+    let label = dialect.label();
     let mut writer = csv::WriterBuilder::new()
-        .delimiter(b',')
+        .delimiter(dialect.delimiter())
         .has_headers(false)
         .quote_style(csv::QuoteStyle::Always)
         .terminator(csv::Terminator::Any(b'\n'))
@@ -78,7 +87,7 @@ pub fn from_jsonl(input: &str, out: &mut impl Write, max_records: usize) -> Resu
     let mut headers = Vec::new();
     for (index, line) in input.lines().enumerate() {
         if index == max_records {
-            bail!("CSV export accepts at most {max_records} JSONL records");
+            bail!("{label} export accepts at most {max_records} JSONL records");
         }
         let record = index + 1;
         crate::transforms::validate_json(line)
@@ -94,7 +103,7 @@ pub fn from_jsonl(input: &str, out: &mut impl Write, max_records: usize) -> Resu
             headers = row.names;
             writer
                 .write_record(&headers)
-                .context("cannot encode CSV header within output limit")?;
+                .with_context(|| format!("cannot encode {label} header within output limit"))?;
         }
         if row.cells.len() != headers.len()
             || headers.iter().any(|name| !row.cells.contains_key(name))
@@ -104,15 +113,18 @@ pub fn from_jsonl(input: &str, out: &mut impl Write, max_records: usize) -> Resu
         writer
             .write_record(headers.iter().map(|name| row.cells[name].as_ref()))
             .with_context(|| {
-                format!("cannot encode JSONL record {record} within CSV output limit")
+                format!("cannot encode JSONL record {record} within {label} output limit")
             })?;
     }
     if headers.is_empty() {
-        bail!("jsonl-to-csv requires at least one nonempty JSON object to define columns");
+        bail!(
+            "jsonl-to-{} requires at least one nonempty JSON object to define columns",
+            label.to_ascii_lowercase()
+        );
     }
     writer
         .flush()
-        .context("cannot flush CSV within output limit")?;
+        .with_context(|| format!("cannot flush {label} within output limit"))?;
     Ok(())
 }
 
