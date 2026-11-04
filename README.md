@@ -810,3 +810,9 @@ Development on main groups [quoted TSV exchange](docs/tsv-exchange.md),
 [explicit optional projection values](docs/jsonl-projection.md) into one table-preparation
 milestone. These additions are unreleased and are not available in the v0.32.0
 installation above. Definitions, pipes and the existing model tool share one native pipeline.
+
+
+The source package is now selected as a **v0.33.0 candidate, not yet published**.
+The installation commands above still target stable v0.32.0. See the
+[grouped candidate review](docs/releases/v0.33.0-candidate.md) for validation and
+remaining delivery gates. Main commits run checks; they do not publish a release.

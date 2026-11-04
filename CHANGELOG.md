@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.33.0 — candidate, not yet released
+
+- Exchange explicitly quoted tab-separated tables with `tsv-to-jsonl` and
+  `jsonl-to-tsv`, through pipes or saved recipes. Reuse strict CSV-style quoting,
+  retain imported strings and exact exported scalar text, and reject malformed
+  records without delimiter/type guessing or skipped rows.
+
+- Keep whole JSONL records by exact integer field equality with
+  `jsonl-where-int --pointer /count --equals 2`. Compare large signed integers
+  without floating-point conversion; `-0` and `0` match. Every selected value
+  must be an integer literal, including discarded records.
+
+- Fill an absent projected column with an explicit JSON literal using
+  `--field-default NAME=JSON_LITERAL` or a field's `default_json` in recipes and
+  tools. Preserve present null and existing strict mappings; malformed original
+  Unicode, ambiguous references and invalid array indexes still fail completely.
+
+Compose all three in the existing native pipeline and transform tool. Installed
+workflow checks exercise the complete table task while preserving pipe/file
+delivery and existing output on failure, with no added runtime dependencies,
+tool names, permissions, task history or implicit memory.
+
 ## 0.32.0 — 2026-10-31
 
 - Inspect JSON/JSONL structure offline with `json-profile` / `jsonl-profile`:
