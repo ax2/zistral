@@ -86,13 +86,30 @@ fn chat(text: &str, reason: Value) -> String {
     event(json!({"choices":[{"index":0,"delta":{"content":text},"finish_reason":reason}]}))
 }
 fn send(mut stream: TcpStream, body: &str) {
-    write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    stream.write_all(response.as_bytes()).unwrap();
     stream.flush().unwrap();
     // A large queued response must finish before the fixture closes both halves.
     // Send FIN after the body, then wait for the client to close (bounded by the
     // read timeout set in accept). Some protocol-complete clients reset a socket
     // with unread trailing events; output/error assertions remain on the client.
-    stream.shutdown(std::net::Shutdown::Write).unwrap();
+    // A client may reject an unexpected stream at its headers, or finish at a
+    // protocol terminator, and reset the socket before this fixture sends FIN.
+    // Writes stay strict; only peer-close errors during shutdown are expected.
+    if let Err(error) = stream.shutdown(std::net::Shutdown::Write) {
+        assert!(
+            matches!(
+                error.kind(),
+                std::io::ErrorKind::ConnectionReset
+                    | std::io::ErrorKind::BrokenPipe
+                    | std::io::ErrorKind::NotConnected
+            ),
+            "unexpected fixture shutdown error: {error}"
+        );
+    }
     let mut ignored = Vec::new();
     let _ = stream.read_to_end(&mut ignored);
 }
