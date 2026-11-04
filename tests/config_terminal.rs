@@ -82,7 +82,12 @@ fn configure_outcome(
     let mut transcript = String::new();
     let mut position = 0;
     let mut cursor_queries = 0;
-    for (prompt, answer) in answers.iter().copied().chain(std::iter::once((finish, ""))) {
+    for (step, (prompt, answer)) in answers
+        .iter()
+        .copied()
+        .chain(std::iter::once((finish, "")))
+        .enumerate()
+    {
         let deadline = Instant::now() + Duration::from_secs(20);
         loop {
             if let Some(offset) = transcript[position..].find(prompt) {
@@ -107,7 +112,9 @@ fn configure_outcome(
                 }
             }
         }
-        if prompt != "Saved " {
+        // The final entry only observes completion (including expected errors).
+        // Do not send a synthetic Enter after the child has already exited.
+        if step < answers.len() {
             // Wait for the end of the label before sending: rpassword must have
             // switched the console to hidden input before the key is typed.
             std::thread::sleep(Duration::from_millis(100));
