@@ -573,6 +573,12 @@ impl Settings {
         if !matches!(api.as_str(), "chat" | "responses" | "anthropic") {
             bail!("api must be chat or responses or anthropic");
         }
+        if cli.chat_token_limit_field.is_some() && api != "chat" {
+            bail!("--chat-token-limit-field requires the chat protocol");
+        }
+        if api == "responses" && cli.max_output_tokens.is_some_and(|limit| limit < 16) {
+            bail!("--max-output-tokens must be at least 16 for responses");
+        }
         let key_env = file.api_key_env.unwrap_or_else(|| "OPENAI_API_KEY".into());
         // Keep provenance beside the value selected by the actual request path.
         // Do not infer it later from a second config/environment read.

@@ -119,8 +119,10 @@ future adapter update.
 Supported protocols are `chat`, `responses`, and `anthropic` (Anthropic Messages,
 including dsh's `anthropic-messages` providers). Anthropic roots without `/v1`
 use `/v1/messages`; roots already ending in `/v1` use `/messages`.
-`--max-output-tokens` sets the Anthropic output limit (default 4096). WorkBuddy
-custom-protocol URLs are preserved as an exact `endpoint` in the saved config;
+Anthropic requests default to a 4096-token output limit. On unreleased `main`,
+`--max-output-tokens` also supports explicit Chat/Responses limits; see
+[output budgets](docs/output-budgets.md) for modern/legacy Chat selection and per-turn semantics.
+WorkBuddy custom-protocol URLs are preserved as an exact `endpoint` in the saved config;
 overriding `--base-url` or `--api` discards that exact endpoint for the request.
 
 The key is stored in the local TOML config, not in an encrypted keychain.
@@ -194,6 +196,10 @@ Names contain 1–64 ASCII letters/digits/underscores/hyphens; at most 128 named
 Selection precedence: `--profile` > `ZI_PROFILE` > saved active profile. Existing model/service/API/key
 overrides still apply. Interactive shortcuts: `/models`, `/use NAME`, `/doctor`.
 
+**Development note (unreleased):** the refined source report and minimal bounded probe below
+are on `main`; the published v0.33.0 retains its original diagnostics. They will ship together
+with the next reviewed batch, rather than as separate releases.
+
 Doctor reports the config path, selected profile, model, protocol, service host and key presence.
 `API Key source` identifies the actual winning environment-variable name, saved profile, or no
 key; it never prints a key value or lists inactive key variables as overrides. Variable names are
@@ -203,8 +209,10 @@ with a reminder that CLI flags can override them; their values are not printed i
 The profile and credential source come from the same configuration read used by requests.
 Only `--probe` sends a model request: one minimal non-streaming turn,
 no tools or task/project instructions, no retries, and a timeout of at most 15 seconds.
-It requests at most 16 output tokens (`max_tokens` for Chat/Anthropic, `max_output_tokens`
-for Responses); the selected service must support that field and return a complete text answer.
+It requests at most 16 output tokens (`max_tokens` for Chat/Anthropic by default,
+`max_output_tokens` for Responses). For modern Chat probes, use
+`zi --chat-token-limit-field max_completion_tokens doctor --probe`.
+The selected service must support that field and return a complete text answer.
 Reasoning models may exhaust this small budget; a failed probe does not prove that normal tasks
 will fail. This tests basic model access, not tool support or model quality. Failed configuration/probes
 exit nonzero, with HTTP/authentication/rate-limit/network guidance. A 403 can involve model/account

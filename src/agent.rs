@@ -186,7 +186,6 @@ fn request_body(
     system: &str,
     messages: &[Value],
     tools: &[Value],
-    output_limit: Option<u32>,
 ) -> Value {
     let anthropic = settings.api == "anthropic";
     let responses = settings.api == "responses";
@@ -194,7 +193,6 @@ fn request_body(
     if anthropic {
         body["system"] = json!(system);
         body["messages"] = json!(messages);
-        body["max_tokens"] = json!(cli.max_output_tokens);
     } else if responses {
         body["input"] = json!(messages);
         body["store"] = json!(false);
@@ -204,12 +202,17 @@ fn request_body(
     if !cli.no_tools {
         body["tools"] = json!(tools);
     }
-    if let Some(limit) = output_limit {
-        body[if responses {
+    if let Some(limit) = cli.max_output_tokens.or(anthropic.then_some(4096)) {
+        let field = if responses {
             "max_output_tokens"
-        } else {
+        } else if anthropic {
             "max_tokens"
-        }] = json!(limit);
+        } else {
+            cli.chat_token_limit_field
+                .as_deref()
+                .unwrap_or("max_completion_tokens")
+        };
+        body[field] = json!(limit);
     }
     body
 }
@@ -223,7 +226,6 @@ pub fn preview(settings: &Settings, cli: &Cli, input: &str) -> Result<String> {
         &request.system,
         &request.messages,
         &request.tools,
-        None,
     );
     let value = json!({
         "version": 1,
@@ -256,7 +258,7 @@ pub fn preview(settings: &Settings, cli: &Cli, input: &str) -> Result<String> {
 }
 
 pub fn run(settings: &Settings, cli: &Cli, input: &str) -> Result<Answer> {
-    run_prepared(settings, cli, input, prepare(settings, cli, input)?, None)
+    run_prepared(settings, cli, input, prepare(settings, cli, input)?)
 }
 
 pub fn probe(settings: &Settings, cli: &Cli) -> Result<()> {
@@ -272,7 +274,11 @@ pub fn probe(settings: &Settings, cli: &Cli) -> Result<()> {
     test.verbose = false;
     test.max_steps = Some(1);
     test.retries = 0;
-    test.max_output_tokens = 16;
+    test.max_output_tokens = Some(16);
+    // Preserve the existing Chat probe wire format unless explicitly selected.
+    if settings.api == "chat" && test.chat_token_limit_field.is_none() {
+        test.chat_token_limit_field = Some("max_tokens".into());
+    }
     test.timeout = cli.timeout.min(15);
     let mut request = prepare(settings, &test, "")?;
     // Probe only the selected service. Do not disclose task/tool instructions,
@@ -285,7 +291,7 @@ pub fn probe(settings: &Settings, cli: &Cli) -> Result<()> {
             .insert(0, json!({"role":"system", "content":request.system}));
     }
     request.tools.clear();
-    run_prepared(settings, &test, "", request, Some(16))?;
+    run_prepared(settings, &test, "", request)?;
     Ok(())
 }
 
@@ -294,7 +300,6 @@ fn run_prepared(
     cli: &Cli,
     input: &str,
     request: InitialRequest,
-    output_limit: Option<u32>,
 ) -> Result<Answer> {
     let InitialRequest {
         system,
@@ -319,15 +324,7 @@ fn run_prepared(
     let responses = settings.api == "responses";
     let anthropic = settings.api == "anthropic";
     for step in 0..max_steps {
-        let body = request_body(
-            settings,
-            cli,
-            streaming,
-            &system,
-            &messages,
-            &tools,
-            output_limit,
-        );
+        let body = request_body(settings, cli, streaming, &system, &messages, &tools);
         let mut retried = 0;
         let response = loop {
             activity.request(step + 1, max_steps);

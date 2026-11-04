@@ -128,9 +128,12 @@ pub struct Cli {
     /// Extra attempts per model turn for transient HTTP errors (0-3; default: no retry)
     #[arg(long, default_value_t = 0, value_parser = clap::value_parser!(u32).range(0..=3))]
     retries: u32,
-    /// Maximum output tokens for the Anthropic Messages API
-    #[arg(long, default_value_t = 4096, value_parser = clap::value_parser!(u32).range(1..=65536))]
-    max_output_tokens: u32,
+    /// Requested output-token cap per model turn (Anthropic default: 4096; others: omitted)
+    #[arg(long, value_parser = clap::value_parser!(u32).range(1..=65536))]
+    max_output_tokens: Option<u32>,
+    /// Chat cap field (model default: max_completion_tokens; probe default: max_tokens)
+    #[arg(long, value_parser = ["max_completion_tokens", "max_tokens"])]
+    chat_token_limit_field: Option<String>,
     /// Maximum input size in bytes
     #[arg(long, global = true, default_value_t = 8_388_608, value_parser = clap::value_parser!(u64).range(1..=67_108_864))]
     max_input: u64,
@@ -276,6 +279,22 @@ fn read_input(cli: &Cli) -> Result<String> {
 }
 
 fn run(mut cli: Cli) -> Result<()> {
+    let doctor_probe = matches!(cli.command.as_ref(), Some(Commands::Doctor { probe: true }));
+    let management_or_local =
+        cli.command.is_some() || cli.count || cli.select.is_some() || cli.config_example;
+    if cli.max_output_tokens.is_some() && management_or_local {
+        bail!(
+            "--max-output-tokens is for model tasks only; doctor --probe uses a fixed 16-token cap"
+        );
+    }
+    if cli.chat_token_limit_field.is_some() {
+        if management_or_local && !doctor_probe {
+            bail!("--chat-token-limit-field is for model tasks or doctor --probe only");
+        }
+        if cli.max_output_tokens.is_none() && !doctor_probe {
+            bail!("--chat-token-limit-field requires --max-output-tokens (except doctor --probe)");
+        }
+    }
     if cli.preview && cli.command.is_some() {
         bail!("--preview is for model tasks, not offline or management commands");
     }
@@ -511,6 +530,14 @@ fn run(mut cli: Cli) -> Result<()> {
         }
         bail!("provide an instruction, or use --count / --select; see zi --help");
     }
+    // Resolve protocol-dependent budget constraints before input/output IO, and
+    // reuse that same settings snapshot for the eventual request.
+    let budget_settings = if cli.max_output_tokens.is_some() || cli.chat_token_limit_field.is_some()
+    {
+        Some(config::Settings::load(&cli)?)
+    } else {
+        None
+    };
     let target = prepare_output(&cli)?;
     let input = read_input(&cli)?;
     let output = if cli.count {
@@ -518,14 +545,18 @@ fn run(mut cli: Cli) -> Result<()> {
     } else if let Some(pointer) = &cli.select {
         data::select(&input, pointer, cli.join.as_deref())?
     } else {
-        if !cli.preview
+        if budget_settings.is_none()
+            && !cli.preview
             && io::stdin().is_terminal()
             && io::stdout().is_terminal()
             && config::needs_setup(&cli)
         {
             config::configure(&cli, false)?;
         }
-        let settings = config::Settings::load(&cli)?;
+        let settings = match budget_settings {
+            Some(settings) => settings,
+            None => config::Settings::load(&cli)?,
+        };
         if cli.preview {
             let preview = agent::preview(&settings, &cli, &input)?;
             let preview = if target.is_none() && io::stdout().is_terminal() {
@@ -692,11 +723,19 @@ fn session(cli: &mut Cli) -> Result<()> {
                 continue;
             }
             _ if prompt.starts_with("/use ") => {
-                match config::use_profile(cli, prompt[5..].trim()) {
-                    Ok(()) => {
+                let name = prompt[5..].trim();
+                let mut next_cli = cli.clone();
+                next_cli.profile = Some(name.into());
+                // Validate effective protocol/budget/key settings before saving
+                // the selection or discarding a usable completed result.
+                match config::Settings::load(&next_cli).and_then(|next_settings| {
+                    config::use_profile(cli, name)?;
+                    Ok(next_settings)
+                }) {
+                    Ok(next_settings) => {
                         last_result.clear();
-                        cli.profile = Some(prompt[5..].trim().into());
-                        settings = config::Settings::load(cli)?;
+                        cli.profile = next_cli.profile;
+                        settings = next_settings;
                         ui::model(&settings, cli);
                     }
                     Err(error) => eprintln!("zi: {}", ui::clean(&error.to_string())),

@@ -927,3 +927,54 @@ fn preview_display_overflow_emits_only_error_in_real_terminal() {
     assert!(!output.contains('\u{0080}'));
     assert!(!root.path().join("config").exists());
 }
+
+#[test]
+fn interactive_budget_conflicts_preserve_profile_and_last_result() {
+    for (limit, selector, other_api, error) in [
+        ("8", None, "responses", "at least 16 for responses"),
+        (
+            "128",
+            Some("max_tokens"),
+            "anthropic",
+            "requires the chat protocol",
+        ),
+    ] {
+        let home = tempfile::tempdir().unwrap();
+        let (url, worker) = export_server(vec![export_reply("chat", "KEEP_RESULT", false, false)]);
+        let path = home.path().join("config.toml");
+        let original = format!(
+            "model='fixture'\nbase_url='{url}'\napi='chat'\n[profiles.alternate]\nmodel='alternate'\nbase_url='{url}'\napi='{other_api}'\n"
+        );
+        std::fs::write(&path, &original).unwrap();
+        let mut args = vec![
+            "--config",
+            path.to_str().unwrap(),
+            "--max-output-tokens",
+            limit,
+            "--no-stream",
+        ];
+        if let Some(field) = selector {
+            args.extend(["--chat-token-limit-field", field]);
+        }
+        let output = terminal(
+            &args,
+            home.path(),
+            true,
+            &[
+                ("zi>", "first"),
+                ("KEEP_RESULT", "/use alternate"),
+                (error, "/save retained.txt"),
+                ("Saved retained.txt", "/doctor"),
+                ("Profile: default", "/exit"),
+                ("Goodbye.", ""),
+            ],
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+        assert_eq!(
+            std::fs::read(home.path().join("retained.txt")).unwrap(),
+            b"KEEP_RESULT\n"
+        );
+        assert!(!prompt_sync_text(&output).contains("Active profile: alternate"));
+        assert_eq!(worker.join().unwrap().len(), 1);
+    }
+}
