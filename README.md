@@ -212,6 +212,7 @@ no tools or task/project instructions, no retries, and a timeout of at most 15 s
 It requests at most 16 output tokens (`max_tokens` for Chat/Anthropic by default,
 `max_output_tokens` for Responses). For modern Chat probes, use
 `zi --chat-token-limit-field max_completion_tokens doctor --probe`.
+Saved budget preferences select the matching field while the probe remains capped at 16.
 The selected service must support that field and return a complete text answer.
 Reasoning models may exhaust this small budget; a failed probe does not prove that normal tasks
 will fail. This tests basic model access, not tool support or model quality. Failed configuration/probes
@@ -219,6 +220,14 @@ exit nonzero, with HTTP/authentication/rate-limit/network guidance. A 403 can in
 permissions or a network proxy; it does not by itself prove the key is invalid.
 Keys, provider error bodies and probe answers are never printed. Use `zi -p work doctor --probe`
 to check one profile without switching the default.
+
+Unreleased `main` also supports saving budget preferences for an existing model:
+`zi config --name work --max-output-tokens 512` (Chat defaults to its modern field).
+Add `--chat-token-limit-field max_tokens` after `config` for a legacy Chat service;
+use `--clear-output-budget` to remove both preferences. These edits do not reopen
+service/key setup or switch the default model. Named models keep separate budgets;
+ordinary task flags override saved values, and `--no-profile-budget` ignores them
+for one invocation. See [saved budgets](docs/output-budgets.md#save-preferences-once-per-model).
 
 ## Streaming
 

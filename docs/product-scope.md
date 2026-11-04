@@ -249,3 +249,12 @@ an error. Ordinary projections and string filtering retain their strict contract
 Together with TSV interoperability these form three related user outcomes; examples,
 protocol coverage and CI maintenance do not count as extra features. See
 [integer filtering](integer-filtering.md) and [projection](jsonl-projection.md).
+
+
+Unreleased `main` supports explicit per-profile request-budget preferences. They
+save only a numeric output cap and one reviewed Chat parameter name, with CLI
+overrides, per-invocation ignore and atomic clearing. They neither retain past
+inputs/results nor grant tools, projects or background execution. Keep manual
+editing/import/profile-switch semantics and pre-IO validation explicit; see
+[saved budgets](output-budgets.md#save-preferences-once-per-model). This is one
+configuration-once improvement, not separate features for every protocol or guard.

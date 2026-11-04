@@ -131,6 +131,9 @@ pub struct Cli {
     /// Requested output-token cap per model turn (Anthropic default: 4096; others: omitted)
     #[arg(long, value_parser = clap::value_parser!(u32).range(1..=65536))]
     max_output_tokens: Option<u32>,
+    /// Ignore saved model request-budget preferences for this invocation
+    #[arg(long)]
+    no_profile_budget: bool,
     /// Chat cap field (model default: max_completion_tokens; probe default: max_tokens)
     #[arg(long, value_parser = ["max_completion_tokens", "max_tokens"])]
     chat_token_limit_field: Option<String>,
@@ -219,6 +222,15 @@ enum Commands {
         /// List detected model configurations without importing or showing keys
         #[arg(long, conflicts_with_all = ["manual", "name"])]
         list: bool,
+        /// Save a per-turn token cap for an existing profile, without interactive setup
+        #[arg(long = "max-output-tokens", value_parser = clap::value_parser!(u32).range(1..=65536), conflicts_with_all = ["manual", "list"])]
+        request_limit: Option<u32>,
+        /// Save the Chat budget field for an existing profile
+        #[arg(long = "chat-token-limit-field", value_parser = ["max_completion_tokens", "max_tokens"], conflicts_with_all = ["manual", "list"])]
+        chat_limit_field: Option<String>,
+        /// Clear both saved output-budget preferences; keep model/key/default selection
+        #[arg(long, conflicts_with_all = ["manual", "list", "request_limit", "chat_limit_field"])]
+        clear_output_budget: bool,
     },
 }
 
@@ -287,13 +299,14 @@ fn run(mut cli: Cli) -> Result<()> {
             "--max-output-tokens is for model tasks only; doctor --probe uses a fixed 16-token cap"
         );
     }
-    if cli.chat_token_limit_field.is_some() {
-        if management_or_local && !doctor_probe {
-            bail!("--chat-token-limit-field is for model tasks or doctor --probe only");
-        }
-        if cli.max_output_tokens.is_none() && !doctor_probe {
-            bail!("--chat-token-limit-field requires --max-output-tokens (except doctor --probe)");
-        }
+    if cli.chat_token_limit_field.is_some() && management_or_local && !doctor_probe {
+        bail!("--chat-token-limit-field is for model tasks or doctor --probe only");
+    }
+    if cli.no_profile_budget
+        && management_or_local
+        && !matches!(cli.command.as_ref(), Some(Commands::Doctor { .. }))
+    {
+        bail!("--no-profile-budget is for model tasks or doctor only");
     }
     if cli.preview && cli.command.is_some() {
         bail!("--preview is for model tasks, not offline or management commands");
@@ -480,7 +493,15 @@ fn run(mut cli: Cli) -> Result<()> {
             };
         }
     }
-    if let Some(Commands::Config { manual, list, name }) = &cli.command {
+    if let Some(Commands::Config {
+        manual,
+        list,
+        name,
+        request_limit,
+        chat_limit_field,
+        clear_output_budget,
+    }) = &cli.command
+    {
         if cli.input.is_some()
             || cli.count
             || cli.select.is_some()
@@ -492,6 +513,15 @@ fn run(mut cli: Cli) -> Result<()> {
             || !cli.prompt.is_empty()
         {
             bail!("invalid options for zi config; see zi config --help");
+        }
+        if request_limit.is_some() || chat_limit_field.is_some() || *clear_output_budget {
+            return config::set_output_budget(
+                &cli,
+                name.as_deref(),
+                *request_limit,
+                chat_limit_field.as_deref(),
+                *clear_output_budget,
+            );
         }
         if *list {
             return config::list_imports();
@@ -530,13 +560,21 @@ fn run(mut cli: Cli) -> Result<()> {
         }
         bail!("provide an instruction, or use --count / --select; see zi --help");
     }
-    // Resolve protocol-dependent budget constraints before input/output IO, and
-    // reuse that same settings snapshot for the eventual request.
-    let budget_settings = if cli.max_output_tokens.is_some() || cli.chat_token_limit_field.is_some()
-    {
-        Some(config::Settings::load(&cli)?)
-    } else {
+    // A saved budget can constrain requests even without CLI budget flags.
+    // Resolve the one effective snapshot before reading task data or preparing output.
+    let model_settings = if cli.count || cli.select.is_some() {
         None
+    } else {
+        if !cli.preview
+            && io::stdin().is_terminal()
+            && io::stdout().is_terminal()
+            && config::needs_setup(&cli)
+        {
+            // Preserve the first-launch output guard before asking for credentials.
+            let _ = prepare_output(&cli)?;
+            config::configure(&cli, false)?;
+        }
+        Some(config::Settings::load(&cli)?)
     };
     let target = prepare_output(&cli)?;
     let input = read_input(&cli)?;
@@ -545,18 +583,7 @@ fn run(mut cli: Cli) -> Result<()> {
     } else if let Some(pointer) = &cli.select {
         data::select(&input, pointer, cli.join.as_deref())?
     } else {
-        if budget_settings.is_none()
-            && !cli.preview
-            && io::stdin().is_terminal()
-            && io::stdout().is_terminal()
-            && config::needs_setup(&cli)
-        {
-            config::configure(&cli, false)?;
-        }
-        let settings = match budget_settings {
-            Some(settings) => settings,
-            None => config::Settings::load(&cli)?,
-        };
+        let settings = model_settings.context("model configuration unavailable")?;
         if cli.preview {
             let preview = agent::preview(&settings, &cli, &input)?;
             let preview = if target.is_none() && io::stdout().is_terminal() {

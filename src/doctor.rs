@@ -36,6 +36,20 @@ pub fn run(cli: &Cli, probe: bool) -> Result<()> {
         }
         config::ApiKeySource::NotConfigured => report!("API Key source: not configured"),
     }
+    let budget = settings.output_budget;
+    if let Some(tokens) = budget.tokens {
+        report!(
+            "Output cap: {tokens} tokens per turn (source: {})",
+            budget.tokens_source
+        );
+        report!(
+            "Output field: {} (source: {})",
+            budget.field,
+            budget.field_source
+        );
+    } else {
+        report!("Output cap: omitted (source: default)");
+    }
     let environment: Vec<_> = [
         "ZI_CONFIG",
         "ZI_PROFILE",
@@ -54,6 +68,10 @@ pub fn run(cli: &Cli, probe: bool) -> Result<()> {
     }
     report!("Configuration: OK");
     if probe {
+        report!(
+            "Probe cap: 16 tokens per turn (field: {})",
+            budget.probe(&settings.api).field
+        );
         output.flush()?;
         let start = Instant::now();
         crate::agent::probe(&settings, cli)

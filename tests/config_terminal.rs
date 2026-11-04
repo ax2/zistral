@@ -22,6 +22,17 @@ fn configure_named(
     home: Option<&std::path::Path>,
     name: Option<&str>,
 ) -> String {
+    configure_outcome(path, answers, home, name, "Saved ", true)
+}
+
+fn configure_outcome(
+    path: &std::path::Path,
+    answers: &[(&str, &str)],
+    home: Option<&std::path::Path>,
+    name: Option<&str>,
+    finish: &str,
+    expected_success: bool,
+) -> String {
     let pair = native_pty_system()
         .openpty(PtySize {
             rows: 30,
@@ -71,11 +82,7 @@ fn configure_named(
     let mut transcript = String::new();
     let mut position = 0;
     let mut cursor_queries = 0;
-    for (prompt, answer) in answers
-        .iter()
-        .copied()
-        .chain(std::iter::once(("Saved ", "")))
-    {
+    for (prompt, answer) in answers.iter().copied().chain(std::iter::once((finish, ""))) {
         let deadline = Instant::now() + Duration::from_secs(20);
         loop {
             if let Some(offset) = transcript[position..].find(prompt) {
@@ -111,7 +118,7 @@ fn configure_named(
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         if let Some(status) = child.try_wait().unwrap() {
-            assert!(status.success());
+            assert_eq!(status.success(), expected_success, "{transcript}");
             break;
         }
         if Instant::now() >= deadline {
@@ -287,4 +294,74 @@ fn named_imports_preserve_other_models_and_legacy_config() {
     for secret in ["legacy-secret", "first-secret", "second-secret"] {
         assert!(!format!("{first}{second}{edited}").contains(secret));
     }
+}
+
+#[test]
+fn manual_model_setup_preserves_saved_budgets_and_other_profiles() {
+    let home = tempfile::tempdir().unwrap();
+    let path = home.path().join("config.toml");
+    std::fs::write(&path, "model='fixture'\nbase_url='http://localhost:1/v1'\napi='chat'\napi_key='manual-budget-secret'\nmax_output_tokens=128\nchat_token_limit_field='max_tokens'\n[profiles.other]\nmodel='other'\napi='responses'\nmax_output_tokens=32\n").unwrap();
+    let output = configure(
+        &path,
+        &[
+            ("Service URL", ""),
+            ("Model name", ""),
+            ("API protocol", ""),
+            ("API Key", ""),
+        ],
+    );
+    let saved: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(saved["max_output_tokens"].as_integer(), Some(128));
+    assert_eq!(saved["chat_token_limit_field"].as_str(), Some("max_tokens"));
+    assert_eq!(
+        saved["profiles"]["other"]["max_output_tokens"].as_integer(),
+        Some(32)
+    );
+    assert_eq!(saved["api_key"].as_str(), Some("manual-budget-secret"));
+    assert!(!output.contains("manual-budget-secret"));
+}
+
+#[test]
+fn importing_a_replacement_service_resets_only_its_saved_budget() {
+    let home = tempfile::tempdir().unwrap();
+    source(
+        home.path(),
+        ".workbuddy/models.json",
+        r#"[{"id":"replacement","url":"https://example.com/v1/chat/completions","apiKey":"replacement-secret"}]"#,
+    );
+    let path = home.path().join("config.toml");
+    std::fs::write(&path,"model='old'\nbase_url='http://localhost:1/v1'\napi='chat'\nmax_output_tokens=128\nchat_token_limit_field='max_tokens'\n[profiles.other]\nmodel='other'\nmax_output_tokens=64\n").unwrap();
+    let output = configure_from(&path, &[("Configuration source", "1")], Some(home.path()));
+    let saved: toml::Value = toml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    assert_eq!(saved["model"].as_str(), Some("replacement"));
+    assert!(saved.get("max_output_tokens").is_none());
+    assert!(saved.get("chat_token_limit_field").is_none());
+    assert_eq!(
+        saved["profiles"]["other"]["max_output_tokens"].as_integer(),
+        Some(64)
+    );
+    assert!(!output.contains("replacement-secret"));
+}
+
+#[test]
+fn incompatible_protocol_edit_preserves_original_config() {
+    let home = tempfile::tempdir().unwrap();
+    let path = home.path().join("config.toml");
+    let original = "model='fixture'\nbase_url='http://localhost:1/v1'\napi='chat'\napi_key='protocol-edit-secret'\nmax_output_tokens=128\nchat_token_limit_field='max_tokens'\n";
+    std::fs::write(&path, original).unwrap();
+    let output = configure_outcome(
+        &path,
+        &[
+            ("Service URL", ""),
+            ("Model name", ""),
+            ("API protocol", "responses"),
+            ("API Key", ""),
+        ],
+        None,
+        None,
+        "requires the chat protocol",
+        false,
+    );
+    assert_eq!(std::fs::read_to_string(path).unwrap(), original);
+    assert!(!output.contains("protocol-edit-secret"));
 }

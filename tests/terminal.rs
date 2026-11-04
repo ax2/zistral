@@ -978,3 +978,42 @@ fn interactive_budget_conflicts_preserve_profile_and_last_result() {
         assert_eq!(worker.join().unwrap().len(), 1);
     }
 }
+
+#[test]
+fn interactive_model_switches_apply_each_saved_budget_without_cli_repetition() {
+    let home = tempfile::tempdir().unwrap();
+    let (url, worker) = export_server(vec![
+        export_reply("chat", "ROOT_RESULT", false, false),
+        export_reply("responses", "WORK_RESULT", false, false),
+        export_reply("chat", "RETURN_RESULT", false, false),
+    ]);
+    let path = home.path().join("config.toml");
+    std::fs::write(&path,format!("model='root'\nbase_url='{url}'\napi='chat'\nmax_output_tokens=128\nchat_token_limit_field='max_tokens'\n[profiles.work]\nmodel='work'\nbase_url='{url}'\napi='responses'\nmax_output_tokens=32\n")).unwrap();
+    terminal(
+        &["--config", path.to_str().unwrap(), "--no-stream"],
+        home.path(),
+        true,
+        &[
+            ("zi>", "first"),
+            ("ROOT_RESULT", "/use work"),
+            ("Active profile: work.", "second"),
+            ("WORK_RESULT", "/use default"),
+            ("Active profile: default.", "third"),
+            ("RETURN_RESULT", "/exit"),
+            ("Goodbye.", ""),
+        ],
+    );
+    let requests = worker.join().unwrap();
+    assert_eq!(requests.len(), 3);
+    assert_eq!(requests[0]["max_tokens"], 128);
+    assert!(requests[0].get("max_completion_tokens").is_none());
+    assert_eq!(requests[1]["max_output_tokens"], 32);
+    assert!(requests[1].get("max_tokens").is_none());
+    assert_eq!(requests[2]["max_tokens"], 128);
+    let saved: toml::Value = toml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    assert!(saved.get("active_profile").is_none());
+    assert_eq!(
+        saved["profiles"]["work"]["max_output_tokens"].as_integer(),
+        Some(32)
+    );
+}

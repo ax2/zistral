@@ -14,6 +14,11 @@ api = "chat"
 # Run zi config to save a key locally, or keep using an environment variable.
 api_key_env = "OPENAI_API_KEY"
 
+# Optional saved request budgets (unreleased main / next grouped release):
+# max_output_tokens = 512
+# chat_token_limit_field = "max_tokens" # Chat only; requires a cap
+# zi config --clear-output-budget removes both preferences.
+
 # Local server example:
 # base_url = "http://localhost:11434/v1"
 # model = "your-local-model"
@@ -28,6 +33,8 @@ struct FileConfig {
     api_key_env: Option<String>,
     api_key: Option<String>,
     endpoint: Option<String>,
+    max_output_tokens: Option<u32>,
+    chat_token_limit_field: Option<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     profiles: BTreeMap<String, Profile>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -43,6 +50,8 @@ struct Profile {
     api_key_env: Option<String>,
     api_key: Option<String>,
     endpoint: Option<String>,
+    max_output_tokens: Option<u32>,
+    chat_token_limit_field: Option<String>,
 }
 
 impl From<&FileConfig> for Profile {
@@ -54,6 +63,8 @@ impl From<&FileConfig> for Profile {
             api_key_env: f.api_key_env.clone(),
             api_key: f.api_key.clone(),
             endpoint: f.endpoint.clone(),
+            max_output_tokens: f.max_output_tokens,
+            chat_token_limit_field: f.chat_token_limit_field.clone(),
         }
     }
 }
@@ -67,6 +78,8 @@ impl From<Profile> for FileConfig {
             api_key_env: p.api_key_env,
             api_key: p.api_key,
             endpoint: p.endpoint,
+            max_output_tokens: p.max_output_tokens,
+            chat_token_limit_field: p.chat_token_limit_field,
             ..Self::default()
         }
     }
@@ -141,9 +154,10 @@ pub fn use_profile(cli: &Cli, name: &str) -> Result<()> {
     let path = path(cli)?;
     let mut document = read_config(&path, false)?;
     let file = selected(&document, name)?;
-    if nonempty(file.model).is_none() {
+    if nonempty(file.model.clone()).is_none() {
         bail!("profile has no model; run zi config --name {name}");
     }
+    profile_budget(&file)?;
     document.active_profile = if name == "default" {
         None
     } else {
@@ -165,6 +179,7 @@ pub enum ApiKeySource {
 pub struct Settings {
     pub profile_name: String,
     pub api_key_source: ApiKeySource,
+    pub output_budget: OutputBudget,
     pub model: String,
     pub base_url: String,
     pub api: String,
@@ -377,6 +392,7 @@ pub fn configure_named(cli: &Cli, manual: bool, name: Option<&str>) -> Result<()
         Some(file) => file,
         None => collect_config(cli, file, &mut ask, &mut output)?,
     };
+    profile_budget(&updated)?;
     if name == "default" {
         let profiles = std::mem::take(&mut document.profiles);
         document = updated.clone();
@@ -543,6 +559,132 @@ fn save_config(path: &Path, file: &FileConfig) -> Result<()> {
     Ok(())
 }
 
+#[derive(Clone, Copy)]
+pub struct OutputBudget {
+    pub tokens: Option<u32>,
+    pub field: &'static str,
+    pub tokens_source: &'static str,
+    pub field_source: &'static str,
+}
+
+impl OutputBudget {
+    pub fn probe(self, api: &str) -> Self {
+        let mut budget = self;
+        // Preserve older Chat probes only when there is no explicit preference.
+        if api == "chat" && self.tokens_source == "default" && self.field_source == "default" {
+            budget.field = "max_tokens";
+            budget.field_source = "probe default";
+        }
+        budget.tokens = Some(16);
+        budget.tokens_source = "probe";
+        budget
+    }
+}
+
+fn resolve_output_budget(
+    api: &str,
+    tokens: Option<u32>,
+    field: Option<&str>,
+    tokens_source: &'static str,
+    field_source: &'static str,
+    probe: bool,
+) -> Result<OutputBudget> {
+    if tokens.is_some_and(|n| !(1..=65536).contains(&n)) {
+        bail!("max_output_tokens / --max-output-tokens must be between 1 and 65536");
+    }
+    if field.is_some() && api != "chat" {
+        bail!("chat_token_limit_field / --chat-token-limit-field requires the chat protocol");
+    }
+    if field.is_some_and(|f| !matches!(f, "max_completion_tokens" | "max_tokens")) {
+        bail!("chat_token_limit_field must be max_completion_tokens or max_tokens");
+    }
+    if field.is_some() && tokens.is_none() && !probe {
+        bail!(
+            "--chat-token-limit-field requires --max-output-tokens or a saved output cap (except doctor --probe)"
+        );
+    }
+    if api == "responses" && tokens.is_some_and(|n| n < 16) {
+        bail!("--max-output-tokens must be at least 16 for responses");
+    }
+    Ok(OutputBudget {
+        tokens: tokens.or((api == "anthropic").then_some(4096)),
+        field: match api {
+            "responses" => "max_output_tokens",
+            "anthropic" => "max_tokens",
+            _ if field == Some("max_tokens") => "max_tokens",
+            _ => "max_completion_tokens",
+        },
+        tokens_source: if tokens.is_some() {
+            tokens_source
+        } else {
+            "default"
+        },
+        field_source: if field.is_some() {
+            field_source
+        } else {
+            "default"
+        },
+    })
+}
+
+fn profile_budget(file: &FileConfig) -> Result<OutputBudget> {
+    let api = file.api.as_deref().unwrap_or("chat");
+    if !matches!(api, "chat" | "responses" | "anthropic") {
+        bail!("api must be chat or responses or anthropic");
+    }
+    resolve_output_budget(
+        api,
+        file.max_output_tokens,
+        file.chat_token_limit_field.as_deref(),
+        "profile",
+        "profile",
+        false,
+    )
+}
+
+pub fn set_output_budget(
+    cli: &Cli,
+    name: Option<&str>,
+    tokens: Option<u32>,
+    field: Option<&str>,
+    clear: bool,
+) -> Result<()> {
+    let path = path(cli)?;
+    let mut document = read_config(&path, false)?;
+    let name = name
+        .or(cli.profile.as_deref())
+        .or(document.active_profile.as_deref())
+        .unwrap_or("default")
+        .to_owned();
+    let mut updated = selected(&document, &name)?;
+    if nonempty(updated.model.clone()).is_none() {
+        bail!("profile has no saved model; run zi config first");
+    }
+    if clear {
+        updated.max_output_tokens = None;
+        updated.chat_token_limit_field = None;
+    } else {
+        if let Some(tokens) = tokens {
+            updated.max_output_tokens = Some(tokens);
+        }
+        if let Some(field) = field {
+            updated.chat_token_limit_field = Some(field.into());
+        }
+    }
+    profile_budget(&updated)?;
+    if name == "default" {
+        document.max_output_tokens = updated.max_output_tokens;
+        document.chat_token_limit_field = updated.chat_token_limit_field;
+    } else {
+        document
+            .profiles
+            .insert(name.clone(), Profile::from(&updated));
+    }
+    save_config(&path, &document)?;
+    eprintln!("Saved request budget for profile {name}. Default profile selection unchanged.");
+    Ok(())
+}
+
 impl Settings {
     pub fn load(cli: &Cli) -> Result<Self> {
         let path = cli.config.clone().or_else(config_path);
@@ -573,12 +715,38 @@ impl Settings {
         if !matches!(api.as_str(), "chat" | "responses" | "anthropic") {
             bail!("api must be chat or responses or anthropic");
         }
-        if cli.chat_token_limit_field.is_some() && api != "chat" {
-            bail!("--chat-token-limit-field requires the chat protocol");
-        }
-        if api == "responses" && cli.max_output_tokens.is_some_and(|limit| limit < 16) {
-            bail!("--max-output-tokens must be at least 16 for responses");
-        }
+        let profile_tokens = if cli.no_profile_budget {
+            None
+        } else {
+            file.max_output_tokens
+        };
+        let profile_field = if cli.no_profile_budget {
+            None
+        } else {
+            file.chat_token_limit_field.as_deref()
+        };
+        let tokens = cli.max_output_tokens.or(profile_tokens);
+        let field = cli.chat_token_limit_field.as_deref().or(profile_field);
+        let output_budget = resolve_output_budget(
+            &api,
+            tokens,
+            field,
+            if cli.max_output_tokens.is_some() {
+                "cli"
+            } else {
+                "profile"
+            },
+            if cli.chat_token_limit_field.is_some() {
+                "cli"
+            } else {
+                "profile"
+            },
+            cli.chat_token_limit_field.is_some()
+                && matches!(
+                    cli.command.as_ref(),
+                    Some(crate::Commands::Doctor { probe: true })
+                ),
+        )?;
         let key_env = file.api_key_env.unwrap_or_else(|| "OPENAI_API_KEY".into());
         // Keep provenance beside the value selected by the actual request path.
         // Do not infer it later from a second config/environment read.
@@ -612,6 +780,7 @@ impl Settings {
         Ok(Self {
             profile_name: name,
             api_key_source,
+            output_budget,
             model,
             base_url: base_url.trim_end_matches('/').into(),
             api,

@@ -570,3 +570,40 @@ fn output_limits_do_not_replace_exact_native_results() {
         assert_eq!(counts["words"], 2);
     }
 }
+
+#[test]
+fn saved_budgets_survive_streamed_tool_followups_and_transient_retries() {
+    for (api, field, wire) in variants() {
+        let (root, l, url) = fixture();
+        let mut config =
+            format!("model='fixture'\nbase_url='{url}'\napi='{api}'\nmax_output_tokens=128\n");
+        if let Some(field) = field {
+            config += &format!("chat_token_limit_field='{field}'\n");
+        }
+        std::fs::write(root.path().join("config.toml"), config).unwrap();
+        let protocol = api.to_owned();
+        let worker = std::thread::spawn(move || {
+            let (s, first) = accept(&l);
+            budget(&first, wire, 128);
+            send(s, 429, false, "hidden-provider-error");
+            let (s, retried) = accept(&l);
+            assert_eq!(first, retried);
+            send(s, 200, true, &stream_body(&protocol, true, false));
+            let (s, next) = accept(&l);
+            budget(&next, wire, 128);
+            assert_eq!(next["stream"], true);
+            send(s, 200, true, &stream_body(&protocol, false, false));
+        });
+        let out = command(root.path(), api, &url, None, None)
+            .args(["--stream", "--retries", "1", "count"])
+            .output()
+            .unwrap();
+        worker.join().unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(out.stdout, b"OK\n");
+    }
+}
