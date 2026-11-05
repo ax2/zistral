@@ -37,6 +37,11 @@ for reproducible checks and the distinction between development measurements and
 The [v0.33.0 grouped table milestone](releases/v0.33.0-candidate.md) records the
 three outcomes and candidate-specific delivery evidence under the same gates.
 
+The [unreleased service-setup batch](releases/service-setup-candidate.md) records
+its seven related outcomes, one explicit workflow, exact runtime/native checks,
+known real-service observations and remaining publication work. It does not select
+a new version or describe CI candidates as a published release.
+
 ## Validate and publish the chosen batch
 
 1. Update the package/lock version and add one changelog section for this release. Keep
