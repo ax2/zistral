@@ -7,7 +7,10 @@ file is preserved byte for byte, including deleted keys. Restart the wizard to
 reload it; zi does not merge or silently retry old settings.
 
 The same protection covers `zi use`, profile rename/removal, key-reference and
-saved-key edits, and output-budget edits. Creation, deletion, comment-only edits
+saved-key edits, and output-budget edits. Unreleased preset-library imports use
+the same OS lock for their own destination and recheck the captured library before
+publication, preserving a concurrent successful import. Their preview stays
+read-only; see [preset import](preset-import.md). Creation, deletion, comment-only edits
 and replacement with invalid bytes also count as changes. Read-only commands
 such as `models`, `doctor` and `config --list` do not create coordination files.
 

@@ -47,13 +47,29 @@ custom presets and 256 KiB TOML, with at most 16 KiB per prompt and 12 variables
 Literal defaults remain literal, including `{{...}}` inside their values. No includes,
 scripts, plugin loading, captured input, automatic history or memory is imported.
 
+**Unreleased reliability fix:** imports now share [configuration-save
+coordination](configuration-saves.md) for the selected library. A persistent empty
+`<library filename>.lock` contains no definitions, inputs or PID; it is reused
+without unlinking. A busy import exits nonzero; a stale merge also fails rather
+than overwriting a successful concurrent import. Explicitly retry against the
+current library. `--dry-run` ignores the write lock and creates no files/directories.
+After source validation, an actual import holds the lock through destination
+inspection, bounded read/merge and publication, releasing it on process exit. This
+also prevents a cooperating import's read handle from interfering with Windows
+replacement. A failed actual attempt may leave its reusable empty coordination
+file; the library's contents remain protected. Existing read/merge limits and
+file-permission rules are unchanged; there is no new schema,
+tool, dependency, automatic merge/retry or background process. v0.33.0 and external
+editors do not honor this coordination file.
+
 Actual publication uses a temporary file in the destination directory and checks for
 observed destination changes before replacement. Invalid definitions, collisions,
 combined-limit failures and detected edits preserve the old library. Destination
 links/devices/directories are rejected. New Unix files use mode `0600`; existing Unix
 permission bits are preserved. Windows follows the destination directory's inherited
-permissions. These checks do not lock out another editor or provide a filesystem
-transaction against arbitrary concurrent changes by other processes.
+permissions. The unreleased lock serializes cooperating zi imports on the same
+local path; it cannot serialize an editor/older zi that ignores it or guarantee a
+transaction across arbitrary final-window external changes or different aliases.
 
 ## Locate definition errors / 定位定义错误
 

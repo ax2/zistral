@@ -700,7 +700,7 @@ fn coordination_error(error: io::Error) -> anyhow::Error {
     }
 }
 
-fn configuration_lock(path: &Path) -> Result<std::fs::File> {
+pub(crate) fn configuration_lock(path: &Path) -> Result<std::fs::File> {
     let mut filename = path
         .file_name()
         .context("configuration path needs a file name")?

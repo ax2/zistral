@@ -334,11 +334,20 @@ pub fn import(cli: &Cli, source: &Path, replace: bool, dry_run: bool) -> Result<
         bail!("import source must contain at least one custom preset");
     }
     let target = path(cli)?;
-    if let (Ok(source), Ok(target)) = (source.canonicalize(), target.canonicalize()) {
-        if source == target {
-            bail!("import source and destination must be different files");
-        }
+    if source == target {
+        bail!("import source and destination must be different files");
     }
+    // Keep cooperating imports' destination readers out of publication too:
+    // Windows replacement can fail while another import has the file open.
+    // Source validation precedes coordination; previews stay completely read-only.
+    let _lock = if dry_run {
+        None
+    } else {
+        if let Some(parent) = target.parent().filter(|p| !p.as_os_str().is_empty()) {
+            std::fs::create_dir_all(parent).context("cannot create presets directory")?;
+        }
+        Some(config::configuration_lock(&target).context("cannot coordinate presets destination")?)
+    };
     match std::fs::symlink_metadata(&target) {
         Ok(metadata) if !metadata.is_file() || metadata.file_type().is_symlink() => {
             bail!("presets destination must be a regular file, not a link or directory")
@@ -347,6 +356,11 @@ pub fn import(cli: &Cli, source: &Path, replace: bool, dry_run: bool) -> Result<
             return Err(error).context("cannot inspect presets destination");
         }
         _ => (),
+    }
+    if let (Ok(source), Ok(target)) = (source.canonicalize(), target.canonicalize()) {
+        if source == target {
+            bail!("import source and destination must be different files");
+        }
     }
     let original = read_file(&target, true)?;
     let mut merged = original
@@ -391,10 +405,15 @@ pub fn import(cli: &Cli, source: &Path, replace: bool, dry_run: bool) -> Result<
 }
 
 fn publish_import(target: &Path, original: Option<&str>, text: &str) -> Result<()> {
+    // A stale merge must not recreate a deleted directory or restore old data.
+    if read_file(target, true)?.as_deref() != original {
+        bail!("presets destination changed while importing; nothing replaced");
+    }
     if let Some(parent) = target.parent().filter(|p| !p.as_os_str().is_empty()) {
         std::fs::create_dir_all(parent).context("cannot create presets directory")?;
     }
-    // Observe before rereading: reject both stale merge inputs and later observed edits.
+    // Actual imports retain their coordination guard from destination inspection
+    // through this snapshot check and atomic publication.
     let pending = output::Prepared::new(target, true)?;
     if read_file(target, true)?.as_deref() != original {
         bail!("presets destination changed while importing; nothing replaced");
@@ -576,5 +595,18 @@ mod import_publication_tests {
         assert!(publish_import(&absent, None, original).is_err());
         assert_eq!(std::fs::read_to_string(&absent).unwrap(), newer);
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 2);
+    }
+
+    #[test]
+    fn stale_preset_snapshot_does_not_recreate_a_removed_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let target = root.path().join("removed/team.toml");
+        let original = "version=1\n[presets]\n";
+        let error = publish_import(&target, Some(original), original).unwrap_err();
+        assert!(error.to_string().contains("changed while importing"));
+        assert!(
+            !target.parent().unwrap().exists(),
+            "stale import recreated an externally removed directory"
+        );
     }
 }

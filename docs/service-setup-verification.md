@@ -105,6 +105,11 @@ variable while the old variable remains present with a deliberately wrong value.
 A separate legacy fixture checks escaped model/path labels in human doctor/model
 summaries while diagnostic JSON retains the original control-bearing values and
 the main configuration remains unchanged, without any provider call.
+The same installed check also imports/replaces/renders an explicit preset library
+under obsolete model settings, verifying no-write preview, unchanged source,
+reused empty coordination file and zero extra service requests. Concurrent-import
+cooperation/loss prevention is covered separately by actual multi-process/native
+lock regressions; a successful single import is not evidence for that race.
 Exact Unicode stream output, error-body redaction, no retry and
 old-file preservation are checked. The whole parsed configuration is compared
 with a reference mapping after every intended edit or no-write operation.

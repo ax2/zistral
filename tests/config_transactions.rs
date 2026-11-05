@@ -40,6 +40,10 @@ fn seed(root: &Path) -> Vec<u8> {
 }
 
 fn hold_lock(root: &Path) -> File {
+    hold_coordination(&root.join("config.toml.lock"))
+}
+
+fn hold_coordination(path: &Path) -> File {
     let mut options = OpenOptions::new();
     options.read(true).write(true).create(true).truncate(false);
     #[cfg(windows)]
@@ -52,7 +56,7 @@ fn hold_lock(root: &Path) -> File {
         use std::os::unix::fs::OpenOptionsExt;
         options.mode(0o600);
     }
-    let file = options.open(root.join("config.toml.lock")).unwrap();
+    let file = options.open(path).unwrap();
     #[cfg(unix)]
     {
         use std::os::fd::AsRawFd;
@@ -245,5 +249,141 @@ fn killing_a_lock_holder_releases_the_lock_without_deleting_the_file() {
                 & 0o777,
             0o600
         );
+    }
+}
+
+fn preset_source(root: &Path, name: &str) -> std::path::PathBuf {
+    let source = root.join(format!("{name}.toml"));
+    std::fs::write(
+        &source,
+        format!(
+            "version=1\n[presets.{name}]\ndescription='Task'\nprompt='PRIVATE_PRESET_BODY_993'\n"
+        ),
+    )
+    .unwrap();
+    source
+}
+
+fn import_preset(root: &Path, source: &Path, dry_run: bool) -> Output {
+    let mut c = command(root);
+    c.arg("--presets")
+        .arg(root.join("library.toml"))
+        .args(["presets", "import"])
+        .arg(source);
+    if dry_run {
+        c.arg("--dry-run");
+    }
+    c.output().unwrap()
+}
+
+#[test]
+fn preset_import_obeys_native_lock_while_preview_stays_readonly_and_retry_succeeds() {
+    let root = tempfile::tempdir().unwrap();
+    let source = preset_source(root.path(), "first");
+    let original = std::fs::read(&source).unwrap();
+    let target = root.path().join("library.toml");
+    let before = b"version=1\n[presets]\n";
+    std::fs::write(&target, before).unwrap();
+    let guard = hold_coordination(&root.path().join("library.toml.lock"));
+    let preview = import_preset(root.path(), &source, true);
+    assert!(
+        preview.status.success(),
+        "{}",
+        String::from_utf8_lossy(&preview.stderr)
+    );
+    assert!(String::from_utf8_lossy(&preview.stdout).contains("Would import"));
+    assert_eq!(std::fs::read(&target).unwrap(), before);
+    let blocked = import_preset(root.path(), &source, false);
+    assert!(
+        !blocked.status.success(),
+        "preset import ignored another process's native coordination lock"
+    );
+    assert!(blocked.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&blocked.stderr).contains("configuration is busy"));
+    assert_eq!(std::fs::read(&target).unwrap(), before);
+    drop(guard);
+    let retry = import_preset(root.path(), &source, false);
+    assert!(
+        retry.status.success(),
+        "{}",
+        String::from_utf8_lossy(&retry.stderr)
+    );
+    let saved: toml::Value = toml::from_str(&std::fs::read_to_string(&target).unwrap()).unwrap();
+    assert_eq!(
+        saved["presets"]["first"]["prompt"].as_str(),
+        Some("PRIVATE_PRESET_BODY_993")
+    );
+    assert_eq!(std::fs::read(&source).unwrap(), original);
+    assert_eq!(
+        std::fs::metadata(root.path().join("library.toml.lock"))
+            .unwrap()
+            .len(),
+        0
+    );
+    assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 3);
+    for output in [preview, blocked, retry] {
+        assert!(!String::from_utf8_lossy(&output.stdout).contains("PRIVATE_PRESET_BODY_993"));
+        assert!(!String::from_utf8_lossy(&output.stderr).contains("PRIVATE_PRESET_BODY_993"));
+    }
+}
+
+#[test]
+fn concurrent_preset_imports_never_both_succeed_and_lose_a_definition() {
+    let root = tempfile::tempdir().unwrap();
+    let sources = [
+        preset_source(root.path(), "left"),
+        preset_source(root.path(), "right"),
+    ];
+    let target = root.path().join("library.toml");
+    for _ in 0..8 {
+        std::fs::write(&target, "version=1\n[presets]\n").unwrap();
+        let barrier = std::sync::Barrier::new(3);
+        let results = std::thread::scope(|scope| {
+            let left = scope.spawn(|| {
+                barrier.wait();
+                import_preset(root.path(), &sources[0], false)
+            });
+            let right = scope.spawn(|| {
+                barrier.wait();
+                import_preset(root.path(), &sources[1], false)
+            });
+            barrier.wait();
+            [left.join().unwrap(), right.join().unwrap()]
+        });
+        let mut saved: toml::Value =
+            toml::from_str(&std::fs::read_to_string(&target).unwrap()).unwrap();
+        for (index, name) in ["left", "right"].iter().enumerate() {
+            let result = &results[index];
+            if result.status.success() {
+                assert!(
+                    saved["presets"].get(name).is_some(),
+                    "two imports reported success but one definition was lost"
+                );
+            } else {
+                assert!(result.stdout.is_empty());
+                let error = String::from_utf8_lossy(&result.stderr);
+                assert!(
+                    error.contains("configuration is busy") || error.contains("changed"),
+                    "{error}"
+                );
+            }
+        }
+        // Explicit fresh retry retains the winner; there is no hidden merge/retry.
+        for (index, name) in ["left", "right"].iter().enumerate() {
+            if saved["presets"].get(name).is_none() {
+                let retry = import_preset(root.path(), &sources[index], false);
+                assert!(
+                    retry.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&retry.stderr)
+                );
+                saved = toml::from_str(&std::fs::read_to_string(&target).unwrap()).unwrap();
+            }
+        }
+        assert!(saved["presets"].get("left").is_some() && saved["presets"].get("right").is_some());
+        for output in results {
+            assert!(!String::from_utf8_lossy(&output.stdout).contains("PRIVATE_PRESET_BODY_993"));
+            assert!(!String::from_utf8_lossy(&output.stderr).contains("PRIVATE_PRESET_BODY_993"));
+        }
     }
 }

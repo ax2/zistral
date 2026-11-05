@@ -377,7 +377,24 @@ api_key_env='DELIVERY_MODEL_KEY'
                 selected.pop('chat_token_limit_field')
                 assert read() == repair and destination.read_bytes() == b'words=2\n'
             assert source.read_bytes() == before_source and len(server.requests) == 6
-            checks.append(label + ': offline renames/protected removal and generation-independent budget cleanup preserve unrelated settings and result')
+            # Explicit reusable instructions remain offline even with obsolete
+            # generation settings; publication uses its own empty shared lock.
+            preset_source = root / 'preset source.toml'
+            preset_source.write_text("version=1\n[presets.delivery]\ndescription='Installed task'\nprompt='Delivery {{tone}}'\n[presets.delivery.defaults]\ntone='concise'\n", encoding='utf-8')
+            preset_before = preset_source.read_bytes()
+            library = root / 'preset library-测试' / 'tasks.toml'
+            preset_args = ['--presets', str(library), 'presets']
+            run(preset_args + ['import', str(preset_source), '--dry-run'], INPUT)
+            assert not library.parent.exists()
+            run(preset_args + ['import', str(preset_source)], INPUT)
+            saved_library = library.read_bytes()
+            library_lock = library.with_name(library.name + '.lock')
+            assert library_lock.is_file() and not library_lock.is_symlink() and library_lock.stat().st_size == 0
+            run(preset_args + ['import', str(preset_source), '--replace'], INPUT)
+            assert library.read_bytes() == saved_library and library_lock.stat().st_size == 0
+            assert run(preset_args + ['render', 'delivery']).stdout == b'Delivery concise\n'
+            assert preset_source.read_bytes() == preset_before and read() == repair and len(server.requests) == 6
+            checks.append(label + ': offline profile/budget maintenance and explicit preset publication preserve settings, source and result')
             assert coordination.is_file() and not coordination.is_symlink() and coordination.stat().st_size == 0
             total_requests += len(server.requests)
     assert len(checks) == 40 and total_requests == 24, 'incomplete service delivery verification'
