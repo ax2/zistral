@@ -815,7 +815,7 @@ pub fn set_output_budget(
         .unwrap_or("default")
         .to_owned();
     let mut updated = selected(&document, &name)?;
-    if nonempty(updated.model.clone()).is_none() {
+    if !clear && nonempty(updated.model.clone()).is_none() {
         bail!("profile has no saved model; run zi config first");
     }
     if clear {
@@ -829,7 +829,12 @@ pub fn set_output_budget(
             updated.chat_token_limit_field = Some(field.into());
         }
     }
-    profile_budget(&updated)?;
+    // Removing preferences is a metadata repair, not a generation request.
+    // Keep setting/validating new preferences strict, but allow clearing an
+    // unconfigured or obsolete profile without changing its other fields.
+    if !clear {
+        profile_budget(&updated)?;
+    }
     if name == "default" {
         document.max_output_tokens = updated.max_output_tokens;
         document.chat_token_limit_field = updated.chat_token_limit_field;

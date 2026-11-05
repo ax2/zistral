@@ -77,9 +77,14 @@ with a saved Chat field fails explicitly. Invalid effective preferences fail
 before task-input/output IO. Offline data commands still need no model config.
 
 `--clear-output-budget` removes both saved preferences. It can repair invalid
-budget values without selecting that profile or reading input. Clearing still
-requires parseable TOML with the expected field types; syntax/type errors need
-correction first. Regular manual
+budget values without activating that profile, requiring a model or supported
+generation protocol, or reading input. The profile/configuration must already
+exist. All unrelated fields and the saved active selection are preserved;
+generation itself still requires valid effective settings, and setting new
+preferences keeps the ordinary model/protocol checks. Clearing still requires
+parseable TOML with the expected field types; syntax/type errors need correction
+first. Before downgrading to an older strict parser, clear these new fields from
+every affected root/named profile, including inactive or unconfigured ones. Regular manual
 model edits retain compatible preferences; incompatible edits fail without
 replacing the original configuration. Importing replacement service settings
 resets that profile's preferences to protocol defaults and preserves all others.

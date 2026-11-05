@@ -344,7 +344,19 @@ api_key_env='DELIVERY_MODEL_KEY'
             expected.pop('profiles')
             assert read() == expected and destination.read_bytes() == b'words=2\n'
             assert len(server.requests) == len(server.plan) == 6
-            checks.append(label + ': offline inactive/active renames and protected removal preserve complete configuration and result')
+            # Cleanup must also work before a model has been set, or when an
+            # obsolete protocol prevents generation. This isolated fixture can
+            # be prepared for an older strict config parser without a model call.
+            config.write_text("api='obsolete'\napi_key='ROOT_KEY_993'\nmax_output_tokens=0\nchat_token_limit_field='unsupported'\n[profiles.unconfigured]\napi='obsolete'\napi_key_env='DELIVERY_REPLACEMENT_KEY'\nmax_output_tokens=0\nchat_token_limit_field='unsupported'\n", encoding='utf-8')
+            repair = read()
+            for name in ['default', 'unconfigured']:
+                run(['config', '--name', name, '--clear-output-budget'])
+                selected = repair if name == 'default' else repair['profiles'][name]
+                selected.pop('max_output_tokens')
+                selected.pop('chat_token_limit_field')
+                assert read() == repair and destination.read_bytes() == b'words=2\n'
+            assert source.read_bytes() == before_source and len(server.requests) == 6
+            checks.append(label + ': offline renames/protected removal and generation-independent budget cleanup preserve unrelated settings and result')
             total_requests += len(server.requests)
     assert len(checks) == 40 and total_requests == 24, 'incomplete service delivery verification'
     return {'passed': len(checks), 'checks': checks, 'synthetic_loopback_requests': total_requests,

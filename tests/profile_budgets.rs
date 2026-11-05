@@ -436,3 +436,76 @@ fn saved_field_without_cap_cannot_borrow_doctor_probe_exception() {
         "invalid saved preferences triggered a probe request"
     );
 }
+
+#[test]
+fn clear_budget_does_not_require_a_model_or_supported_protocol() {
+    for root_api in [None, Some("chat"), Some("obsolete")] {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("config.toml");
+        let api = root_api
+            .map(|api| format!("api='{api}'\n"))
+            .unwrap_or_default();
+        let original = format!(
+            "{api}api_key='ROOT_CLEANUP_SECRET_993'\nmax_output_tokens=0\nchat_token_limit_field='unsupported'\nactive_profile='ready'\n[profiles.unconfigured]\napi='obsolete'\napi_key_env='MISSING_CLEANUP_REF_993'\nmax_output_tokens=0\nchat_token_limit_field='unsupported'\n[profiles.ready]\nmodel='ready'\nbase_url='http://localhost:1/v1'\napi_key='READY_CLEANUP_SECRET_993'\nmax_output_tokens=64\n"
+        );
+        std::fs::write(&path, &original).unwrap();
+        let mut expected: toml::Value = toml::from_str(&original).unwrap();
+        // Valid named selection proves that the full typed document parses and
+        // that unrelated root preferences do not affect this active profile.
+        let report = command(root.path())
+            .args(["doctor", "--json"])
+            .output()
+            .unwrap();
+        assert!(report.status.success());
+        assert_eq!(
+            serde_json::from_slice::<Value>(&report.stdout).unwrap()["configuration"]["details"]["profile"],
+            "ready"
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+        for name in ["default", "unconfigured"] {
+            let before = std::fs::read(&path).unwrap();
+            // Setting new preferences still needs a model; clearing does not.
+            let rejected = command(root.path())
+                .args(["config", "--name", name, "--max-output-tokens", "128"])
+                .output()
+                .unwrap();
+            assert!(!rejected.status.success());
+            assert_eq!(std::fs::read(&path).unwrap(), before);
+            let out = command(root.path())
+                .args(["config", "--name", name, "--clear-output-budget"])
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            assert!(out.stdout.is_empty());
+            for secret in ["ROOT_CLEANUP_SECRET_993", "READY_CLEANUP_SECRET_993"] {
+                assert!(!String::from_utf8_lossy(&out.stderr).contains(secret));
+            }
+            let profile = if name == "default" {
+                &mut expected
+            } else {
+                &mut expected["profiles"][name]
+            };
+            profile.as_table_mut().unwrap().remove("max_output_tokens");
+            profile
+                .as_table_mut()
+                .unwrap()
+                .remove("chat_token_limit_field");
+            let actual: toml::Value =
+                toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            assert_eq!(actual, expected);
+        }
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+    }
+}
