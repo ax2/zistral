@@ -829,3 +829,56 @@ fn manual_official_setup_requires_effective_key_but_local_services_remain_option
         }
     }
 }
+
+#[test]
+fn manual_configuration_quotes_legacy_environment_names_without_changing_references() {
+    for (name, expected) in [
+        ("ZISTRAL_SETUP\nKEY", r#""ZISTRAL_SETUP\nKEY""#),
+        ("ZISTRAL_SETUP\x1b[2JKEY", r#""ZISTRAL_SETUP\u001b[2JKEY""#),
+        (
+            "ZISTRAL_SETUP\u{009b}2JKEY",
+            r#""ZISTRAL_SETUP\u009b2JKEY""#,
+        ),
+        ("ZISTRAL_SETUP\u{007f}KEY", r#""ZISTRAL_SETUP\u007fKEY""#),
+        ("ZISTRAL_SETUP_中\"KEY", r#""ZISTRAL_SETUP_中\"KEY""#),
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("config.toml");
+        let config = format!(
+            "model='fixture'\nbase_url='http://localhost:1/v1'\napi='chat'\napi_key_env={}\n[profiles.other]\nmodel='other'\napi_key='OTHER_DISPLAY_SECRET_993'\n",
+            expected
+        );
+        let fixture: toml::Value = toml::from_str(&config).unwrap();
+        assert_eq!(fixture["api_key_env"].as_str(), Some(name));
+        std::fs::write(&path, &config).unwrap();
+        let finish = format!("Environment variables still override saved settings: {expected}");
+        let output = configure_outcome_env(
+            &path,
+            &[
+                ("Service URL", ""),
+                ("Model name", ""),
+                ("API protocol", ""),
+                ("API Key", ""),
+            ],
+            None,
+            None,
+            &finish,
+            true,
+            &[(name, "DISPLAY_ENV_VALUE_993")],
+        );
+        assert_eq!(
+            output.matches(expected).count(),
+            2,
+            "both source notice and final override warning must quote the exact variable name"
+        );
+        for secret in ["DISPLAY_ENV_VALUE_993", "OTHER_DISPLAY_SECRET_993"] {
+            assert!(!output.contains(secret));
+        }
+        let saved = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(
+            toml::from_str::<toml::Value>(&saved).unwrap(),
+            toml::from_str::<toml::Value>(&config).unwrap()
+        );
+        assert!(!saved.contains("DISPLAY_ENV_VALUE_993"));
+    }
+}

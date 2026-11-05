@@ -904,3 +904,42 @@ fn many_stream_fragments_keep_complete_unicode_pipe_output_in_all_protocols() {
         server.join().unwrap();
     }
 }
+
+#[test]
+fn required_key_errors_quote_legacy_environment_names() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("config.toml");
+    for (name, expected) in [
+        ("ZISTRAL_SETUP\nKEY", r#""ZISTRAL_SETUP\nKEY""#),
+        ("ZISTRAL_SETUP\x1b[2JKEY", r#""ZISTRAL_SETUP\u001b[2JKEY""#),
+        (
+            "ZISTRAL_SETUP\u{009b}2JKEY",
+            r#""ZISTRAL_SETUP\u009b2JKEY""#,
+        ),
+        ("ZISTRAL_SETUP\u{007f}KEY", r#""ZISTRAL_SETUP\u007fKEY""#),
+        ("ZISTRAL_SETUP_中\"KEY", r#""ZISTRAL_SETUP_中\"KEY""#),
+    ] {
+        let config = format!(
+            "model='fixture'\nbase_url='https://api.openai.com/v1'\napi_key_env={}\n",
+            expected
+        );
+        let fixture: toml::Value = toml::from_str(&config).unwrap();
+        assert_eq!(fixture["api_key_env"].as_str(), Some(name));
+        std::fs::write(&path, &config).unwrap();
+        let out = command()
+            .env(name, "")
+            .args(["--config", path.to_str().unwrap(), "doctor"])
+            .output()
+            .unwrap();
+        assert!(!out.status.success());
+        let error = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            error.contains(&format!("set ZI_API_KEY or {expected}")),
+            "{error}"
+        );
+        if name.chars().any(char::is_control) {
+            assert!(!error.contains(name));
+        }
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), config);
+    }
+}

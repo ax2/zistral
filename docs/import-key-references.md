@@ -64,7 +64,11 @@ profile that explicitly selects a different variable.
 
 Normal precedence remains `ZI_API_KEY` > the profile's named variable (default
 `OPENAI_API_KEY`) > a saved literal. An intentional global override still wins.
-Doctor quotes variable names safely and never prints values. References remain
+Human doctor, configuration credential notices/override warnings and missing-key
+errors quote variable names and escape control characters, including DEL/C1; they
+never print key values. Display escaping does not change the saved reference or
+the environment name used for lookup. Existing nonportable references remain
+readable even though new `--api-key-env` names use portable syntax. References remain
 ordinary profile settings and follow rename/remove behavior. No new configuration
 field, key vault, command, dependency, background watcher, or agent tool is added.
 

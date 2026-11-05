@@ -508,7 +508,8 @@ pub fn configure_named(cli: &Cli, manual: bool, name: Option<&str>) -> Result<()
     ]
     .into_iter()
     .filter(|name| std::env::var(name).is_ok_and(|v| !v.trim().is_empty()))
-    .collect();
+    .map(|name| serde_json::to_string(name).map(|json| crate::ui::json_display(&json)))
+    .collect::<serde_json::Result<Vec<_>>>()?;
     if !overrides.is_empty() {
         writeln!(
             output,
@@ -596,7 +597,7 @@ fn collect_config(
         writeln!(
             output,
             "Environment credential {} takes precedence over a saved key; its value is not saved.",
-            serde_json::to_string(&name)?
+            crate::ui::json_display(&serde_json::to_string(&name)?)
         )?;
     }
     loop {
@@ -932,7 +933,10 @@ impl Settings {
             && api_key.is_none()
             && !cli.preview
         {
-            bail!("set ZI_API_KEY or {key_env}; local servers may run without a key");
+            bail!(
+                "set ZI_API_KEY or {}; local servers may run without a key",
+                crate::ui::json_display(&serde_json::to_string(&key_env)?)
+            );
         }
         let endpoint = if !catalogue && cli.base_url.is_none() && cli.api.is_none() {
             file.endpoint

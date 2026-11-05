@@ -87,7 +87,8 @@ It prints `v0.16.2` for the matching package. A rejected event/ref writes no tag
 When GITHUB_OUTPUT is set by Actions, successful validation also appends `tag=...` there.
 The preview does not create a branch, build artifacts or publish anything.
 
-Package version/dependency metadata and packaging-source changes also run the read-only
+Package version/dependency metadata, packaging-source changes and edits to the
+configuration/import readers also run the read-only
 `Installer checks` workflow before a Release request. It builds native packages and
 portable archives for Windows x64, Linux x64 (Ubuntu 22.04 build host) and macOS arm64,
 using the same targets and Unix verifier as Release. Require all three native jobs for

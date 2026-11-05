@@ -2,9 +2,9 @@ name: Installer checks
 on:
   push:
     branches: [main]
-    paths: ['Cargo.toml', 'Cargo.lock', 'packaging/**', 'scripts/package.py', 'scripts/test-install.ps1', 'scripts/test-install-unix.py', 'scripts/test_unix_installer_rules.py', 'scripts/test_pre_sharing_delivery.py', 'scripts/test_table_preparation_delivery.py', 'scripts/test_service_setup_delivery.py', '.github/workflows/installer-checks.yml']
+    paths: ['Cargo.toml', 'Cargo.lock', 'src/config.rs', 'src/imports.rs', 'packaging/**', 'scripts/package.py', 'scripts/test-install.ps1', 'scripts/test-install-unix.py', 'scripts/test_unix_installer_rules.py', 'scripts/test_pre_sharing_delivery.py', 'scripts/test_table_preparation_delivery.py', 'scripts/test_service_setup_delivery.py', '.github/workflows/installer-checks.yml']
   pull_request:
-    paths: ['Cargo.toml', 'Cargo.lock', 'packaging/**', 'scripts/package.py', 'scripts/test-install.ps1', 'scripts/test-install-unix.py', 'scripts/test_unix_installer_rules.py', 'scripts/test_pre_sharing_delivery.py', 'scripts/test_table_preparation_delivery.py', 'scripts/test_service_setup_delivery.py', '.github/workflows/installer-checks.yml']
+    paths: ['Cargo.toml', 'Cargo.lock', 'src/config.rs', 'src/imports.rs', 'packaging/**', 'scripts/package.py', 'scripts/test-install.ps1', 'scripts/test-install-unix.py', 'scripts/test_unix_installer_rules.py', 'scripts/test_pre_sharing_delivery.py', 'scripts/test_table_preparation_delivery.py', 'scripts/test_service_setup_delivery.py', '.github/workflows/installer-checks.yml']
   workflow_dispatch:
 permissions:
   contents: read

@@ -64,3 +64,15 @@ without `--plain`. No clipboard-control sequence or real provider request is req
 Since v0.29.1, internal Chat/Anthropic string accumulation avoids repeated prefix
 clones. Display/cleaning, Responses, callbacks and output/error contracts stay unchanged;
 controlled decoder measurements are [documented separately](stream-performance.md).
+
+## Credential-reference messages (unreleased)
+
+The next grouped release uses quoted JSON-style names in configuration credential
+notices, the final environment-override warning and missing-key errors, sharing
+doctor's control escaping. Legacy/imported environment names containing newlines,
+ESC, DEL or C1 remain identifiable without sending those controls to a terminal.
+Ordinary Unicode and quotes retain their represented value. Both redirected
+diagnostics and real terminals use this representation; key values remain hidden.
+The saved reference, lookup precedence, actual request authentication and task
+pipe/file data are unchanged. New CLI variable names remain portable; this display
+rule does not enable new source formats or automatically migrate existing profiles.
