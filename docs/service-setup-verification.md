@@ -70,6 +70,12 @@ model and key. Defaults resume (Anthropic 4096; Chat/Responses omitted). `use`
 selects an existing saved profile; it does not copy settings between profiles.
 Neither command needs a model connection. No history or session memory is added.
 
+Maintain named profiles offline with `zi config --rename OLD NEW` or
+`zi config --remove NAME`. Rename preserves settings and follows a saved active
+selection; remove rejects the root `default` and saved active profile. Select
+another profile before removing it. See [profile maintenance](profile-maintenance.md)
+for external references and credential-removal semantics.
+
 ## Repeatable delivery verification
 
 Run the same check against a freshly built, portable or installed executable:
@@ -85,10 +91,11 @@ and contacts only its own loopback service. It does not modify a user's selected
 profile, key, installed executable or PATH. All fixtures are removed on exit.
 
 It tests the same journey under modern Chat, explicit legacy Chat, Responses and
-Anthropic: 28 checks and 24 controlled HTTP requests. Requests verify actual
+Anthropic: 32 checks and 24 controlled HTTP requests. Requests verify actual
 auth/protocol/budget fields; the first task body equals the preview, a real native
 count result returns on the correlated tool followup, and saved/CLI/probe caps
-remain distinct. Exact Unicode stream output, error-body redaction, no retry and
+remain distinct. Offline profile rename/remove and default-selection protection are checked too.
+Exact Unicode stream output, error-body redaction, no retry and
 old-file preservation are checked. The whole parsed configuration is compared
 with a reference mapping after every intended edit or no-write operation.
 

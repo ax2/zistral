@@ -286,8 +286,30 @@ api_key_env='DELIVERY_MODEL_KEY'
             assert len(server.requests) == len(server.plan) == 6
             assert not (root / 'config').exists(), 'unexpected default configuration/history directory'
             checks.append(label + ': clear preferences and return to default offline; credentials, other settings and file retained')
+            run(['config', '--rename', 'work', 'archived'])
+            expected['profiles']['archived'] = expected['profiles'].pop('work')
+            assert read() == expected
+            run(['use', 'archived'])
+            expected['active_profile'] = 'archived'
+            run(['config', '--rename', 'archived', 'kept'])
+            expected['profiles']['kept'] = expected['profiles'].pop('archived')
+            expected['active_profile'] = 'kept'
+            assert read() == expected
+            report = json.loads(run(['doctor', '--json']).stdout)
+            assert report['configuration']['details']['profile'] == 'kept'
+            for protected in ['kept', 'default', 'missing']:
+                unchanged = config.read_bytes()
+                result = run(['config', '--remove', protected], success=False)
+                assert not result.stdout and config.read_bytes() == unchanged
+            run(['use', 'default'])
+            expected.pop('active_profile')
+            run(['config', '--remove', 'kept'])
+            expected.pop('profiles')
+            assert read() == expected and destination.read_bytes() == b'words=2\n'
+            assert len(server.requests) == len(server.plan) == 6
+            checks.append(label + ': offline inactive/active renames and protected removal preserve complete configuration and result')
             total_requests += len(server.requests)
-    assert len(checks) == 28 and total_requests == 24, 'incomplete service delivery verification'
+    assert len(checks) == 32 and total_requests == 24, 'incomplete service delivery verification'
     return {'passed': len(checks), 'checks': checks, 'synthetic_loopback_requests': total_requests,
             'real_provider_requests': 0}
 

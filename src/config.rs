@@ -170,6 +170,60 @@ pub fn use_profile(cli: &Cli, name: &str) -> Result<()> {
     Ok(())
 }
 
+/// Metadata changes deliberately do not validate generation settings: an obsolete
+/// or misconfigured profile must remain renameable/removable without a service.
+pub fn rename_profile(cli: &Cli, old: &str, new: &str) -> Result<()> {
+    validate_name(old)?;
+    validate_name(new)?;
+    if old == "default" || new == "default" {
+        bail!("default is reserved for root settings and cannot be renamed or replaced");
+    }
+    if old == new {
+        bail!("new profile name must differ from the old name; configuration unchanged");
+    }
+    let path = path(cli)?;
+    let mut document = read_config(&path, false)?;
+    if document.profiles.contains_key(new) {
+        bail!("target profile already exists; choose another name");
+    }
+    let profile = document
+        .profiles
+        .remove(old)
+        .context("unknown saved profile; run zi models")?;
+    document.profiles.insert(new.into(), profile);
+    let active = document.active_profile.as_deref() == Some(old);
+    if active {
+        document.active_profile = Some(new.into());
+    }
+    save_config(&path, &document)?;
+    eprintln!(
+        "Renamed profile {old} to {new}. Saved default selection {}. External references are unchanged.",
+        if active { "updated" } else { "unchanged" }
+    );
+    Ok(())
+}
+
+pub fn remove_profile(cli: &Cli, name: &str) -> Result<()> {
+    validate_name(name)?;
+    if name == "default" {
+        bail!("default root settings cannot be removed; choose a named profile");
+    }
+    let path = path(cli)?;
+    let mut document = read_config(&path, false)?;
+    if document.active_profile.as_deref() == Some(name) {
+        bail!("cannot remove the saved active profile; run zi use NAME to select another first");
+    }
+    document
+        .profiles
+        .remove(name)
+        .context("unknown saved profile; run zi models")?;
+    save_config(&path, &document)?;
+    eprintln!(
+        "Removed profile {name}. Other profiles and the saved default selection are unchanged."
+    );
+    Ok(())
+}
+
 pub enum ApiKeySource {
     Environment(String),
     SavedProfile,

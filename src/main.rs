@@ -242,6 +242,12 @@ enum Commands {
         /// Clear both saved output-budget preferences; keep model/key/default selection
         #[arg(long, conflicts_with_all = ["manual", "list", "request_limit", "chat_limit_field"])]
         clear_output_budget: bool,
+        /// Rename a saved named profile; update the saved selection if necessary
+        #[arg(long, num_args = 2, value_names = ["OLD", "NEW"], conflicts_with_all = ["name", "manual", "list", "request_limit", "chat_limit_field", "clear_output_budget", "remove"])]
+        rename: Vec<String>,
+        /// Remove an inactive named profile; default and saved active profiles are protected
+        #[arg(long, value_name = "NAME", conflicts_with_all = ["name", "manual", "list", "request_limit", "chat_limit_field", "clear_output_budget"])]
+        remove: Option<String>,
     },
 }
 
@@ -529,6 +535,8 @@ fn run(mut cli: Cli) -> Result<()> {
         request_limit,
         chat_limit_field,
         clear_output_budget,
+        rename,
+        remove,
     }) = &cli.command
     {
         if cli.input.is_some()
@@ -542,6 +550,12 @@ fn run(mut cli: Cli) -> Result<()> {
             || !cli.prompt.is_empty()
         {
             bail!("invalid options for zi config; see zi config --help");
+        }
+        if !rename.is_empty() {
+            return config::rename_profile(&cli, &rename[0], &rename[1]);
+        }
+        if let Some(name) = remove {
+            return config::remove_profile(&cli, name);
         }
         if request_limit.is_some() || chat_limit_field.is_some() || *clear_output_budget {
             return config::set_output_budget(

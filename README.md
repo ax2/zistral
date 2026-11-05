@@ -195,6 +195,9 @@ for model IDs without switching or saving models. See [model catalogue](docs/mod
 for protocol support, pagination, limits and script exit-status handling.
 See the [complete service-setup workflow](docs/service-setup-verification.md) for
 configuration, diagnosis, request preview, task/stream/file output and delivery checks.
+Unreleased [profile maintenance](docs/profile-maintenance.md) adds explicit offline
+`zi config --rename OLD NEW` and `zi config --remove NAME`, preserving the saved selection
+and protecting root/active profiles from removal.
 
 Each profile has its own model, service, protocol, key/key reference, and optional exact endpoint.
 Legacy settings remain available as `default`; `zi use default` restores them.
