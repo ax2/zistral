@@ -224,6 +224,97 @@ pub fn remove_profile(cli: &Cli, name: &str) -> Result<()> {
     Ok(())
 }
 
+// Value-free phase markers for machine diagnostics. Preserve the existing
+// human-readable cause chain; never classify configuration failures by its text.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum ConfigIssue {
+    FileRead,
+    FileFormat,
+    Profile,
+    Model,
+    ServiceUrl,
+    Protocol,
+    OutputBudget,
+    Credential,
+    Endpoint,
+}
+
+impl ConfigIssue {
+    pub(crate) fn diagnostic(self) -> (&'static str, &'static str) {
+        match self {
+            Self::FileRead => (
+                "config_file_unreadable",
+                "cannot read configuration; check the selected path, permissions and UTF-8 encoding",
+            ),
+            Self::FileFormat => (
+                "config_format_invalid",
+                "invalid configuration; check TOML syntax, supported field names and value types",
+            ),
+            Self::Profile => (
+                "profile_invalid",
+                "select an existing saved profile with --profile or zi use",
+            ),
+            Self::Model => (
+                "model_missing",
+                "run zi config first, or set ZI_MODEL / --model",
+            ),
+            Self::ServiceUrl => (
+                "service_url_invalid",
+                "check the API base URL; use HTTPS or loopback HTTP without credentials, query or fragment",
+            ),
+            Self::Protocol => (
+                "protocol_invalid",
+                "api must be chat or responses or anthropic",
+            ),
+            Self::OutputBudget => (
+                "output_budget_invalid",
+                "check the output cap and Chat field for the selected protocol; clear obsolete saved preferences if needed",
+            ),
+            Self::Credential => (
+                "credential_missing",
+                "set an API key using ZI_API_KEY, the configured environment variable or zi config",
+            ),
+            Self::Endpoint => (
+                "endpoint_invalid",
+                "check the exact endpoint; use a valid API URL with the same origin as base_url",
+            ),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct ConfigFailure {
+    issue: ConfigIssue,
+    cause: anyhow::Error,
+}
+
+impl ConfigIssue {
+    fn tag(self, cause: anyhow::Error) -> anyhow::Error {
+        ConfigFailure { issue: self, cause }.into()
+    }
+}
+
+impl ConfigFailure {
+    pub(crate) fn diagnostic(&self) -> (&'static str, &'static str) {
+        self.issue.diagnostic()
+    }
+}
+
+impl std::fmt::Display for ConfigFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&self.cause, formatter)
+    }
+}
+
+impl std::error::Error for ConfigFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        // Display already forwards the original outer message. Start at its
+        // source, so alternate anyhow formatting does not duplicate that layer.
+        let cause: &(dyn std::error::Error + Send + Sync + 'static) = self.cause.as_ref();
+        cause.source()
+    }
+}
+
 pub enum ApiKeySource {
     Environment(String),
     SavedProfile,
@@ -289,23 +380,27 @@ fn read_config_snapshot(path: &Path, allow_missing: bool) -> Result<(FileConfig,
     match std::fs::read_to_string(path) {
         // Parser diagnostics include source lines, which may contain an API key.
         Ok(text) => {
-            let document = toml::from_str(&text).map_err(|_| {
-                anyhow!(
-                    "invalid configuration {}; check TOML syntax and field names",
-                    crate::ui::label(&path.display().to_string())
-                )
-            })?;
+            let document = toml::from_str(&text)
+                .map_err(|_| {
+                    anyhow!(
+                        "invalid configuration {}; check TOML syntax and field names",
+                        crate::ui::label(&path.display().to_string())
+                    )
+                })
+                .map_err(|error| ConfigIssue::FileFormat.tag(error))?;
             Ok((document, Some(text.into_bytes())))
         }
         Err(e) if e.kind() == io::ErrorKind::NotFound && allow_missing => {
             Ok((FileConfig::default(), None))
         }
-        Err(e) => Err(e).with_context(|| {
-            format!(
-                "cannot read configuration {}",
-                crate::ui::label(&path.display().to_string())
-            )
-        }),
+        Err(e) => Err(e)
+            .with_context(|| {
+                format!(
+                    "cannot read configuration {}",
+                    crate::ui::label(&path.display().to_string())
+                )
+            })
+            .map_err(|error| ConfigIssue::FileRead.tag(error)),
     }
 }
 
@@ -1003,26 +1098,30 @@ impl Settings {
             .or(file.active_profile.as_deref())
             .unwrap_or("default")
             .to_owned();
-        let file = selected(&file, &name)?;
+        let file = selected(&file, &name).map_err(|error| ConfigIssue::Profile.tag(error))?;
         let model = nonempty(cli.model.clone().or(file.model));
         let model = if catalogue {
             model.unwrap_or_default()
         } else {
-            model.context("run zi config first, or set ZI_MODEL / --model")?
+            model
+                .context("run zi config first, or set ZI_MODEL / --model")
+                .map_err(|error| ConfigIssue::Model.tag(error))?
         };
         let base_url = cli
             .base_url
             .clone()
             .or(file.base_url)
             .unwrap_or_else(|| "https://api.openai.com/v1".into());
-        let url = validate_url(&base_url)?;
+        let url = validate_url(&base_url).map_err(|error| ConfigIssue::ServiceUrl.tag(error))?;
         let api = cli
             .api
             .clone()
             .or(file.api)
             .unwrap_or_else(|| "chat".into());
         if !matches!(api.as_str(), "chat" | "responses" | "anthropic") {
-            bail!("api must be chat or responses or anthropic");
+            return Err(
+                ConfigIssue::Protocol.tag(anyhow!("api must be chat or responses or anthropic"))
+            );
         }
         let profile_tokens = if catalogue || cli.no_profile_budget {
             None
@@ -1055,7 +1154,8 @@ impl Settings {
                     cli.command.as_ref(),
                     Some(crate::Commands::Doctor { probe: true, .. })
                 ),
-        )?;
+        )
+        .map_err(|error| ConfigIssue::OutputBudget.tag(error))?;
         let key_env = file.api_key_env.unwrap_or_else(|| "OPENAI_API_KEY".into());
         // Keep provenance beside the value selected by the actual request path.
         // Do not infer it later from a second config/environment read.
@@ -1064,10 +1164,11 @@ impl Settings {
             && api_key.is_none()
             && !cli.preview
         {
-            bail!(
+            return Err(anyhow!(
                 "set ZI_API_KEY or {}; local servers may run without a key",
                 crate::ui::json_display(&serde_json::to_string(&key_env)?)
-            );
+            ))
+            .map_err(|error| ConfigIssue::Credential.tag(error));
         }
         let endpoint = if !catalogue && cli.base_url.is_none() && cli.api.is_none() {
             file.endpoint
@@ -1075,9 +1176,12 @@ impl Settings {
             None
         };
         if let Some(endpoint) = &endpoint {
-            let exact = validate_url(endpoint)?;
+            let exact = validate_url(endpoint).map_err(|error| ConfigIssue::Endpoint.tag(error))?;
             if url.origin() != exact.origin() {
-                bail!("configured endpoint must have the same origin as base_url");
+                return Err(anyhow!(
+                    "configured endpoint must have the same origin as base_url"
+                ))
+                .map_err(|error| ConfigIssue::Endpoint.tag(error));
             }
         }
         Ok(Self {
@@ -1363,5 +1467,38 @@ mod tests {
         std::fs::remove_dir(&nested).unwrap();
         assert!(save_config(&path, &file, Some(original)).is_err());
         assert!(!nested.exists());
+    }
+
+    #[test]
+    fn configuration_tags_preserve_brief_and_complete_human_error_chains() {
+        let make = || anyhow!("original detailed cause").context("original brief advice");
+        let brief = make().to_string();
+        let complete = format!("{:#}", make());
+        let tagged = ConfigIssue::OutputBudget.tag(make());
+        assert_eq!(tagged.to_string(), brief);
+        assert_eq!(format!("{tagged:#}"), complete);
+        let make_io = || {
+            anyhow::Error::new(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "original IO cause",
+            ))
+            .context("original read advice")
+        };
+        let io_complete = format!("{:#}", make_io());
+        let tagged_io = ConfigIssue::FileRead.tag(make_io());
+        assert_eq!(format!("{tagged_io:#}"), io_complete);
+        assert!(tagged_io.chain().any(|cause| {
+            cause
+                .downcast_ref::<io::Error>()
+                .is_some_and(|error| error.kind() == io::ErrorKind::BrokenPipe)
+        }));
+        assert_eq!(
+            tagged
+                .downcast_ref::<ConfigFailure>()
+                .unwrap()
+                .diagnostic()
+                .0,
+            "output_budget_invalid"
+        );
     }
 }

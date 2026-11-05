@@ -70,6 +70,33 @@ authentication value is included. HTTP status comes from the typed request error
 not text parsing. It does not identify whether a service or intervening proxy
 originated the response. The usual stderr failure notice is generic in this mode.
 
+Configuration failures additionally have a fixed `error.code`, derived from a
+typed validation phase rather than parsing the error message. `kind` remains
+`configuration`; `configuration.details` remains null and a requested probe stays
+`not_run`. Its message gives corresponding fixed guidance without field values.
+
+| Configuration code | What to check |
+| --- | --- |
+| `config_file_unreadable` | Selected path, read permissions and UTF-8 encoding |
+| `config_format_invalid` | TOML syntax, supported fields and value types |
+| `profile_invalid` | Select an existing valid saved profile |
+| `model_missing` | Configure a model or provide `ZI_MODEL` / `--model` |
+| `service_url_invalid` | API base URL scheme, host and forbidden credentials/query/fragment |
+| `protocol_invalid` | Choose `chat`, `responses` or `anthropic` |
+| `output_budget_invalid` | Compatible cap/Chat field, or clear obsolete saved preferences |
+| `credential_missing` | Provide an effective key for an official service |
+| `endpoint_invalid` | Valid exact endpoint on the base URL's origin |
+| `configuration_invalid` | Fallback when no known phase marker exists |
+
+This describes the first failed effective check, not a scan of every saved
+profile or an automatic repair. CLI overrides and `--no-profile-budget` can make
+unused saved settings irrelevant. Malformed typed TOML still invalidates the
+file. Other error kinds retain their existing fields and need not have `code`.
+Treat future codes as unknown failures; do not infer that a request was attempted.
+Missing/invalid configuration reports neither create directories/lock files nor
+save changes or issue the requested probe. This is an additive version-1 field;
+no new runtime dependency, command or diagnostic network behavior is introduced.
+
 ## Bounds and terminal behavior
 
 Default checks are offline. `--probe` retains one non-streaming model turn, no

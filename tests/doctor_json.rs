@@ -11,7 +11,7 @@ fn command(root: &Path, timeout: &str) -> Command {
         std::env::var_os("ZISTRAL_TEST_BINARY").unwrap_or_else(|| env!("CARGO_BIN_EXE_zi").into());
     let mut c = Command::new(binary);
     for (k, _) in std::env::vars() {
-        if k.starts_with("ZI_")
+        if k.to_uppercase().starts_with("ZI_")
             || matches!(
                 k.to_uppercase().as_str(),
                 "OPENAI_API_KEY" | "HTTP_PROXY" | "HTTPS_PROXY" | "ALL_PROXY"
@@ -435,4 +435,108 @@ fn doctor_json_report_limit_is_checked_before_probe_without_partial_stdout() {
     assert_eq!(v["error"]["kind"], "report_limit");
     assert_eq!(v["probe"]["status"], "not_run");
     assert!(l.accept().is_err());
+}
+
+#[test]
+fn doctor_json_configuration_errors_expose_only_typed_actionable_codes() {
+    let root = tempfile::tempdir().unwrap();
+    let (listener, url) = listener();
+    let valid =
+        format!("model='PRIVATE_FIELD_SECRET_993'\nbase_url='{url}'\napi_key='AUTH_SECRET_993'\n");
+    let cases:[(Option<Vec<u8>>,&str,&str);12]=[
+        (None,"config_file_unreadable","UTF-8"),
+        (Some(vec![0xff,0xfe]),"config_file_unreadable","UTF-8"),
+        (Some(b"model='PRIVATE_FIELD_SECRET_993'\napi_key='AUTH_SECRET_993'\nbroken=[".to_vec()),"config_format_invalid","TOML"),
+        (Some(format!("{valid}active_profile='PRIVATE_UNKNOWN_PROFILE_993'\n").into_bytes()),"profile_invalid","profile"),
+        (Some(format!("base_url='{url}'\napi_key='AUTH_SECRET_993'\n").into_bytes()),"model_missing","model"),
+        (Some(b"model='PRIVATE_FIELD_SECRET_993'\nbase_url='https://AUTH_SECRET_993@example.com/v1?PRIVATE_QUERY_993'\n".to_vec()),"service_url_invalid","URL"),
+        (Some(format!("{valid}api='PRIVATE_PROTOCOL_993'\n").into_bytes()),"protocol_invalid","chat"),
+        (Some(format!("{valid}max_output_tokens=0\n").into_bytes()),"output_budget_invalid","cap"),
+        (Some(format!("{valid}max_output_tokens=128\nchat_token_limit_field='PRIVATE_PARAMETER_993'\n").into_bytes()),"output_budget_invalid","cap"),
+        (Some(b"model='PRIVATE_FIELD_SECRET_993'\nbase_url='https://api.openai.com/v1'\napi_key_env='ZISTRAL_DIAG_MISSING_993'\n".to_vec()),"credential_missing","key"),
+        (Some(format!("{valid}endpoint='https://PRIVATE_ENDPOINT_993.example/v1'\n").into_bytes()),"endpoint_invalid","endpoint"),
+        (Some(format!("{valid}endpoint='https://AUTH_SECRET_993@example.com/v1'\n").into_bytes()),"endpoint_invalid","endpoint"),
+    ];
+    let path = root.path().join("config.toml");
+    for (bytes, code, advice) in cases {
+        if path.exists() {
+            std::fs::remove_file(&path).unwrap();
+        }
+        if let Some(bytes) = &bytes {
+            std::fs::write(&path, bytes).unwrap();
+        }
+        for probe in [false, true] {
+            let mut c = command(root.path(), "2");
+            c.env("ZISTRAL_DIAG_MISSING_993", "")
+                .args(["doctor", "--json"]);
+            if probe {
+                c.arg("--probe");
+            }
+            let out = c.output().unwrap();
+            let value = report(&out, false);
+            assert_eq!(value["error"]["kind"], "configuration");
+            assert_eq!(
+                value["error"]["code"], code,
+                "missing/incorrect typed code for configuration failure"
+            );
+            assert!(value["error"]["message"].as_str().unwrap().contains(advice));
+            assert!(value["error"]["http_status"].is_null() && value["error"]["retries"].is_null());
+            assert!(value["configuration"]["details"].is_null());
+            assert_eq!(
+                value["probe"]["status"],
+                if probe { "not_run" } else { "not_requested" }
+            );
+            assert!(listener.accept().is_err());
+            assert_eq!(std::fs::read(&path).ok(), bytes);
+            assert!(!root.path().join("config.toml.lock").exists());
+            for marker in [
+                "PRIVATE_UNKNOWN_PROFILE_993",
+                "PRIVATE_QUERY_993",
+                "PRIVATE_PROTOCOL_993",
+                "PRIVATE_PARAMETER_993",
+                "PRIVATE_ENDPOINT_993",
+                "ZISTRAL_DIAG_MISSING_993",
+            ] {
+                assert!(!String::from_utf8_lossy(&out.stdout).contains(marker));
+                assert!(!String::from_utf8_lossy(&out.stderr).contains(marker));
+            }
+        }
+    }
+}
+
+#[test]
+fn doctor_configuration_codes_follow_effective_overrides_not_unused_settings() {
+    let root = tempfile::tempdir().unwrap();
+    let (listener, url) = listener();
+    let text = format!(
+        "model='root-model'\nbase_url='{url}'\nactive_profile='broken'\n[profiles.broken]\nbase_url='{url}'\napi='obsolete'\nmax_output_tokens=0\n"
+    );
+    std::fs::write(root.path().join("config.toml"), &text).unwrap();
+    for flags in [
+        vec!["-p", "default"],
+        vec![
+            "-p",
+            "broken",
+            "--model",
+            "override-model",
+            "--api",
+            "chat",
+            "--no-profile-budget",
+        ],
+    ] {
+        let out = command(root.path(), "2")
+            .args(flags)
+            .args(["doctor", "--json"])
+            .output()
+            .unwrap();
+        let value = report(&out, true);
+        assert!(value["error"].is_null());
+        assert_eq!(value["configuration"]["status"], "ok");
+        assert_eq!(value["probe"]["status"], "not_requested");
+        assert!(listener.accept().is_err());
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("config.toml")).unwrap(),
+            text
+        );
+    }
 }

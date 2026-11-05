@@ -370,6 +370,10 @@ api_key_env='DELIVERY_MODEL_KEY'
             # be prepared for an older strict config parser without a model call.
             config.write_text("api='obsolete'\napi_key='ROOT_KEY_993'\nmax_output_tokens=0\nchat_token_limit_field='unsupported'\n[profiles.unconfigured]\napi='obsolete'\napi_key_env='DELIVERY_REPLACEMENT_KEY'\nmax_output_tokens=0\nchat_token_limit_field='unsupported'\n", encoding='utf-8')
             repair = read()
+            failure = json.loads(run(['doctor', '--json', '--probe'], INPUT, success=False).stdout)
+            assert failure['error']['kind'] == 'configuration' and failure['error']['code'] == 'model_missing'
+            assert failure['probe']['status'] == 'not_run' and failure['configuration']['details'] is None
+            assert read() == repair and len(server.requests) == 6
             for name in ['default', 'unconfigured']:
                 run(['config', '--name', name, '--clear-output-budget'])
                 selected = repair if name == 'default' else repair['profiles'][name]

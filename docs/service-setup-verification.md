@@ -105,6 +105,11 @@ variable while the old variable remains present with a deliberately wrong value.
 A separate legacy fixture checks escaped model/path labels in human doctor/model
 summaries while diagnostic JSON retains the original control-bearing values and
 the main configuration remains unchanged, without any provider call.
+An invalid effective configuration also reports a fixed typed configuration code
+and suppresses an explicitly requested probe, without changing the file or
+issuing an extra service request. Detailed phase/override coverage is in the
+actual-CLI diagnostics regressions; the installed workflow checks the missing-model
+path under every protocol variant.
 The same installed check also imports/replaces/renders an explicit preset library
 under obsolete model settings, verifying no-write preview, unchanged source,
 reused empty coordination file and zero extra service requests. Concurrent-import

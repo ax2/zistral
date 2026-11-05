@@ -91,6 +91,19 @@ fn diagnostic_error(kind: &str, message: &str) -> serde_json::Value {
     serde_json::json!({"kind":kind,"http_status":null,"retries":null,"message":message})
 }
 
+fn configuration_error(error: &anyhow::Error) -> serde_json::Value {
+    let (code, advice) = error
+        .downcast_ref::<config::ConfigFailure>()
+        .map(|issue| issue.diagnostic())
+        .unwrap_or((
+            "configuration_invalid",
+            "configuration check failed; run zi config or human-readable zi doctor",
+        ));
+    let mut report = diagnostic_error("configuration", advice);
+    report["code"] = serde_json::json!(code);
+    report
+}
+
 fn probe_error(error: &anyhow::Error) -> serde_json::Value {
     if let Some(http) = error.downcast_ref::<crate::agent::HttpFailure>() {
         return serde_json::json!({"kind":"http","http_status":http.status,"retries":http.retries,"message":http.advice});
@@ -195,13 +208,7 @@ pub fn run_json(cli: &Cli, probe: bool) -> Result<()> {
                 serde_json::Value::Null,
             )
         }
-        Err(_) => (
-            serde_json::Value::Null,
-            diagnostic_error(
-                "configuration",
-                "configuration check failed; run zi config or human-readable zi doctor",
-            ),
-        ),
+        Err(error) => (serde_json::Value::Null, configuration_error(error)),
     };
     let mut report = json!({
         "version":1,"kind":"doctor-report","zi_version":env!("CARGO_PKG_VERSION"),"ok":settings.is_ok(),
