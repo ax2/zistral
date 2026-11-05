@@ -79,3 +79,7 @@ nonzero without a success notice; failure checks cover unchanged source bytes.
 Pipes remain available for subsequent commands, and no model query is implied.
 The existing installed-service delivery check includes profile maintenance in
 all four protocol variants, with no additional HTTP requests.
+
+Configuration writes also use [save-conflict protection](configuration-saves.md):
+reload after a stale-save error; an empty sibling `.lock` file coordinates local
+writers without storing keys or keeping a background process.

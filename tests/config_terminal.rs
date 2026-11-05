@@ -45,6 +45,22 @@ fn configure_outcome_env(
     expected_success: bool,
     environment: &[(&str, &str)],
 ) -> String {
+    let (transcript, success) =
+        configure_with_hook(path, answers, home, name, &[finish], environment, || {});
+    assert_eq!(success, expected_success, "{transcript}");
+    transcript
+}
+
+fn configure_with_hook(
+    path: &std::path::Path,
+    answers: &[(&str, &str)],
+    home: Option<&std::path::Path>,
+    name: Option<&str>,
+    finishes: &[&str],
+    environment: &[(&str, &str)],
+    before_first_answer: impl FnOnce(),
+) -> (String, bool) {
+    let mut hook = Some(before_first_answer);
     let pair = native_pty_system()
         .openpty(PtySize {
             rows: 30,
@@ -100,13 +116,22 @@ fn configure_outcome_env(
     for (step, (prompt, answer)) in answers
         .iter()
         .copied()
-        .chain(std::iter::once((finish, "")))
+        .chain(std::iter::once(("", "")))
         .enumerate()
     {
+        let wanted = if step < answers.len() {
+            std::slice::from_ref(&prompt)
+        } else {
+            finishes
+        };
         let deadline = Instant::now() + Duration::from_secs(20);
         loop {
-            if let Some(offset) = transcript[position..].find(prompt) {
-                position += offset + prompt.len();
+            if let Some((offset, length)) = wanted.iter().find_map(|text| {
+                transcript[position..]
+                    .find(text)
+                    .map(|offset| (offset, text.len()))
+            }) {
+                position += offset + length;
                 break;
             }
             match rx.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
@@ -123,13 +148,16 @@ fn configure_outcome_env(
                 }
                 Err(_) => {
                     child.kill().ok();
-                    panic!("terminal did not reach {prompt:?}; output: {transcript}");
+                    panic!("terminal did not reach {wanted:?}; output: {transcript}");
                 }
             }
         }
         // The final entry only observes completion (including expected errors).
         // Do not send a synthetic Enter after the child has already exited.
         if step < answers.len() {
+            if step == 0 {
+                hook.take().unwrap()();
+            }
             // Wait for the end of the label before sending: rpassword must have
             // switched the console to hidden input before the key is typed.
             std::thread::sleep(Duration::from_millis(100));
@@ -138,21 +166,20 @@ fn configure_outcome_env(
         }
     }
     let deadline = Instant::now() + Duration::from_secs(5);
-    loop {
+    let success = loop {
         if let Some(status) = child.try_wait().unwrap() {
-            assert_eq!(status.success(), expected_success, "{transcript}");
-            break;
+            break status.success();
         }
         if Instant::now() >= deadline {
             child.kill().ok();
             panic!("config did not exit");
         }
         std::thread::sleep(Duration::from_millis(20));
-    }
+    };
     while let Ok(bytes) = rx.try_recv() {
         transcript.push_str(&String::from_utf8_lossy(&bytes));
     }
-    transcript
+    (transcript, success)
 }
 
 fn source(home: &std::path::Path, path: &str, contents: &str) {
@@ -956,4 +983,127 @@ fn repair_invalid_url_and_display_control_defaults_without_rewriting_metadata() 
         model
     );
     assert_eq!(std::fs::read_to_string(&path).unwrap(), saved);
+}
+
+#[test]
+fn stale_wizard_preserves_a_concurrent_cli_key_removal_and_can_be_restarted() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("config.toml");
+    std::fs::write(&path, "model='root'\nactive_profile='work'\n[profiles.work]\nmodel='work'\nbase_url='http://localhost:1/v1'\napi='chat'\napi_key='WORK_CONCURRENT_SECRET_993'\n[profiles.other]\nmodel='other'\napi_key='REMOVED_CONCURRENT_SECRET_993'\n").unwrap();
+    let mut newer = None;
+    let (output, success) = configure_with_hook(
+        &path,
+        &[
+            ("Service URL", ""),
+            ("Model name", "edited"),
+            ("API protocol", ""),
+            ("API Key", ""),
+        ],
+        None,
+        Some("work"),
+        &["Saved ", "zi: "],
+        &[],
+        || {
+            let out = imported_command(root.path(), &path, "UNUSED_CONCURRENT_ENV_993", "")
+                .args([
+                    "config",
+                    "--name",
+                    "other",
+                    "--api-key-env",
+                    "NEW_CONCURRENT_REF_993",
+                    "--clear-saved-key",
+                ])
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            assert!(out.stdout.is_empty());
+            let observed: toml::Value =
+                toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            assert!(observed["profiles"]["other"].get("api_key").is_none());
+            assert_eq!(
+                observed["profiles"]["other"]["api_key_env"].as_str(),
+                Some("NEW_CONCURRENT_REF_993")
+            );
+            newer = Some(std::fs::read(&path).unwrap());
+        },
+    );
+    assert!(
+        std::fs::read(&path).unwrap() == newer.unwrap(),
+        "stale wizard overwrote a newer CLI configuration and restored a removed key"
+    );
+    assert!(!success, "stale wizard must report a save conflict");
+    assert!(output.contains("configuration changed"));
+    assert!(!output.contains("Saved "));
+    let retry = configure_named(
+        &path,
+        &[
+            ("Service URL", ""),
+            ("Model name", "edited"),
+            ("API protocol", ""),
+            ("API Key", ""),
+        ],
+        None,
+        Some("work"),
+    );
+    let saved: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(saved["profiles"]["work"]["model"].as_str(), Some("edited"));
+    assert!(saved["profiles"]["other"].get("api_key").is_none());
+    assert_eq!(
+        saved["profiles"]["other"]["api_key_env"].as_str(),
+        Some("NEW_CONCURRENT_REF_993")
+    );
+    for secret in [
+        "WORK_CONCURRENT_SECRET_993",
+        "REMOVED_CONCURRENT_SECRET_993",
+    ] {
+        assert!(!output.contains(secret));
+        assert!(!retry.contains(secret));
+    }
+}
+
+#[test]
+fn stale_wizard_preserves_external_replacement_deletion_and_first_setup_creation() {
+    for scenario in 0..3 {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("config.toml");
+        if scenario != 2 {
+            std::fs::write(&path, "base_url='http://localhost:1/v1'\nmodel='old'\napi='chat'\napi_key='OLD_TRANSACTION_SECRET_993'\n").unwrap();
+        }
+        let (output, success) = configure_with_hook(
+            &path,
+            &[
+                ("Service URL", "http://localhost:1/v1"),
+                ("Model name", "edited"),
+                ("API protocol", "chat"),
+                ("API Key", "FAKE_TRANSACTION_SECRET_993"),
+            ],
+            Some(root.path()),
+            None,
+            &["Saved ", "zi: "],
+            &[],
+            || match scenario {
+                0 => std::fs::write(&path, [0xff, 0xfe]).unwrap(),
+                1 => std::fs::remove_file(&path).unwrap(),
+                _ => std::fs::write(&path, b"# externally created\nmodel='new'\n").unwrap(),
+            },
+        );
+        assert!(!success, "{output}");
+        assert!(output.contains("configuration changed"), "{output}");
+        assert!(!output.contains("Saved "));
+        assert!(!output.contains("FAKE_TRANSACTION_SECRET_993"));
+        assert!(!output.contains("OLD_TRANSACTION_SECRET_993"));
+        match scenario {
+            0 => assert_eq!(std::fs::read(&path).unwrap(), [0xff, 0xfe]),
+            1 => assert!(!path.exists()),
+            _ => assert_eq!(
+                std::fs::read(&path).unwrap(),
+                b"# externally created\nmodel='new'\n"
+            ),
+        }
+        assert!(!root.path().join("config.toml.lock").exists());
+    }
 }

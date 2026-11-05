@@ -76,3 +76,7 @@ uses all four protocol variants: after changing the reference, the old variable
 remains present with a wrong value and later controlled requests must authenticate
 with the new one. Forty workflow checks retain the same 24 synthetic loopback
 requests. These checks do not establish access to a real provider account.
+
+Configuration writes also use [save-conflict protection](configuration-saves.md):
+reload after a stale-save error; an empty sibling `.lock` file coordinates local
+writers without storing keys or keeping a background process.

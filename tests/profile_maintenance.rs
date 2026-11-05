@@ -85,7 +85,10 @@ fn rename_preserves_every_profile_field_and_moves_only_saved_selection() {
             .unwrap();
         check(&out, true);
         assert_eq!(read(root.path()), expected);
-        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 2);
+        let lock = root.path().join("config.toml.lock");
+        assert!(lock.is_file());
+        assert_eq!(std::fs::metadata(lock).unwrap().len(), 0);
         let out = command(root.path())
             .args(["--profile", "renamed", "doctor", "--json"])
             .output()
@@ -157,7 +160,10 @@ fn remove_is_explicit_inactive_only_and_preserves_default_and_unrelated_keys() {
     check(&out, true);
     expected.as_table_mut().unwrap().remove("profiles");
     assert_eq!(read(root.path()), expected);
-    assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
+    assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 2);
+    let lock = root.path().join("config.toml.lock");
+    assert!(lock.is_file());
+    assert_eq!(std::fs::metadata(lock).unwrap().len(), 0);
     let after = std::fs::read(root.path().join("config.toml")).unwrap();
     assert!(!String::from_utf8_lossy(&after).contains("WORK_SECRET_993"));
     assert!(String::from_utf8_lossy(&after).contains("ROOT_SECRET_993"));

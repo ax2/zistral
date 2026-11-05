@@ -498,7 +498,10 @@ fn clear_budget_does_not_require_a_model_or_supported_protocol() {
                 toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
             assert_eq!(actual, expected);
         }
-        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 2);
+        let lock = root.path().join("config.toml.lock");
+        assert!(lock.is_file());
+        assert_eq!(std::fs::metadata(lock).unwrap().len(), 0);
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;

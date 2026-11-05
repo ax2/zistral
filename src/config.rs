@@ -152,7 +152,7 @@ pub fn models(cli: &Cli) -> Result<()> {
 
 pub fn use_profile(cli: &Cli, name: &str) -> Result<()> {
     let path = path(cli)?;
-    let mut document = read_config(&path, false)?;
+    let (mut document, original) = read_config_snapshot(&path, false)?;
     let file = selected(&document, name)?;
     if nonempty(file.model.clone()).is_none() {
         bail!("profile has no model; run zi config --name {name}");
@@ -163,7 +163,7 @@ pub fn use_profile(cli: &Cli, name: &str) -> Result<()> {
     } else {
         Some(name.into())
     };
-    save_config(&path, &document)?;
+    save_config(&path, &document, original.as_deref())?;
     eprintln!(
         "Active profile: {name}. ZI_PROFILE / --profile and other overrides still take precedence."
     );
@@ -182,7 +182,7 @@ pub fn rename_profile(cli: &Cli, old: &str, new: &str) -> Result<()> {
         bail!("new profile name must differ from the old name; configuration unchanged");
     }
     let path = path(cli)?;
-    let mut document = read_config(&path, false)?;
+    let (mut document, original) = read_config_snapshot(&path, false)?;
     if document.profiles.contains_key(new) {
         bail!("target profile already exists; choose another name");
     }
@@ -195,7 +195,7 @@ pub fn rename_profile(cli: &Cli, old: &str, new: &str) -> Result<()> {
     if active {
         document.active_profile = Some(new.into());
     }
-    save_config(&path, &document)?;
+    save_config(&path, &document, original.as_deref())?;
     eprintln!(
         "Renamed profile {old} to {new}. Saved default selection {}. External references are unchanged.",
         if active { "updated" } else { "unchanged" }
@@ -209,7 +209,7 @@ pub fn remove_profile(cli: &Cli, name: &str) -> Result<()> {
         bail!("default root settings cannot be removed; choose a named profile");
     }
     let path = path(cli)?;
-    let mut document = read_config(&path, false)?;
+    let (mut document, original) = read_config_snapshot(&path, false)?;
     if document.active_profile.as_deref() == Some(name) {
         bail!("cannot remove the saved active profile; run zi use NAME to select another first");
     }
@@ -217,7 +217,7 @@ pub fn remove_profile(cli: &Cli, name: &str) -> Result<()> {
         .profiles
         .remove(name)
         .context("unknown saved profile; run zi models")?;
-    save_config(&path, &document)?;
+    save_config(&path, &document, original.as_deref())?;
     eprintln!(
         "Removed profile {name}. Other profiles and the saved default selection are unchanged."
     );
@@ -271,15 +271,24 @@ fn resolve_api_key(saved: Option<&str>, key_env: &str) -> (Option<String>, ApiKe
 }
 
 fn read_config(path: &Path, allow_missing: bool) -> Result<FileConfig> {
+    read_config_snapshot(path, allow_missing).map(|(document, _)| document)
+}
+
+fn read_config_snapshot(path: &Path, allow_missing: bool) -> Result<(FileConfig, Option<Vec<u8>>)> {
     match std::fs::read_to_string(path) {
         // Parser diagnostics include source lines, which may contain an API key.
-        Ok(text) => toml::from_str(&text).map_err(|_| {
-            anyhow!(
-                "invalid configuration {}; check TOML syntax and field names",
-                crate::ui::label(&path.display().to_string())
-            )
-        }),
-        Err(e) if e.kind() == io::ErrorKind::NotFound && allow_missing => Ok(FileConfig::default()),
+        Ok(text) => {
+            let document = toml::from_str(&text).map_err(|_| {
+                anyhow!(
+                    "invalid configuration {}; check TOML syntax and field names",
+                    crate::ui::label(&path.display().to_string())
+                )
+            })?;
+            Ok((document, Some(text.into_bytes())))
+        }
+        Err(e) if e.kind() == io::ErrorKind::NotFound && allow_missing => {
+            Ok((FileConfig::default(), None))
+        }
         Err(e) => Err(e).with_context(|| {
             format!(
                 "cannot read configuration {}",
@@ -439,7 +448,7 @@ pub fn configure_named(cli: &Cli, manual: bool, name: Option<&str>) -> Result<()
         .clone()
         .or_else(config_path)
         .context("cannot locate config directory; use zi config --config PATH")?;
-    let mut document = read_config(&path, true)?;
+    let (mut document, original) = read_config_snapshot(&path, true)?;
     let name = name
         .or(cli.profile.as_deref())
         .or(document.active_profile.as_deref())
@@ -501,7 +510,7 @@ pub fn configure_named(cli: &Cli, manual: bool, name: Option<&str>) -> Result<()
             .insert(name.clone(), Profile::from(&updated));
         document.active_profile = Some(name.clone());
     }
-    save_config(&path, &document)?;
+    save_config(&path, &document, original.as_deref())?;
     writeln!(
         output,
         "Saved {}. You can now run zi with an instruction.",
@@ -659,12 +668,102 @@ fn collect_config(
     Ok(file)
 }
 
-fn save_config(path: &Path, file: &FileConfig) -> Result<()> {
+fn configuration_unchanged(path: &Path, original: Option<&[u8]>) -> Result<()> {
+    let current = match std::fs::read(path) {
+        Ok(bytes) => Some(bytes),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error).context("cannot recheck configuration; nothing saved"),
+    };
+    if current.as_deref() != original {
+        bail!(
+            "configuration changed while editing; nothing saved; reload the configuration and retry"
+        );
+    }
+    Ok(())
+}
+
+fn coordination_error(error: io::Error) -> anyhow::Error {
+    let busy = error.kind() == io::ErrorKind::WouldBlock;
+    #[cfg(windows)]
+    let busy = busy || matches!(error.raw_os_error(), Some(32 | 33));
+    if busy {
+        anyhow!(
+            "configuration is busy; another process is saving it; retry after that save finishes"
+        )
+    } else {
+        error.into()
+    }
+}
+
+fn configuration_lock(path: &Path) -> Result<std::fs::File> {
+    let mut filename = path
+        .file_name()
+        .context("configuration path needs a file name")?
+        .to_os_string();
+    filename.push(".lock");
+    let lock_path = path.with_file_name(filename);
+    match std::fs::symlink_metadata(&lock_path) {
+        Ok(metadata) => {
+            if !metadata.is_file() || metadata.file_type().is_symlink() || metadata.len() != 0 {
+                bail!(
+                    "configuration coordination file must be a regular empty file; nothing saved"
+                );
+            }
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => (),
+        Err(error) => {
+            return Err(coordination_error(error))
+                .context("cannot inspect configuration coordination file");
+        }
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true).write(true).create(true).truncate(false);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        options.share_mode(0);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let file = options
+        .open(&lock_path)
+        .map_err(coordination_error)
+        .context("cannot acquire configuration coordination file")?;
+    let metadata = file
+        .metadata()
+        .context("cannot inspect configuration coordination handle")?;
+    if !metadata.is_file() || metadata.len() != 0 {
+        bail!("configuration coordination file must be a regular empty file; nothing saved");
+    }
+    #[cfg(unix)]
+    {
+        use std::os::fd::AsRawFd;
+        // SAFETY: file owns a live descriptor for the complete guard lifetime.
+        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+            return Err(coordination_error(io::Error::last_os_error()))
+                .context("cannot lock configuration coordination file");
+        }
+    }
+    // Keep this stable empty file: unlinking it while another process has it
+    // open would allow independent locks on different inodes. Closing the File
+    // releases the OS lock, including after a crash; no PID/expiry state exists.
+    Ok(file)
+}
+
+fn save_config(path: &Path, file: &FileConfig, original: Option<&[u8]>) -> Result<()> {
+    let text = toml::to_string_pretty(file).context("cannot serialize configuration")?;
+    // Reject an already changed/deleted file before creating any directory or
+    // coordination artifact. Recheck again under the OS lock before publication.
+    configuration_unchanged(path, original)?;
     let parent = path
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or(Path::new("."));
     std::fs::create_dir_all(parent).context("cannot create config directory")?;
+    let _lock = configuration_lock(path)?;
     let mut temporary =
         tempfile::NamedTempFile::new_in(parent).context("cannot create config file")?;
     #[cfg(unix)]
@@ -674,7 +773,6 @@ fn save_config(path: &Path, file: &FileConfig) -> Result<()> {
             .as_file()
             .set_permissions(std::fs::Permissions::from_mode(0o600))?;
     }
-    let text = toml::to_string_pretty(file).context("cannot serialize configuration")?;
     temporary
         .write_all(text.as_bytes())
         .context("cannot write configuration")?;
@@ -682,6 +780,7 @@ fn save_config(path: &Path, file: &FileConfig) -> Result<()> {
         .as_file()
         .sync_all()
         .context("cannot flush configuration")?;
+    configuration_unchanged(path, original)?;
     temporary
         .persist(path)
         .map_err(|e| e.error)
@@ -798,7 +897,7 @@ pub fn set_key_settings(
     // Validate before opening configuration, even for non-CLI callers.
     let key_env = key_env.map(parse_key_env).transpose()?;
     let path = path(cli)?;
-    let mut document = read_config(&path, false)?;
+    let (mut document, original) = read_config_snapshot(&path, false)?;
     let name = name
         .or(cli.profile.as_deref())
         .or(document.active_profile.as_deref())
@@ -821,7 +920,7 @@ pub fn set_key_settings(
             .profiles
             .insert(name.clone(), Profile::from(&updated));
     }
-    save_config(&path, &document)?;
+    save_config(&path, &document, original.as_deref())?;
     eprintln!(
         "Saved API key settings for profile {name}. Environment overrides still apply; use zi doctor to inspect the effective source."
     );
@@ -836,7 +935,7 @@ pub fn set_output_budget(
     clear: bool,
 ) -> Result<()> {
     let path = path(cli)?;
-    let mut document = read_config(&path, false)?;
+    let (mut document, original) = read_config_snapshot(&path, false)?;
     let name = name
         .or(cli.profile.as_deref())
         .or(document.active_profile.as_deref())
@@ -871,7 +970,7 @@ pub fn set_output_budget(
             .profiles
             .insert(name.clone(), Profile::from(&updated));
     }
-    save_config(&path, &document)?;
+    save_config(&path, &document, original.as_deref())?;
     eprintln!("Saved request budget for profile {name}. Default profile selection unchanged.");
     Ok(())
 }
@@ -1020,7 +1119,7 @@ mod tests {
         );
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("nested/config.toml");
-        save_config(&path, &file).unwrap();
+        save_config(&path, &file, None).unwrap();
         let saved = read_config(&path, false).unwrap();
         assert_eq!(
             saved.base_url.as_deref(),
@@ -1043,12 +1142,14 @@ mod tests {
             );
         }
         // Updating an existing configuration must work on Windows as well.
+        let original = std::fs::read(&path).unwrap();
         save_config(
             &path,
             &FileConfig {
                 model: Some("new-model".into()),
                 ..file
             },
+            Some(&original),
         )
         .unwrap();
         assert_eq!(
@@ -1057,8 +1158,11 @@ mod tests {
         );
         assert_eq!(
             std::fs::read_dir(path.parent().unwrap()).unwrap().count(),
-            1
+            2
         );
+        let lock = path.with_file_name("config.toml.lock");
+        assert!(lock.is_file());
+        assert_eq!(std::fs::metadata(lock).unwrap().len(), 0);
     }
 
     #[test]
@@ -1219,5 +1323,40 @@ mod tests {
         assert_eq!(updated.model.as_deref(), Some("repaired"));
         assert_eq!(updated.api.as_deref(), Some("chat"));
         assert_eq!(updated.api_key.as_deref(), Some("SAVED_DEFAULT_SECRET_993"));
+    }
+
+    #[test]
+    fn changed_configuration_snapshots_fail_without_creating_save_artifacts() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("config.toml");
+        let file = FileConfig::default();
+        let original = b"model='before'\n";
+        for current in [
+            Some(b"# external edit\nmodel='before'\n".as_slice()),
+            Some(&[0xff, 0xfe]),
+            None,
+        ] {
+            std::fs::write(&path, original).unwrap();
+            match current {
+                Some(bytes) => std::fs::write(&path, bytes).unwrap(),
+                None => std::fs::remove_file(&path).unwrap(),
+            }
+            let error = save_config(&path, &file, Some(original)).unwrap_err();
+            assert!(error.to_string().contains("configuration changed"));
+            assert_eq!(std::fs::read(&path).ok().as_deref(), current);
+            assert!(!root.path().join("config.toml.lock").exists());
+        }
+        std::fs::write(&path, original).unwrap();
+        assert!(save_config(&path, &file, None).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
+        let nested = root.path().join("deleted");
+        std::fs::create_dir(&nested).unwrap();
+        let path = nested.join("config.toml");
+        std::fs::write(&path, original).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        std::fs::remove_dir(&nested).unwrap();
+        assert!(save_config(&path, &file, Some(original)).is_err());
+        assert!(!nested.exists());
     }
 }

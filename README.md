@@ -208,6 +208,8 @@ zi doctor --json            # Unreleased: versioned JSON diagnostics for scripts
 **Unreleased main:** `zi models --remote [--json]` explicitly queries the selected service
 for model IDs without switching or saving models. See [model catalogue](docs/model-catalogue.md)
 for protocol support, pagination, limits and script exit-status handling.
+Unreleased [configuration-save protection](docs/configuration-saves.md) prevents
+stale configuration wizards from overwriting newer changes from another terminal.
 See the [complete service-setup workflow](docs/service-setup-verification.md) for
 configuration, diagnosis, request preview, task/stream/file output and delivery checks.
 Unreleased [profile maintenance](docs/profile-maintenance.md) adds explicit offline

@@ -26,6 +26,7 @@ dependencies. Existing offline data/recipe workflows remain model-independent.
 | Discover IDs exposed by a configured service | Explicit `models --remote [--json]` queries supported catalogue endpoints | No task body/model auto-selection/config write; bounded complete-result output; catalogue membership does not prove call permissions or tool support |
 | Maintain saved configurations offline | Rename/remove named profiles; change an existing profile's key reference; explicitly remove a saved literal | Protect root/saved-active removal; preserve unrelated settings/default selection; key values are never resolved/copied by metadata edits |
 | Import reusable credential references | Available supported Codex/WorkBuddy/CodeBuddy/dsh environment-key sources retain their variable name | Selected effective source only; literal/missing-key fallbacks remain explicit; no source-file edits or account/session-token import |
+| Save from multiple terminals safely | Stale wizards cannot restore removed keys or overwrite newer configuration | Exact snapshot checks plus a same-path local OS lock; busy/conflict saves fail explicitly without merging; see [scope](../configuration-saves.md) |
 
 Manual edits now use the same effective-key selection as requests, so Enter can
 retain an available environment credential on official service hosts. `-` in the
@@ -148,6 +149,15 @@ them from **every** affected profile, including root and inactive profiles, usin
 this version; an older strict configuration parser can reject them even when a
 different profile is selected. CLI options/JSON commands introduced here are also
 unavailable in v0.33.0. Existing key-reference fields are not new schema fields.
+
+## Additional configuration-save follow-up (unreleased)
+
+The conflict-protection row is one additional related outcome; snapshot checks,
+locking, crash recovery and regressions are parts of that outcome. The historical
+verification baseline above predates it and is not evidence for this follow-up.
+Its exact source must pass CI and native installation checks before selection.
+It adds no schema field or runtime dependency. The installed release remains
+v0.33.0.
 
 ## Remaining publication work
 

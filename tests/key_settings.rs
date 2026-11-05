@@ -116,7 +116,10 @@ fn reference_edits_follow_explicit_then_invocation_then_saved_profile_selection(
             );
         }
         assert_eq!(read(root), expected);
-        assert_eq!(std::fs::read_dir(root).unwrap().count(), 1);
+        assert_eq!(std::fs::read_dir(root).unwrap().count(), 2);
+        let lock = root.join("config.toml.lock");
+        assert!(lock.is_file());
+        assert_eq!(std::fs::metadata(lock).unwrap().len(), 0);
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -158,7 +161,10 @@ fn explicit_key_removal_preserves_references_and_all_unrelated_settings() {
                     .insert("api_key_env".into(), toml::Value::String(name.into()));
             }
             assert_eq!(read(root), expected);
-            assert_eq!(std::fs::read_dir(root).unwrap().count(), 1);
+            assert_eq!(std::fs::read_dir(root).unwrap().count(), 2);
+            let lock = root.join("config.toml.lock");
+            assert!(lock.is_file());
+            assert_eq!(std::fs::metadata(lock).unwrap().len(), 0);
         }
     }
 }

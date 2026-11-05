@@ -150,3 +150,7 @@ The probe has no tools or input/task instructions, at most one model turn, no
 retries and at most 15 seconds per request. It still hides answers and provider
 error bodies, and it may fail if a reasoning model exhausts this small budget.
 Tests use synthetic local servers; they do not prove real-service/model quality.
+
+Configuration writes also use [save-conflict protection](configuration-saves.md):
+reload after a stale-save error; an empty sibling `.lock` file coordinates local
+writers without storing keys or keeping a background process.

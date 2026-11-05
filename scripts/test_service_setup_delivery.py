@@ -188,12 +188,14 @@ api_key_env='DELIVERY_MODEL_KEY'
             source.write_text(text, encoding='utf-8')
             # An explicit home override keeps Codex discovery inside this fixture.
             env['CODEX_HOME'] = str(root / '.codex')
+            coordination = config.with_name(config.name + '.lock')
+            assert not coordination.exists()
             before_discovery = config.read_bytes()
             before_source = source.read_bytes()
             result = run(['config', '--list'], INPUT)
             assert model.encode() in result.stdout and b'Key environment' in result.stdout
             assert source.read_bytes() == before_source and config.read_bytes() == before_discovery
-            assert read() == baseline and not server.requests
+            assert read() == baseline and not server.requests and not coordination.exists()
             checks.append(label + ': source-agent discovery recognizes environment credentials without echo, config writes or network')
             run(['use', 'work'])
             args = ['config', '--max-output-tokens', '128']
@@ -229,6 +231,8 @@ api_key_env='DELIVERY_MODEL_KEY'
             raw_report = json.loads(run(['doctor', '--json'], config_file=metadata).stdout)
             assert raw_report['configuration']['details']['model'] == raw_model
             assert raw_report['configuration']['path'] == str(metadata)
+            assert coordination.is_file() and not coordination.is_symlink() and coordination.stat().st_size == 0
+            assert not metadata.with_name(metadata.name + '.lock').exists()
             assert read() == expected and not server.requests
             checks.append(label + ': select/save budget/offline doctor preserve the effective profile/key source; metadata labels escape controls while JSON retains original values')
 
@@ -374,6 +378,7 @@ api_key_env='DELIVERY_MODEL_KEY'
                 assert read() == repair and destination.read_bytes() == b'words=2\n'
             assert source.read_bytes() == before_source and len(server.requests) == 6
             checks.append(label + ': offline renames/protected removal and generation-independent budget cleanup preserve unrelated settings and result')
+            assert coordination.is_file() and not coordination.is_symlink() and coordination.stat().st_size == 0
             total_requests += len(server.requests)
     assert len(checks) == 40 and total_requests == 24, 'incomplete service delivery verification'
     return {'passed': len(checks), 'checks': checks, 'synthetic_loopback_requests': total_requests,

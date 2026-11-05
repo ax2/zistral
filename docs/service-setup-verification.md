@@ -123,3 +123,7 @@ exact-commit CI, packaging checks and eventual official-artifact verification.
 Detailed contracts: [output budgets](output-budgets.md),
 [diagnostic JSON](doctor-json.md), [model catalogue](model-catalogue.md),
 [file output](../README.md), [release gates](releasing.md).
+
+Configuration writes also use [save-conflict protection](configuration-saves.md):
+reload after a stale-save error; an empty sibling `.lock` file coordinates local
+writers without storing keys or keeping a background process.
