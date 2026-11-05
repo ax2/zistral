@@ -12,7 +12,26 @@ pub struct Candidate {
     pub base_url: String,
     pub api: String,
     pub api_key: Option<String>,
+    pub api_key_env: Option<String>,
     pub endpoint: Option<String>,
+}
+
+impl Candidate {
+    pub fn key_available(&self) -> bool {
+        self.api_key.is_some()
+            || self
+                .api_key_env
+                .as_deref()
+                .is_some_and(|name| env_key(name).is_some())
+    }
+}
+
+// Preserve the selected credential's kind. Environment values are inspected for
+// presence but never retained as candidate literals or written as saved keys.
+#[derive(Clone)]
+enum Credential {
+    Literal(String),
+    Environment(String),
 }
 
 #[derive(Default)]
@@ -82,10 +101,13 @@ fn string(value: &Value, key: &str) -> Option<String> {
         .filter(|v| !v.trim().is_empty())
         .map(|v| v.trim().to_owned())
 }
-fn env_key(name: &str) -> Option<String> {
-    std::env::var(name).ok().filter(|v| !v.trim().is_empty())
+fn env_key(name: &str) -> Option<Credential> {
+    std::env::var(name)
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .map(|_| Credential::Environment(name.to_owned()))
 }
-fn literal_key(value: Option<String>) -> Option<String> {
+fn literal_key(value: Option<String>) -> Option<Credential> {
     let value = value?;
     if let Some(name) = value
         .strip_prefix("${")
@@ -94,7 +116,7 @@ fn literal_key(value: Option<String>) -> Option<String> {
     {
         env_key(name)
     } else {
-        Some(value)
+        Some(Credential::Literal(value))
     }
 }
 fn api(value: &str) -> Option<&'static str> {
@@ -111,7 +133,7 @@ fn candidate(
     model: String,
     url: String,
     protocol: &str,
-    key: Option<String>,
+    key: Option<Credential>,
     exact: bool,
     found: &mut Discovery,
 ) {
@@ -144,12 +166,18 @@ fn candidate(
     } else {
         (protocol == "anthropic" && trimmed.ends_with(suffix)).then(|| trimmed.to_owned())
     };
+    let (api_key, api_key_env) = match key {
+        Some(Credential::Literal(value)) => (Some(value), None),
+        Some(Credential::Environment(name)) => (None, Some(name)),
+        None => (None, None),
+    };
     found.candidates.push(Candidate {
         source,
         model,
         base_url,
         api: protocol.into(),
-        api_key: key,
+        api_key,
+        api_key_env,
         endpoint,
     });
 }
@@ -238,7 +266,8 @@ fn read_codex(root: &Path, found: &mut Discovery) {
             .or_else(|| literal_key(string(provider, "experimental_bearer_token")))
             .or_else(|| {
                 if requires_auth {
-                    env_key("OPENAI_API_KEY").or_else(|| string(&auth, "OPENAI_API_KEY"))
+                    env_key("OPENAI_API_KEY")
+                        .or_else(|| string(&auth, "OPENAI_API_KEY").map(Credential::Literal))
                 } else {
                     None
                 }
@@ -305,7 +334,7 @@ fn read_workbuddy(path: &Path, label: &str, found: &mut Discovery) {
     }
 }
 
-fn dsh_key(provider: &Value, credentials: &Value) -> Option<String> {
+fn dsh_key(provider: &Value, credentials: &Value) -> Option<Credential> {
     if let Some(name) = string(provider, "apiKeyEnv") {
         if let Some(value) = env_key(&name) {
             return Some(value);
@@ -318,7 +347,8 @@ fn dsh_key(provider: &Value, credentials: &Value) -> Option<String> {
                     Some("api-key" | "api_key" | "secret")
                 ) {
                     return string(&record["payload"], "secret")
-                        .or_else(|| string(&record["payload"], "apiKey"));
+                        .or_else(|| string(&record["payload"], "apiKey"))
+                        .map(Credential::Literal);
                 }
                 return None;
             }

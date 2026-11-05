@@ -312,8 +312,12 @@ fn print_imports(found: &crate::imports::Discovery, output: &mut impl Write) -> 
             crate::imports::display(&candidate.source),
             crate::imports::display(&candidate.model),
             candidate.api,
-            if candidate.api_key.is_some() {
-                "found"
+            if candidate.key_available() {
+                if candidate.api_key_env.is_some() {
+                    "environment"
+                } else {
+                    "found"
+                }
             } else {
                 "missing"
             }
@@ -353,11 +357,18 @@ fn import_config(
         .into_iter()
         .nth(index)
         .expect("validated selection");
+    let key_env = candidate.api_key_env;
+    let environment_available = || {
+        key_env
+            .as_deref()
+            .is_some_and(|name| nonempty(std::env::var(name).ok()).is_some())
+    };
     let mut key = candidate.api_key;
-    while key.is_none() {
+    while key.is_none() && !environment_available() {
         let answer = ask("API Key [hidden; Enter for no key]", true)?;
         key = nonempty(Some(answer.trim().to_owned()));
         if key.is_some()
+            || environment_available()
             || !matches!(
                 validate_url(&candidate.base_url)?.host_str(),
                 Some("api.openai.com" | "api.anthropic.com")
@@ -374,12 +385,18 @@ fn import_config(
         crate::imports::display(&candidate.model),
         candidate.api
     )?;
+    if key_env.is_some() {
+        writeln!(
+            output,
+            "API Key environment reference retained; its value is not saved."
+        )?;
+    }
     Ok(Some(FileConfig {
         model: Some(candidate.model),
         base_url: Some(candidate.base_url),
         api: Some(candidate.api),
         api_key: key,
-        api_key_env: None,
+        api_key_env: key_env,
         endpoint: candidate.endpoint,
         ..FileConfig::default()
     }))

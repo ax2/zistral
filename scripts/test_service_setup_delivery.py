@@ -172,6 +172,28 @@ api_key_env='DELIVERY_MODEL_KEY'
                 return result
 
             baseline = read()
+            # Exercise actual source discovery on the installed executable too.
+            # Only declared variable names are in source files, never key values.
+            if api == 'responses':
+                source = root / '.codex/config.toml'
+                text = f"model='{model}'\nmodel_provider='custom'\n[model_providers.custom]\nbase_url='{url}'\nwire_api='responses'\nenv_key='DELIVERY_MODEL_KEY'\n"
+            elif api == 'anthropic':
+                source = root / '.dsh/profiles/test/cordis.yml'
+                text = f"- id: llm\n  config:\n    providers:\n      custom:\n        baseURL: {url}\n        api: anthropic-messages\n        apiKeyEnv: DELIVERY_MODEL_KEY\n        models: ['{model}']\n"
+            else:
+                source = root / '.workbuddy/models.json'
+                text = json.dumps([{'id': model, 'url': url, 'apiKeyEnv': 'DELIVERY_MODEL_KEY'}])
+            source.parent.mkdir(parents=True)
+            source.write_text(text, encoding='utf-8')
+            # An explicit home override keeps Codex discovery inside this fixture.
+            env['CODEX_HOME'] = str(root / '.codex')
+            before_discovery = config.read_bytes()
+            before_source = source.read_bytes()
+            result = run(['config', '--list'], INPUT)
+            assert model.encode() in result.stdout and b'Key environment' in result.stdout
+            assert source.read_bytes() == before_source and config.read_bytes() == before_discovery
+            assert read() == baseline and not server.requests
+            checks.append(label + ': source-agent discovery recognizes environment credentials without echo, config writes or network')
             run(['use', 'work'])
             args = ['config', '--max-output-tokens', '128']
             if preference:
@@ -309,7 +331,7 @@ api_key_env='DELIVERY_MODEL_KEY'
             assert len(server.requests) == len(server.plan) == 6
             checks.append(label + ': offline inactive/active renames and protected removal preserve complete configuration and result')
             total_requests += len(server.requests)
-    assert len(checks) == 32 and total_requests == 24, 'incomplete service delivery verification'
+    assert len(checks) == 36 and total_requests == 24, 'incomplete service delivery verification'
     return {'passed': len(checks), 'checks': checks, 'synthetic_loopback_requests': total_requests,
             'real_provider_requests': 0}
 

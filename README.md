@@ -79,6 +79,11 @@ protocol, and API key. If a key is available, no re-entry is needed; otherwise
 the wizard asks for a hidden key. Select `0` to enter settings manually or keep
 editing the current settings. Nothing is changed in the source agents.
 
+**Unreleased main:** a selected environment-sourced API key keeps its variable
+reference instead of saving a plaintext snapshot. Key rotation is picked up by
+the next invocation. Literal key imports remain supported; see
+[imported key references](docs/import-key-references.md).
+
 For manual setup, enter the service URL (normally ending in `/v1`), model name, API protocol,
 and API key. The protocol defaults to `responses` for api.openai.com and `chat`
 for compatible/local services. API key input is hidden. The settings are saved

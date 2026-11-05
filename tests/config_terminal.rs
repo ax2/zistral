@@ -33,6 +33,18 @@ fn configure_outcome(
     finish: &str,
     expected_success: bool,
 ) -> String {
+    configure_outcome_env(path, answers, home, name, finish, expected_success, &[])
+}
+
+fn configure_outcome_env(
+    path: &std::path::Path,
+    answers: &[(&str, &str)],
+    home: Option<&std::path::Path>,
+    name: Option<&str>,
+    finish: &str,
+    expected_success: bool,
+    environment: &[(&str, &str)],
+) -> String {
     let pair = native_pty_system()
         .openpty(PtySize {
             rows: 30,
@@ -65,6 +77,9 @@ fn configure_outcome(
         "OPENAI_API_KEY",
     ] {
         cmd.env_remove(name);
+    }
+    for (name, value) in environment {
+        cmd.env(*name, *value);
     }
     let mut child = pair.slave.spawn_command(cmd).unwrap();
     drop(pair.slave);
@@ -371,4 +386,283 @@ fn incompatible_protocol_edit_preserves_original_config() {
     );
     assert_eq!(std::fs::read_to_string(path).unwrap(), original);
     assert!(!output.contains("protocol-edit-secret"));
+}
+
+fn environment_import_fixture(
+    home: &std::path::Path,
+    case: usize,
+    url: &str,
+    name: &str,
+) -> (&'static str, Vec<(std::path::PathBuf, Vec<u8>)>) {
+    let (api, files):(&str,Vec<(&str,String)>)=match case {
+        0 => ("responses",vec![(".codex/config.toml",format!("model='env-model'\nmodel_provider='custom'\n[model_providers.custom]\nbase_url='{url}'\nwire_api='responses'\nenv_key='{name}'\n"))]),
+        1 => ("responses",vec![(".codex/config.toml",format!("model='env-model'\nmodel_provider='custom'\n[model_providers.custom]\nbase_url='{url}'\nwire_api='responses'\nexperimental_bearer_token='${{{name}}}'\n"))]),
+        2 => ("responses",vec![(".codex/config.toml",format!("model='env-model'\n[model_providers.openai]\nbase_url='{url}'\n")),(".codex/auth.json",r#"{"OPENAI_API_KEY":"AUTH_FILE_FALLBACK_993","tokens":{"access_token":"NEVER_IMPORT_SESSION_993"}}"#.into())]),
+        3 => ("chat",vec![(".workbuddy/models.json",serde_json::json!([{"id":"env-model","url":format!("{url}/chat/completions"),"apiKeyEnv":name}]).to_string())]),
+        4 => ("chat",vec![(".codebuddy/models.json",serde_json::json!({"models":[{"id":"env-model","url":url,"apiKey":format!("${{{name}}}")}]}).to_string())]),
+        5 => ("anthropic",vec![(".dsh/profiles/desktop/cordis.yml",format!("- id: llm\n  config:\n    providers:\n      custom:\n        baseURL: {url}\n        api: anthropic-messages\n        apiKeyEnv: {name}\n        models: [env-model]\n"))]),
+        _ => ("anthropic",vec![(".dsh/profiles/desktop/cordis.yml",format!("- id: llm\n  config:\n    providers:\n      custom:\n        baseURL: {url}\n        api: anthropic-messages\n        apiKeyEnv: ZISTRAL_DSH_ALIAS_993\n        models: [env-model]\n")),(".dsh/.credentials.yaml",format!("refs:\n  ZISTRAL_DSH_ALIAS_993: '${{{name}}}'\n"))]),
+    };
+    let originals = files
+        .into_iter()
+        .map(|(path, text)| {
+            source(home, path, &text);
+            (home.join(path), text.into_bytes())
+        })
+        .collect();
+    (api, originals)
+}
+
+fn imported_command(
+    home: &std::path::Path,
+    path: &std::path::Path,
+    name: &str,
+    key: &str,
+) -> std::process::Command {
+    let mut c = std::process::Command::new(
+        std::env::var_os("ZISTRAL_TEST_BINARY").unwrap_or_else(|| env!("CARGO_BIN_EXE_zi").into()),
+    );
+    for (k, _) in std::env::vars() {
+        if k.to_uppercase().starts_with("ZI_")
+            || matches!(
+                k.to_uppercase().as_str(),
+                "OPENAI_API_KEY" | "ANTHROPIC_API_KEY" | "HTTP_PROXY" | "HTTPS_PROXY" | "ALL_PROXY"
+            )
+        {
+            c.env_remove(k);
+        }
+    }
+    if name != "OPENAI_API_KEY" {
+        c.env("OPENAI_API_KEY", "UNRELATED_OPENAI_993");
+    }
+    c.current_dir(home)
+        .env("HOME", home)
+        .env("USERPROFILE", home)
+        .env("NO_PROXY", "*")
+        .env(name, key)
+        .args(["--config", path.to_str().unwrap(), "--timeout", "3"])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    c
+}
+
+#[test]
+fn imported_environment_key_is_a_reference_not_a_plaintext_snapshot() {
+    use std::{
+        io::{BufRead, BufReader},
+        net::TcpListener,
+    };
+    for case in 0..7 {
+        let home = tempfile::tempdir().unwrap();
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        l.set_nonblocking(true).unwrap();
+        let url = format!("http://{}/v1", l.local_addr().unwrap());
+        let name = if case == 2 {
+            "OPENAI_API_KEY"
+        } else {
+            "ZISTRAL_IMPORTED_REF_993"
+        };
+        let (api, originals) = environment_import_fixture(home.path(), case, &url, name);
+        let path = home.path().join("zi/config.toml");
+        source(
+            home.path(),
+            "zi/config.toml",
+            "model='root-model'\nbase_url='http://localhost:1/v1'\napi_key='ROOT_EXISTING_993'\n[profiles.kept]\nmodel='keep-model'\napi_key='OTHER_EXISTING_993'\n",
+        );
+        let output = configure_outcome_env(
+            &path,
+            &[("Configuration source", "1")],
+            Some(home.path()),
+            Some("work"),
+            "Saved ",
+            true,
+            &[
+                (name, "IMPORTED_FIRST_SECRET_993"),
+                ("ZISTRAL_DSH_ALIAS_993", ""),
+            ],
+        );
+        assert!(
+            !output.contains("IMPORTED_FIRST_SECRET_993")
+                && !output.contains("AUTH_FILE_FALLBACK_993")
+                && !output.contains("NEVER_IMPORT_SESSION_993")
+        );
+        assert!(!output.contains("API Key ["));
+        let saved = std::fs::read(&path).unwrap();
+        let file: toml::Value = toml::from_str(std::str::from_utf8(&saved).unwrap()).unwrap();
+        let p = &file["profiles"]["work"];
+        assert_eq!(
+            p.get("api_key_env").and_then(toml::Value::as_str),
+            Some(name),
+            "import must retain the environment reference"
+        );
+        assert!(p.get("api_key").is_none());
+        assert_eq!(p["base_url"].as_str(), Some(url.as_str()));
+        assert!(p.get("endpoint").is_none());
+        assert_eq!(p["api"].as_str(), Some(api));
+        assert_eq!(file["active_profile"].as_str(), Some("work"));
+        assert_eq!(file["api_key"].as_str(), Some("ROOT_EXISTING_993"));
+        assert_eq!(
+            file["profiles"]["kept"]["api_key"].as_str(),
+            Some("OTHER_EXISTING_993")
+        );
+        assert!(!String::from_utf8_lossy(&saved).contains("IMPORTED_FIRST_SECRET_993"));
+        let worker = std::thread::spawn(move || {
+            for expected_key in ["IMPORTED_FIRST_SECRET_993", "IMPORTED_ROTATED_SECRET_993"] {
+                let end = Instant::now() + Duration::from_secs(8);
+                let mut s = loop {
+                    match l.accept() {
+                        Ok((s, _)) => break s,
+                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                            assert!(Instant::now() < end);
+                            std::thread::sleep(Duration::from_millis(5));
+                        }
+                        Err(e) => panic!("{e}"),
+                    }
+                };
+                s.set_nonblocking(false).unwrap();
+                s.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+                let mut reader = BufReader::new(s.try_clone().unwrap());
+                let mut header = String::new();
+                let mut size = 0;
+                loop {
+                    let mut line = String::new();
+                    assert!(reader.read_line(&mut line).unwrap() > 0);
+                    if line == "\r\n" {
+                        break;
+                    }
+                    if let Some((k, v)) = line.split_once(':') {
+                        if k.eq_ignore_ascii_case("content-length") {
+                            size = v.trim().parse::<usize>().unwrap();
+                        }
+                    }
+                    header.push_str(&line);
+                }
+                assert!(size < 131072);
+                let mut body = vec![0; size];
+                reader.read_exact(&mut body).unwrap();
+                let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+                assert_eq!(body["model"], "env-model");
+                let auth = header
+                    .lines()
+                    .filter_map(|l| l.split_once(':'))
+                    .find(|(k, _)| {
+                        k.eq_ignore_ascii_case(if api == "anthropic" {
+                            "x-api-key"
+                        } else {
+                            "authorization"
+                        })
+                    })
+                    .map(|(_, v)| v.trim());
+                let expected = if api == "anthropic" {
+                    expected_key.to_owned()
+                } else {
+                    format!("Bearer {expected_key}")
+                };
+                assert!(
+                    auth == Some(expected.as_str()),
+                    "imported request used wrong credential"
+                );
+                let reply=match api{"responses"=>serde_json::json!({"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"OK"}]}]}),"anthropic"=>serde_json::json!({"stop_reason":"end_turn","content":[{"type":"text","text":"OK"}]}),_=>serde_json::json!({"choices":[{"finish_reason":"stop","message":{"content":"OK"}}]})}.to_string();
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{reply}",
+                    reply.len()
+                );
+                s.write_all(response.as_bytes()).unwrap();
+            }
+        });
+        for key in ["IMPORTED_FIRST_SECRET_993", "IMPORTED_ROTATED_SECRET_993"] {
+            let out = imported_command(home.path(), &path, name, key)
+                .args(["--no-tools", "--no-stream", "Reply with OK."])
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            assert_eq!(out.stdout, b"OK\n");
+            assert!(out.stderr.is_empty());
+            assert_eq!(std::fs::read(&path).unwrap(), saved);
+        }
+        worker.join().unwrap();
+        let out = imported_command(home.path(), &path, name, "")
+            .args(["doctor", "--json"])
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(
+            report["configuration"]["details"]["credential"]["configured"],
+            false
+        );
+        assert_eq!(
+            report["configuration"]["details"]["credential"]["source"],
+            "none"
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), saved);
+        for (path, bytes) in originals {
+            assert_eq!(std::fs::read(path).unwrap(), bytes);
+        }
+    }
+}
+
+#[test]
+fn missing_import_environment_prompts_for_literal_key_without_claiming_a_reference() {
+    for case in [0, 3, 5] {
+        let home = tempfile::tempdir().unwrap();
+        let (_, originals) = environment_import_fixture(
+            home.path(),
+            case,
+            "http://localhost:1/v1",
+            "ZISTRAL_MISSING_IMPORTED_REF_993",
+        );
+        let path = home.path().join("zi/config.toml");
+        let output = configure_outcome_env(
+            &path,
+            &[
+                ("Configuration source", "1"),
+                ("API Key [", "SUPPLIED_FALLBACK_993"),
+            ],
+            Some(home.path()),
+            None,
+            "Saved ",
+            true,
+            &[("ZISTRAL_MISSING_IMPORTED_REF_993", "")],
+        );
+        assert!(!output.contains("SUPPLIED_FALLBACK_993"));
+        let saved: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(saved["api_key"].as_str(), Some("SUPPLIED_FALLBACK_993"));
+        assert!(saved.get("api_key_env").is_none());
+        for (path, bytes) in originals {
+            assert_eq!(std::fs::read(path).unwrap(), bytes);
+        }
+    }
+}
+
+#[test]
+fn unavailable_source_environment_keeps_existing_literal_fallback_precedence() {
+    let home = tempfile::tempdir().unwrap();
+    source(
+        home.path(),
+        ".workbuddy/models.json",
+        r#"[{"id":"env-model","url":"http://localhost:1/v1","apiKeyEnv":"ZISTRAL_MISSING_IMPORTED_REF_993","apiKey":"SOURCE_LITERAL_FALLBACK_993"}]"#,
+    );
+    let path = home.path().join("zi/config.toml");
+    let output = configure_outcome_env(
+        &path,
+        &[("Configuration source", "1")],
+        Some(home.path()),
+        None,
+        "Saved ",
+        true,
+        &[("ZISTRAL_MISSING_IMPORTED_REF_993", "")],
+    );
+    assert!(!output.contains("API Key [") && !output.contains("SOURCE_LITERAL_FALLBACK_993"));
+    let saved: toml::Value = toml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    assert_eq!(
+        saved["api_key"].as_str(),
+        Some("SOURCE_LITERAL_FALLBACK_993")
+    );
+    assert!(saved.get("api_key_env").is_none());
 }

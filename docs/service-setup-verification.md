@@ -1,6 +1,6 @@
 # Service setup: a complete workflow (unreleased)
 
-The service diagnostics, saved request budgets and remote catalogue described here
+The service diagnostics, saved request budgets, credential references and remote catalogue described here
 are on unreleased `main`. They are accumulating for a grouped release; v0.33.0
 does not include them. A development commit or passing check is not publication.
 
@@ -14,7 +14,9 @@ zi config --name work
 zi -p work models --remote
 ```
 
-The first command saves a profile. The second explicitly queries that service for
+The first command saves a profile. Available source environment-key references are
+retained as references, so their values are not copied into zi settings. See
+[imported key references](import-key-references.md) for supported forms and fallbacks. The second explicitly queries that service for
 IDs; it never selects or saves a returned ID. If necessary, edit the profile with
 `zi config --name work --manual` using the returned ID and your provider's protocol
 documentation. Catalogue availability does not prove inference access or tool
@@ -91,7 +93,7 @@ and contacts only its own loopback service. It does not modify a user's selected
 profile, key, installed executable or PATH. All fixtures are removed on exit.
 
 It tests the same journey under modern Chat, explicit legacy Chat, Responses and
-Anthropic: 32 checks and 24 controlled HTTP requests. Requests verify actual
+Anthropic: 36 checks and 24 controlled HTTP requests. Requests verify actual
 auth/protocol/budget fields; the first task body equals the preview, a real native
 count result returns on the correlated tool followup, and saved/CLI/probe caps
 remain distinct. Offline profile rename/remove and default-selection protection are checked too.
