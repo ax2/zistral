@@ -89,7 +89,14 @@ preservation. Its short-lived `installer-check-SHA` artifacts are CI candidates,
 GitHub Release. Require that exact-SHA workflow to pass when it is present, alongside
 normal CI. Each installed Windows executable also runs the offline pre-sharing workflow
 check. Release runs the same check against the native Linux/macOS installations.
-The check covers structural reports, reusable optional-field masking, pipe/file request
+The installed executable also runs the [service-setup delivery check](service-setup-verification.md)
+against a synthetic loopback server: profile selection, saved budgets, catalogue discovery,
+versioned diagnostics/probe, a native-tool followup, explicit streaming and failed-file
+preservation in all three protocols (plus legacy Chat). This is not a real provider
+permission/quality test; it never reads real keys or user settings. Normal three-platform
+CI runs the same delivery check before release.
+
+The pre-sharing check covers structural reports, reusable optional-field masking, pipe/file request
 preview, no model connection and preservation of existing files on failure. It uses
 synthetic data and isolated configuration, with Python only on the test host; installed
 zi itself still requires no Python. It does not replace full Rust tests or real model

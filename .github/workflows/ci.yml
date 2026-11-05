@@ -38,6 +38,7 @@ jobs:
           binary = 'target/debug/zi' + ('.exe' if os.name == 'nt' else '')
           subprocess.run([sys.executable, 'scripts/test_pre_sharing_delivery.py', '--binary', binary], check=True)
           subprocess.run([sys.executable, 'scripts/test_table_preparation_delivery.py', '--binary', binary], check=True)
+          subprocess.run([sys.executable, 'scripts/test_service_setup_delivery.py', '--binary', binary], check=True)
       - run: cargo clippy --locked --all-targets -- -D warnings
   msrv:
     runs-on: ubuntu-latest

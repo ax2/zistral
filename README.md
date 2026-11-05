@@ -193,6 +193,8 @@ zi doctor --json            # Unreleased: versioned JSON diagnostics for scripts
 **Unreleased main:** `zi models --remote [--json]` explicitly queries the selected service
 for model IDs without switching or saving models. See [model catalogue](docs/model-catalogue.md)
 for protocol support, pagination, limits and script exit-status handling.
+See the [complete service-setup workflow](docs/service-setup-verification.md) for
+configuration, diagnosis, request preview, task/stream/file output and delivery checks.
 
 Each profile has its own model, service, protocol, key/key reference, and optional exact endpoint.
 Legacy settings remain available as `default`; `zi use default` restores them.

@@ -38,6 +38,8 @@ function Install-Candidate {
     if($LASTEXITCODE -ne 0){throw 'Installed pre-sharing workflow failed'}
     & python (Join-Path $root 'scripts/test_table_preparation_delivery.py') --binary "$Destination\zi.exe"
     if($LASTEXITCODE -ne 0){throw 'Installed table-preparation workflow failed'}
+    & python (Join-Path $root 'scripts/test_service_setup_delivery.py') --binary "$Destination\zi.exe"
+    if($LASTEXITCODE -ne 0){throw 'Installed service-setup workflow failed'}
 }
 function Uninstall-Candidate {
     if(Test-Path -LiteralPath "$Destination\unins000.exe"){
