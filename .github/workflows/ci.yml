@@ -15,6 +15,7 @@ jobs:
           python-version: '3.12'
       - run: python scripts/test_release_notes.py
       - run: python scripts/test_release_target.py
+      - run: python scripts/test_unix_installer_rules.py
   test:
     strategy:
       fail-fast: false

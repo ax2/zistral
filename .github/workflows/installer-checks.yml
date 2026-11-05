@@ -2,9 +2,9 @@ name: Installer checks
 on:
   push:
     branches: [main]
-    paths: ['Cargo.toml', 'Cargo.lock', 'packaging/**', 'scripts/package.py', 'scripts/test-install.ps1', 'scripts/test_pre_sharing_delivery.py', 'scripts/test_table_preparation_delivery.py', 'scripts/test_service_setup_delivery.py', '.github/workflows/installer-checks.yml']
+    paths: ['Cargo.toml', 'Cargo.lock', 'packaging/**', 'scripts/package.py', 'scripts/test-install.ps1', 'scripts/test-install-unix.py', 'scripts/test_unix_installer_rules.py', 'scripts/test_pre_sharing_delivery.py', 'scripts/test_table_preparation_delivery.py', 'scripts/test_service_setup_delivery.py', '.github/workflows/installer-checks.yml']
   pull_request:
-    paths: ['Cargo.toml', 'Cargo.lock', 'packaging/**', 'scripts/package.py', 'scripts/test-install.ps1', 'scripts/test_pre_sharing_delivery.py', 'scripts/test_table_preparation_delivery.py', 'scripts/test_service_setup_delivery.py', '.github/workflows/installer-checks.yml']
+    paths: ['Cargo.toml', 'Cargo.lock', 'packaging/**', 'scripts/package.py', 'scripts/test-install.ps1', 'scripts/test-install-unix.py', 'scripts/test_unix_installer_rules.py', 'scripts/test_pre_sharing_delivery.py', 'scripts/test_table_preparation_delivery.py', 'scripts/test_service_setup_delivery.py', '.github/workflows/installer-checks.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -36,5 +36,46 @@ jobs:
           path: |
             dist/*-setup.exe
             dist/*.zip
+          if-no-files-found: error
+          retention-days: 7
+  native:
+    name: native (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - os: macos-latest
+            target: aarch64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      TARGET: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check portable archive and clean-runner guard rules
+        run: python scripts/test_unix_installer_rules.py
+      - name: Rust stable
+        run: |
+          rustup update stable --no-self-update
+          rustup default stable
+          rustup target add "$TARGET"
+      - name: Build candidate executable
+        run: cargo build --release --locked --target "$TARGET"
+      - name: Package native installer and portable archive
+        run: python scripts/package.py --target "$TARGET"
+      - name: Check portable and native install, reinstall, workflows and uninstall
+        run: python scripts/test-install-unix.py --target "$TARGET" --binary "target/$TARGET/release/zi" --dist dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-check-${{ matrix.target }}-${{ github.sha }}
+          path: |
+            dist/*.tar.gz
+            dist/*.deb
+            dist/*.pkg
           if-no-files-found: error
           retention-days: 7

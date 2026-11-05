@@ -33,6 +33,7 @@ jobs:
         run: |
           python scripts/test_release_notes.py
           python scripts/test_release_target.py
+          python scripts/test_unix_installer_rules.py
           python scripts/release_notes.py "${{ steps.version.outputs.tag }}" > /dev/null
       - name: Skip versions already released
         id: check
@@ -94,22 +95,11 @@ jobs:
       - name: Test Linux installation and uninstall
         if: runner.os == 'Linux'
         run: |
-          sudo dpkg -i dist/*.deb
-          test "$(zi --version)" = "zi ${RELEASE_TAG#v}"
-          echo hello | zi --count | python -c 'import json,sys; assert json.load(sys.stdin)["words"] == 1'
-          python scripts/test_pre_sharing_delivery.py --binary /usr/bin/zi
-          python scripts/test_table_preparation_delivery.py --binary /usr/bin/zi
-          python scripts/test_service_setup_delivery.py --binary /usr/bin/zi
-          sudo dpkg -r zistral
+          python scripts/test-install-unix.py --target "$TARGET" --binary "target/$TARGET/release/zi" --dist dist
       - name: Test macOS installation
         if: runner.os == 'macOS'
         run: |
-          sudo installer -pkg dist/*.pkg -target /
-          test "$(/usr/local/bin/zi --version)" = "zi ${RELEASE_TAG#v}"
-          echo hello | /usr/local/bin/zi --count | python -c 'import json,sys; assert json.load(sys.stdin)["words"] == 1'
-          python scripts/test_pre_sharing_delivery.py --binary /usr/local/bin/zi
-          python scripts/test_table_preparation_delivery.py --binary /usr/local/bin/zi
-          python scripts/test_service_setup_delivery.py --binary /usr/local/bin/zi
+          python scripts/test-install-unix.py --target "$TARGET" --binary "target/$TARGET/release/zi" --dist dist
       - uses: actions/upload-artifact@v4
         with:
           name: release-${{ matrix.target }}

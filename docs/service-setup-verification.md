@@ -99,10 +99,12 @@ Exact Unicode stream output, error-body redaction, no retry and
 old-file preservation are checked. The whole parsed configuration is compared
 with a reference mapping after every intended edit or no-write operation.
 
-Normal three-platform CI runs it against the built executable. Windows installer
-checks run it against each actual installed copy during install/upgrade/PATH
-ownership tests. Release verification runs it against native Linux/macOS
-installations too; adding this gate does not itself run or publish a Release.
+Normal three-platform CI runs it against the built executable. Candidate installer
+checks also run it against actual native copies on all three platforms. Windows
+retains its install/upgrade/PATH ownership scenarios; Linux/macOS verify a portable
+copy plus native install and same-version reinstall before cleanup. Release uses
+the same Unix verifier on its final packages. These checks do not themselves
+publish a Release or prove a previous-version upgrade/final-artifact result.
 The helper's zero exit and JSON check count must both be verified. A nonzero exit
 or missing/count-mismatched report is failure, even if earlier checks printed OK.
 

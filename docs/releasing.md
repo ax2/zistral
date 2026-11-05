@@ -82,13 +82,33 @@ It prints `v0.16.2` for the matching package. A rejected event/ref writes no tag
 When GITHUB_OUTPUT is set by Actions, successful validation also appends `tag=...` there.
 The preview does not create a branch, build artifacts or publish anything.
 
-Package version/dependency metadata and packaging-source changes also run the read-only `Installer checks` workflow, before a
-Release request. It builds a Windows installer/archive and exercises install twice into
-a directory containing both spaces and Chinese characters, then uninstall/PATH/config
-preservation. Its short-lived `installer-check-SHA` artifacts are CI candidates, not a
-GitHub Release. Require that exact-SHA workflow to pass when it is present, alongside
-normal CI. Each installed Windows executable also runs the offline pre-sharing workflow
-check. Release runs the same check against the native Linux/macOS installations.
+Package version/dependency metadata and packaging-source changes also run the read-only
+`Installer checks` workflow before a Release request. It builds native packages and
+portable archives for Windows x64, Linux x64 (Ubuntu 22.04 build host) and macOS arm64,
+using the same targets and Unix verifier as Release. Require all three native jobs for
+that exact SHA to pass when present, alongside normal CI. These temporary artifacts
+are CI candidates, not a GitHub Release; the package version remains unchanged during
+ordinary development and can match an already published version.
+
+Windows exercises repeated installation into a path with spaces/Chinese characters,
+legacy duplicate PATH repair, user-owned PATH preservation, uninstall and configuration
+preservation. The Unix verifier checks the entire portable archive's expected members,
+regular-file types, executable mode and binary digest before copying only its binary
+to a Unicode/space path. It tests that copy and the native executable after install
+and same-version reinstall, including pipe counts and all three delivery workflows.
+Uninstall must remove the owned executable and preserve a synthetic model configuration.
+It refuses existing executables, package receipts or model settings and is intended
+only for clean disposable runners. Python optimization is rejected before installer
+commands because verification assertions must stay enabled. No recursive user-directory
+cleanup or system package removal outside the known fresh test installation is used.
+
+The Unix check does not substitute for a real previous-version upgrade or final official
+artifact verification. Its isolated configuration is removed only after preservation
+checks; it is not a credential migration or secure-erasure test. Archive/guard rule tests
+run in normal CI without native installation. No new zi runtime dependency is added.
+Keep the Windows artifact name `installer-check-SHA`; Unix artifacts add their target
+to that name. All candidate artifacts expire after seven days. Release reuses the same
+Unix verifier against its final native/portable packages before publication.
 The installed executable also runs the [service-setup delivery check](service-setup-verification.md)
 against a synthetic loopback server: profile selection, saved budgets, catalogue discovery,
 versioned diagnostics/probe, a native-tool followup, explicit streaming and failed-file
