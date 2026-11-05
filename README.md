@@ -13,6 +13,11 @@ git diff | zi "Write a concise commit message"
 cat notes.txt | zi "Summarize in three sentences" > summary.txt
 ```
 
+**Unreleased main:** the [grouped service-setup candidate](docs/releases/service-setup-candidate.md)
+collects eight related configuration, diagnosis, request-control and credential
+improvements with exact CI/native evidence. Stable v0.33.0 downloads do not contain
+that batch; ordinary development commits do not publish a new version.
+
 ## Install and start
 
 Download a native installer from [Releases](https://github.com/ax2/zistral/releases/latest):

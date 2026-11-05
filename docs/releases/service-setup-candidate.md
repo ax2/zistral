@@ -1,205 +1,188 @@
 # Unreleased grouped candidate: model-service setup and reliability
 
-This records the current batch for review; it does not select a version or publish
-a release. The latest stable release remains
-[v0.33.0](https://github.com/ax2/zistral/releases/tag/v0.33.0).
-The verified runtime/package source is commit
-[`4e0d61a`](https://github.com/ax2/zistral/commit/4e0d61ae8202cb13c17f3ff76abf4867b77e5245).
-Development package metadata still says `0.33.0`; CI candidate packages with that
-version are not the published v0.33.0 assets. Subsequent source changes need their
-own evidence. Documentation-only followups do not turn these into final artifacts.
+This is the review of **eight related outcomes** on unreleased `main`; it does
+not select a version or publish a release. Stable downloads remain
+[v0.33.0](https://github.com/ax2/zistral/releases/tag/v0.33.0), which does not include
+this batch. Development package metadata also says `0.33.0`; a CI candidate is
+different from the published assets even when that version string is identical.
 
-## The use case
+The verified source for this review is
+[`0850ca6`](https://github.com/ax2/zistral/commit/0850ca61f47be07a330de609dbf1f984f9d05e5c).
+Its application source is unchanged from `c736fca`; the follow-up adds pinned
+published-installer verification. Later runtime, packaging or test changes need
+their own evidence. This document replaces the earlier incremental candidate
+notes; the links below refer to this exact baseline.
 
-A small pipe-native assistant should make it straightforward to configure a
-service, inspect the effective model/key settings, make a bounded explicit check,
-and run a task with predictable request preferences. The batch addresses that
-journey without adding tools, task history, model weights, a daemon or runtime
-dependencies. Existing offline data/recipe workflows remain model-independent.
+## One complete use case
 
-| User need | Delivered behavior | Contract |
+Configure a provider once, understand which model and credential will be used,
+make an explicit small service check, and run a task with predictable request
+preferences and pipe/file behavior. The batch fits zi's
+[text/data/focused-task position](../product-scope.md): no additional agent tools,
+implicit history, session memory, model weights, daemon or runtime dependency.
+Existing offline data/recipe workflows remain independent of model services.
+
+| User outcome | Delivered behavior | Boundary and details |
 | --- | --- | --- |
-| Understand which service/key will actually be used | Human doctor reports the effective profile and winning credential source; explicit probing uses one short tool-free turn | No key values, retries or task/project input in a probe; fixed 16-token request cap and at most 15 seconds |
-| Limit an individual task's requested model output | Explicit per-turn cap for Chat, Responses and Anthropic, including stream/tool followups | Protocol field chosen explicitly; no model-name guessing or fallback-field retry; a requested cap is not a total cost guarantee |
-| Reuse preferences while switching models | Save, override, temporarily ignore or clear a profile's request-budget preferences | Named-profile isolation; CLI overrides are invocation-only; incompatible effective preferences fail before task IO |
-| Diagnose from a script or pipe | `doctor --json` emits one bounded version-1 report with a meaningful exit code | Typed safe errors; default checks offline; configuration success does not establish inference access |
-| Discover IDs exposed by a configured service | Explicit `models --remote [--json]` queries supported catalogue endpoints | No task body/model auto-selection/config write; bounded complete-result output; catalogue membership does not prove call permissions or tool support |
-| Maintain saved configurations offline | Rename/remove named profiles; change an existing profile's key reference; explicitly remove a saved literal | Protect root/saved-active removal; preserve unrelated settings/default selection; key values are never resolved/copied by metadata edits |
-| Import reusable credential references | Available supported Codex/WorkBuddy/CodeBuddy/dsh environment-key sources retain their variable name | Selected effective source only; literal/missing-key fallbacks remain explicit; no source-file edits or account/session-token import |
-| Save from multiple terminals safely | Stale wizards cannot restore removed keys or overwrite newer configuration | Exact snapshot checks plus a same-path local OS lock; busy/conflict saves fail explicitly without merging; see [scope](../configuration-saves.md) |
+| Trust setup and diagnosis | Show the winning key source; validate defaults before display and escape control-bearing human metadata | Invalid defaults are hidden and require a valid replacement. An explicit probe is one non-streaming, tool-free turn, fixed 16-token requested cap and at most 15 seconds. [Workflow](../service-setup-verification.md) |
+| Limit a task's requested model output | Explicit per-turn cap across Chat, Responses and Anthropic, including streams, tool followups and retries | Legacy Chat field is explicit; no field-name guessing/retry. This is not a total cost guarantee. [Budgets](../output-budgets.md) |
+| Reuse preferences while switching profiles | Save, override, temporarily ignore or clear profile-local request budgets | CLI overrides are invocation-only. Clearing works without a model or supported generation protocol; setting/running remains validated. [Budgets](../output-budgets.md) |
+| Diagnose in scripts | `doctor --json` returns one bounded version-1 report and meaningful exit code | Offline by default; explicit probe only. Safe typed errors, no keys or raw provider bodies. [JSON contract](../doctor-json.md) |
+| Discover a service's model IDs | Explicit `models --remote [--json]` | Bounded same-origin catalogue GETs; no task body, selection or config write. Plain `models` and `/models` stay offline. [Catalogue](../model-catalogue.md) |
+| Maintain saved profiles and keys offline | Rename/remove named profiles, change a key-variable reference, explicitly clear a saved literal | Protect root/saved-active removal; preserve unrelated settings/default selection. Key metadata edits do not read/copy variable values. [Profiles](../profile-maintenance.md), [keys](../key-settings.md) |
+| Import reusable credential references | Supported Codex/WorkBuddy/CodeBuddy/dsh imports retain an available selected variable name | Effective zi environment keys avoid redundant entry without replacing the source's literal/reference. No account/session-token import, source-file edits or automatic migration. [Import rules](../import-key-references.md) |
+| Save safely from multiple terminals | Stale wizards cannot overwrite newer settings or restore a removed key | Exact snapshots plus a local OS lock; busy/conflict saves fail without merging. Restart to reload. [Save conflicts and scope](../configuration-saves.md) |
 
-Manual edits now use the same effective-key selection as requests, so Enter can
-retain an available environment credential on official service hosts. `-` in the
-wizard clears only the saved literal. This correction belongs to the existing
-credential-reference outcome, not a separately counted release feature. Protocol
-variants, tests, packaging work and documentation likewise are supporting evidence.
+Prompt/display corrections, protocol variants, regressions, packaging and this
+documentation support those eight outcomes; they are not extra counted features.
 
-Import setup also respects zi's existing effective environment key, avoiding
-redundant key entry while retaining the source's literal/reference. This shares
-the manual setup/request selection rule and safe notice; it belongs to the
-credential-reference outcome rather than another counted feature. Its follow-up
-requires its own exact-source checks, as with the concurrency follow-up below.
+## Configure, inspect, run
 
-Explicit budget clearing also works when a profile has no model or has an
-obsolete generation protocol. It removes only the two preferences; setting new
-preferences and running model tasks retain their normal validation. An actual
-v0.33.0 executable accepted a ready profile again after root and inactive-profile
-budget fields were cleared in an isolated downgrade check.
-
-## One explicit setup-to-task workflow
-
-Create or import a named profile in a real terminal:
+Use a real terminal and choose a detected source or manual provider settings:
 
 ```sh
 zi config --name work
-```
-
-For an existing profile, prepare a key reference and optionally remove its saved
-literal fallback. The variable can be supplied separately by the environment that
-launches zi; the following edit neither reads its value nor changes that environment.
-
-```sh
-zi config --name work --api-key-env WORK_API_KEY --clear-saved-key
 zi config --name work --max-output-tokens 512
 zi -p work doctor --json
 ```
 
-The budget command above uses the selected protocol's normal field. Only for a
-Chat service documented to need the legacy field, explicitly add
-`--chat-token-limit-field max_tokens` to that config edit. A later invocation can
-use `--no-profile-budget` without changing saved preferences. Effective key order
-remains `ZI_API_KEY` > selected variable (default `OPENAI_API_KEY`) > saved literal.
+Setup saves a profile; it does not test model access. Imported environment
+references require their variable in the shell that later launches zi. Effective
+key order is `ZI_API_KEY` > selected variable (default `OPENAI_API_KEY`) > saved
+literal. Ordinary Chat uses `max_completion_tokens`; only for a documented legacy
+service add `--chat-token-limit-field max_tokens` to the budget edit.
+`--no-profile-budget` temporarily ignores saved preferences without changing them.
 
-The following commands explicitly contact the configured provider; run them only
-when that is intended. The catalogue uses GET, and the probe allows one small model
-turn. Neither command supplies a document/project as input.
+These two commands explicitly contact the configured provider, without supplying
+a document/project as input:
 
 ```sh
 zi -p work models --remote --json
 zi -p work doctor --json --probe
 ```
 
-A provider may support generation but not expose a compatible catalogue. An HTTP
-404 is not a reason to delete the saved model or guess another endpoint. Inspect
-saved profiles with offline `zi models`; configure a documented model ID explicitly.
+A catalogue can be absent even when generation works. Membership does not prove
+call permission or tool support; a tiny probe does not establish general quality.
+Do not delete a saved model or guess an endpoint because a catalogue returned 404.
 
-Preview a real first task request offline, then use the ordinary pipeline/file
-delivery contract for execution:
+Preview the first request offline, then execute with explicit input/output:
 
 ```sh
 zi -p work --preview --no-stream -i notes.txt 'Summarize in three sentences'
 cat notes.txt | zi -p work --no-stream 'Summarize in three sentences'
-zi -p work --no-stream -i notes.txt -o summary.txt 'Summarize in three sentences'
+zi -p work --no-stream -i notes.txt -o summary.txt 'Summarize briefly'
+cat notes.txt | zi -p work --stream --max-output-tokens 256 'Summarize briefly'
 ```
 
-The preview contains the supplied input and request body, without authentication
-headers. The second command writes a complete validated answer to stdout. The file
-form refuses an existing target unless `--force` is explicitly added, and replaces
-it only after success. Ordinary shell `>` can truncate its target before zi starts;
-it does not provide that preservation guarantee. Explicit `--stream` can leave
-partial stdout on failure and cannot combine with `-o`.
+Preview includes the supplied input/body, without credential headers. Non-streaming
+stdout is emitted after completion validation. `-o` refuses an existing file unless
+`--force` is explicit and replaces it only after success. Shell `>` has ordinary
+shell truncation behavior. Explicit streaming may leave partial stdout on error
+and cannot combine with `-o`.
 
-Metadata maintenance remains explicit:
+Optional maintenance remains offline and explicit:
 
 ```sh
+zi config --name work --api-key-env WORK_API_KEY --clear-saved-key
 zi config --rename work personal
 zi config --name personal --clear-output-budget
-zi -p personal doctor --json
 ```
 
-An active rename follows the saved selection; external `-p work`/`ZI_PROFILE=work`
-references are not rewritten. Removing a profile requires an existing inactive
-named target. Root `default` and the saved active profile remain protected; select
-another existing usable profile first. Clearing a saved key does not revoke it,
-unset an environment variable or remove copies from other profiles/agents.
+The first edit stores only a name and removes the literal fallback. Set
+`WORK_API_KEY` separately in the launching environment before the next model task;
+the edit is allowed while the variable is absent. Clearing a saved key neither
+revokes it nor unsets variables or removes copies elsewhere. Rename follows a
+saved active selection, but external `-p work`/`ZI_PROFILE=work` references need an
+explicit update. Remove only an existing inactive named profile.
 
-## Verified evidence for the runtime source
+A configuration save leaves a reusable empty sibling `.lock` file, containing no
+key, snapshot, PID or expiry. Process exit releases its OS lock. This coordinates
+cooperating writers on the same local path; older tools/editors ignoring the lock,
+path aliases and distributed filesystems are outside the universal guarantee.
 
-- [Exact five-job CI](https://github.com/ax2/zistral/actions/runs/41966889467):
-  Windows390, macOS393 and Linux394 Rust tests; 22 suites per platform, zero ignored.
-  Each platform also passed 8 pre-sharing, 7 table-preparation and 40 service-setup
-  workflow checks. Rust 1.85 and all 18 release/archive rule tests passed.
-- [Exact three-platform candidate installation checks](https://github.com/ax2/zistral/actions/runs/41966889460):
-  Windows x64 exercised five actual installation scenarios, each with all 55 workflow
-  checks. Linux x64 and macOS arm64 each checked a portable copy plus native install
-  and same-version reinstall, including the 55 checks on each copy and configuration
-  preservation through uninstall. The Unix checks ran on disposable matching hosts.
-- Local full validation: 390 Rust tests / 22 suites / zero ignored, formatting,
-  Clippy with warnings denied and optimized build. The actual optimized executable
-  passed eight budget tests, six key-maintenance tests and 13 terminal/configuration tests. The service
-  workflow uses the same 24 synthetic loopback requests; its new reference must
-  authenticate correctly while the old variable remains present with a wrong value.
+## Exact validation baseline
 
-These are controlled integration/installation results, not a model-quality score
-or real-account access result. The Windows local executable is 5,782,016 bytes;
-its PE import inspection showed Windows system DLLs with the existing static-CRT
-configuration. This is a local development-build observation, not a promised final
-download size, proof for every Windows version or a new packaging feature.
+[Five-job CI](https://github.com/ax2/zistral/actions/runs/41983234535) passed for
+`0850ca6`, including formatting, Clippy with warnings denied and Rust 1.85:
 
-## Known service observations and compatibility
+| Platform | Rust tests | Suites | Ignored | Built-executable workflow checks |
+| --- | ---: | ---: | ---: | --- |
+| Windows | 406 | 23 | 0 | 8 pre-sharing + 7 table + 40 service setup |
+| macOS | 409 | 23 | 0 | 8 + 7 + 40 |
+| Linux | 410 | 23 | 0 | 8 + 7 + 40 |
 
-The existing configured real service returned HTTP403 for a fixed16 probe, and one
-explicit catalogue query returned HTTP404. Those recorded checks left configuration
-unchanged; they did not prove inference access, identify whether a proxy/provider
-originated the response or establish general model quality. No repeated credential
-guessing, proxy bypass or automatic endpoint/field fallback is part of this batch.
+The metadata job passed 27 Python rules: release notes 4, release targeting 5,
+Unix archives/guards 10 and pinned-baseline preparation 8. Python is a test-host
+dependency, not an installed zi requirement.
 
-Imported references require the selected variable in later launching environments;
-already running tasks retain their settings snapshot. Only the chosen available
-credential source is retained, not an entire upstream fallback chain. Existing
-saved literal profiles are not automatically migrated. Metadata edits need valid
-typed TOML and reserialize formatting/comments using the existing atomic writer.
+[Three native installer jobs](https://github.com/ax2/zistral/actions/runs/41983234537)
+also passed for the same SHA:
 
-Saved budget fields are new to this batch. Before downgrading to v0.33.0, clear
-them from **every** affected profile, including root and inactive profiles, using
-this version; an older strict configuration parser can reject them even when a
-different profile is selected. CLI options/JSON commands introduced here are also
-unavailable in v0.33.0. Existing key-reference fields are not new schema fields.
+- Windows x64 installed the checksum-pinned official v0.33.0 package first, then
+  exercised five candidate installations with all 55 workflow checks each, including
+  Unicode/space paths, duplicate PATH repair and preservation of user-owned entries.
+- Linux x64 and macOS arm64 each checked a portable candidate copy, installed the
+  pinned official package, then installed/reinstalled the native candidate with
+  all 55 checks on each candidate copy.
+- All three required the actual official executable's digest/version and the
+  candidate's installed bytes to match their expected sources. Both executables
+  loaded the stable-compatible multi-profile fixture; its complete bytes survived
+  replacement/reinstallation/uninstall. Cleanup refused unexpected state.
 
-## Additional configuration-save follow-up (unreleased)
+The reviewed public package/executable pins are in
+[`stable-upgrade-baseline.json`](../../scripts/stable-upgrade-baseline.json).
+The baseline is selected explicitly, with no mutable latest-release lookup.
+Reports state **`package_version_changed: false`** because both packages currently
+say 0.33.0. This proves published-code to candidate-code replacement, not a
+package-manager transition across different version numbers or final artifacts.
 
-The conflict-protection row is one additional related outcome; snapshot checks,
-locking, crash recovery and regressions are parts of that outcome. The historical
-verification baseline above predates it and is not evidence for this follow-up.
-Its exact source must pass CI and native installation checks before selection.
-It adds no schema field or runtime dependency. The installed release remains
-v0.33.0.
+Local application validation at `c736fca` passed 406 Rust tests, formatting,
+Clippy and an optimized build. The actual optimized executable passed 18 terminal,
+4 configuration-transaction and 16 general-feature tests, plus the same 55
+workflow checks. The application/build inputs are unchanged at `0850ca6`; its
+own exact CI/native results above additionally validate the delivery follow-up.
 
-## Published-baseline replacement follow-up (unreleased)
+The service helper makes 24 synthetic loopback requests across modern Chat,
+explicit legacy Chat, Responses and Anthropic. It checks actual auth/budget fields,
+preview/request equality, native-tool followups, stream output and failed-file
+preservation. Real-terminal tests additionally exercise effective-key imports,
+override removal and stale-wizard conflicts. These are controlled checks, not
+real-account access or model-quality scores.
 
-Candidate installer checks now start with the official v0.33.0 native package,
-pinned by filename, size, SHA256 and matching portable executable digest in
-`scripts/stable-upgrade-baseline.json`. They refuse existing installation/config
-state, load one stable-compatible multi-profile fixture in both old and candidate
-executables, and compare its exact bytes through replacement/reinstall/uninstall.
-This is additional delivery evidence for the same eight outcomes, not a feature.
-Its source needs its own passing native jobs; the historical baseline above does
-not establish this new check's result.
+## Compatibility and remaining publication work
 
-Candidate metadata remains 0.33.0: the report distinguishes a published-to-candidate
-binary replacement from a genuinely different package version. Final-version
-upgrade checks remain required after a version is selected. Only the pinned
-public installer is downloaded; no model service or user's settings are involved.
+Recorded account checks earlier in development returned HTTP403 for a fixed-16
+probe and HTTP404 for one catalogue query (the latter on 2026-11-05). Configuration
+was unchanged. Those observations do not locate the responsible provider/proxy,
+prove current inference access or justify credential guessing/proxy bypass/retries.
+No additional real-provider request was made for this review.
 
-## Remaining publication work
+Budget fields are new to this batch. Before downgrading, clear them from **every**
+affected profile, including root and inactive/unconfigured profiles, using this
+candidate; v0.33.0's strict parser can reject the whole document otherwise:
 
-Keep the current package version until the grouped batch is selected for release.
-Normal release reviews occur at most weekly; this preparation is not a publication
-trigger or a promise to release on a particular date. No recurring task is created.
+```sh
+zi config --name default --clear-output-budget
+zi config --name personal --clear-output-budget
+```
+
+Repeat for every other affected named profile. Clearing requires valid typed TOML,
+not a model/protocol; other config edits still reserialize formatting/comments.
+Existing key-reference fields are not new schema fields. An older zi does not
+honor the new coordination lock. Runtime settings remain snapshots per task.
+
+Keep package metadata unchanged until a grouped release is selected. Normal
+reviews are at most weekly; completion of this review or a commit is not a
+publication trigger. This document creates no recurring automation.
 
 At selection, follow the [release checklist](../releasing.md): choose the exact
-source/version, remove unreleased wording as appropriate, add only this batch to
-the new release notes, run its own complete CI and final native package checks,
-and verify the official downloadable assets/digests plus installed behavior.
-Published assets/tags remain immutable. Current passing candidate results do not
-replace those final-artifact checks.
+source/version, update unreleased labels/stable links, add only this batch to the
+new notes, pass its own complete CI,
+verify genuine stable-to-new-version native upgrades and official downloadable
+assets/digests/installed behavior. Passing same-version candidates do not replace
+those gates. Published assets and tags remain immutable.
 
-After actual publication, write one illustrated Feishu article under
-`文章/zistral`, with official-version screenshots, runnable examples, principal
-changes and any needed configuration/data-flow diagram; a labelled actual recording
-is preferred. No development-checkpoint article is required for this document.
-
-Details: [service workflow](../service-setup-verification.md),
-[budgets](../output-budgets.md), [diagnostic JSON](../doctor-json.md),
-[catalogue](../model-catalogue.md), [profile maintenance](../profile-maintenance.md),
-[key metadata](../key-settings.md), [imported references](../import-key-references.md).
+After actual publication, write one illustrated Feishu article in `文章/zistral`
+using verified official-version screenshots, runnable examples, principal changes
+and any needed configuration/data-flow diagram; a labelled actual recording is
+preferred. There is no development-checkpoint article for this review.

@@ -38,15 +38,16 @@ The [v0.33.0 grouped table milestone](releases/v0.33.0-candidate.md) records the
 three outcomes and candidate-specific delivery evidence under the same gates.
 
 The [unreleased service-setup batch](releases/service-setup-candidate.md) records
-its seven related outcomes, one explicit workflow, exact runtime/native checks,
+its eight related outcomes, one explicit workflow, exact runtime/native checks,
 known real-service observations and remaining publication work. It does not select
 a new version or describe CI candidates as a published release.
 
 ## Validate and publish the chosen batch
 
 1. Update the package/lock version and add one changelog section for this release. Keep
-   historical sections unchanged. Update the manual-dispatch default and installation examples.
-2. Run the relevant local checks, the full Rust release checks and the two Python suites:
+   historical sections unchanged. Update the manual-dispatch default, installation examples
+   and unreleased feature labels/stable-version links.
+2. Run the relevant local checks, the full Rust release checks and the Python metadata/installer rules:
 
    ```sh
    cargo fmt --check
@@ -55,6 +56,8 @@ a new version or describe CI candidates as a published release.
    cargo build --release --locked
    python scripts/test_release_notes.py
    python scripts/test_release_target.py
+   python scripts/test_unix_installer_rules.py
+   python scripts/test_upgrade_baseline.py
    ```
 
 3. Commit/push to `main` and inspect CI for that exact commit. Normal CI includes three
@@ -108,9 +111,18 @@ only for clean disposable runners. Python optimization is rejected before instal
 commands because verification assertions must stay enabled. No recursive user-directory
 cleanup or system package removal outside the known fresh test installation is used.
 
-The Unix check does not substitute for a real previous-version upgrade or final official
-artifact verification. Its isolated configuration is removed only after preservation
-checks; it is not a credential migration or secure-erasure test. Archive/guard rule tests
+Candidate checks additionally install the checksum-pinned official v0.33.0 package
+before the candidate, verifying both executable identities and byte-for-byte legacy
+configuration preservation. Download preparation uses `gh` only on the disposable
+test host. The [baseline manifest](../scripts/stable-upgrade-baseline.json) fixes
+the public installer size/digest and matching executable digest; updating it requires
+review of verified official assets, rather than following a mutable latest release.
+
+Candidate metadata currently still says 0.33.0, so reports explicitly distinguish
+published-code replacement from a different package version. Before publishing a
+selected version, require actual stable-to-new-version native upgrades and final
+official artifact verification; same-version replacements do not establish them.
+The isolated configuration is removed only after preservation checks; it is not a credential migration or secure-erasure test. Archive/guard rule tests
 run in normal CI without native installation. No new zi runtime dependency is added.
 Keep the Windows artifact name `installer-check-SHA`; Unix artifacts add their target
 to that name. All candidate artifacts expire after seven days. Release reuses the same

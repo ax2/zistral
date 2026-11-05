@@ -10,6 +10,11 @@ cat notes.txt | zi "总结为三句话" > summary.txt
 git diff | zi "生成一句简洁的提交说明"
 ```
 
+**开发中，尚未发版：** `main` 已合并 8 项相关改进，涵盖配置校验、请求上限与按模型保存、
+结构化诊断、远端模型目录、凭据维护与引用导入，以及多终端保存冲突保护。
+[整批评审说明](docs/releases/service-setup-candidate.md)列出完整场景、兼容性和三平台验证。
+稳定下载仍为 v0.33.0，不包含这批改进；日常提交不会触发发版。
+
 ## 安装与配置
 
 从 [Releases](https://github.com/ax2/zistral/releases/latest) 下载原生安装包：
