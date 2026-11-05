@@ -52,6 +52,16 @@ official service checks can require a key, while custom services may allow none.
 This is not a live watch of another agent's auth file or secret store. Re-import
 explicitly to pick up changes in a literal source credential or provider config.
 
+Manual edits (`zi config --name work --manual`) use the same effective-key
+precedence as requests. Press Enter at the hidden key prompt to keep an available
+environment credential without copying its value into `api_key`. The wizard names
+the effective variable safely and explains that it overrides a saved literal.
+`-` removes only the saved literal; it does not unset a variable or delete its
+reference. Official OpenAI/Anthropic hosts require an effective key; a missing or
+blank selected variable can still be filled with a hidden saved fallback. Custom
+services retain optional-key setup. An unrelated `OPENAI_API_KEY` does not fill a
+profile that explicitly selects a different variable.
+
 Normal precedence remains `ZI_API_KEY` > the profile's named variable (default
 `OPENAI_API_KEY`) > a saved literal. An intentional global override still wins.
 Doctor quotes variable names safely and never prints values. References remain
@@ -73,3 +83,8 @@ The native installed-service workflow also verifies source discovery under all
 four protocol variants: 36 checks and the same 24 loopback requests. Its source
 files contain only declared variable names. Python remains a test-host dependency;
 installed zi is still one executable with no additional runtime.
+
+Manual-edit terminal regressions also cover named/default/global environment
+sources, both official hosts, retained/cleared saved fallbacks and missing-key
+retry versus optional local setup. Offline doctor after each saved edit confirms
+the same winning source without a network request or a configuration write.

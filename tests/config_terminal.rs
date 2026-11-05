@@ -666,3 +666,166 @@ fn unavailable_source_environment_keeps_existing_literal_fallback_precedence() {
     );
     assert!(saved.get("api_key_env").is_none());
 }
+
+#[test]
+fn manual_setup_keeps_available_environment_credentials_without_saving_values() {
+    for (host, reference, environment, saved_key, answer) in [
+        (
+            "api.openai.com",
+            Some("ZISTRAL_MANUAL_REF_993"),
+            "ZISTRAL_MANUAL_REF_993",
+            None,
+            "",
+        ),
+        ("api.openai.com", None, "OPENAI_API_KEY", None, ""),
+        (
+            "api.openai.com",
+            Some("ZISTRAL_MANUAL_REF_993"),
+            "ZI_API_KEY",
+            None,
+            "",
+        ),
+        (
+            "api.anthropic.com",
+            Some("ZISTRAL_MANUAL_REF_993"),
+            "ZISTRAL_MANUAL_REF_993",
+            None,
+            "",
+        ),
+        (
+            "api.openai.com",
+            Some("ZISTRAL_MANUAL_REF_993"),
+            "ZISTRAL_MANUAL_REF_993",
+            Some("SAVED_FALLBACK_993"),
+            "",
+        ),
+        (
+            "api.openai.com",
+            Some("ZISTRAL_MANUAL_REF_993"),
+            "ZISTRAL_MANUAL_REF_993",
+            Some("SAVED_FALLBACK_993"),
+            "-",
+        ),
+    ] {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("config.toml");
+        let api = if host == "api.anthropic.com" {
+            "anthropic"
+        } else {
+            "chat"
+        };
+        let mut document = format!(
+            "model='root'\napi_key='ROOT_KEEP_993'\nactive_profile='work'\n[profiles.work]\nmodel='before'\nbase_url='https://{host}/v1'\napi='{api}'\nmax_output_tokens=128\n[profiles.other]\nmodel='other'\napi_key='OTHER_KEEP_993'\n"
+        );
+        // Add fields within the selected profile, never to the unrelated table.
+        let mut fields = String::new();
+        if let Some(reference) = reference {
+            fields.push_str(&format!("api_key_env='{reference}'\n"));
+        }
+        if let Some(key) = saved_key {
+            fields.push_str(&format!("api_key='{key}'\n"));
+        }
+        document = document.replace("[profiles.other]", &format!("{fields}[profiles.other]"));
+        std::fs::write(&path, &document).unwrap();
+        let mut expected: toml::Value = toml::from_str(&document).unwrap();
+        expected["profiles"]["work"]["model"] = toml::Value::String("after".into());
+        if answer == "-" {
+            expected["profiles"]["work"]
+                .as_table_mut()
+                .unwrap()
+                .remove("api_key");
+        }
+        let transcript = configure_outcome_env(
+            &path,
+            &[
+                ("Service URL", ""),
+                ("Model name", "after"),
+                ("API protocol", ""),
+                ("API Key", answer),
+            ],
+            None,
+            Some("work"),
+            "Saved ",
+            true,
+            &[(environment, "ENV_VALUE_NOT_SAVED_993")],
+        );
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(toml::from_str::<toml::Value>(&raw).unwrap(), expected);
+        for secret in [
+            "ENV_VALUE_NOT_SAVED_993",
+            "SAVED_FALLBACK_993",
+            "ROOT_KEEP_993",
+            "OTHER_KEEP_993",
+        ] {
+            assert!(!transcript.contains(secret));
+        }
+        assert!(!raw.contains("ENV_VALUE_NOT_SAVED_993"));
+        assert!(!transcript.contains("API Key is required"));
+        let out = imported_command(home.path(), &path, environment, "ENV_VALUE_NOT_SAVED_993")
+            .args(["-p", "work", "doctor", "--json"])
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        let credential = &report["configuration"]["details"]["credential"];
+        assert_eq!(credential["configured"], true);
+        assert_eq!(credential["source"], "environment");
+        assert_eq!(credential["environment_variable"], environment);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), raw);
+        assert!(!String::from_utf8_lossy(&out.stdout).contains("ENV_VALUE_NOT_SAVED_993"));
+    }
+}
+
+#[test]
+fn manual_official_setup_requires_effective_key_but_local_services_remain_optional() {
+    for (host, api, key_required) in [
+        ("api.openai.com", "chat", true),
+        ("api.anthropic.com", "anthropic", true),
+        ("localhost:11434", "chat", false),
+    ] {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("config.toml");
+        let scheme = if key_required { "https" } else { "http" };
+        std::fs::write(&path, format!("model='before'\nbase_url='{scheme}://{host}/v1'\napi='{api}'\napi_key_env='ZISTRAL_MANUAL_REF_993'\n")).unwrap();
+        let mut answers = vec![
+            ("Service URL", ""),
+            ("Model name", ""),
+            ("API protocol", ""),
+            ("API Key", ""),
+        ];
+        if key_required {
+            answers.push((
+                "API Key is required for this service.",
+                "FALLBACK_ENTERED_993",
+            ));
+        }
+        let transcript = configure_outcome_env(
+            &path,
+            &answers,
+            None,
+            None,
+            "Saved ",
+            true,
+            &[
+                ("ZISTRAL_MANUAL_REF_993", " "),
+                ("OPENAI_API_KEY", "UNRELATED_OPENAI_993"),
+            ],
+        );
+        let saved: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(
+            saved.get("api_key").and_then(toml::Value::as_str),
+            if key_required {
+                Some("FALLBACK_ENTERED_993")
+            } else {
+                None
+            }
+        );
+        assert_eq!(
+            saved["api_key_env"].as_str(),
+            Some("ZISTRAL_MANUAL_REF_993")
+        );
+        for secret in ["FALLBACK_ENTERED_993", "UNRELATED_OPENAI_993"] {
+            assert!(!transcript.contains(secret));
+        }
+    }
+}

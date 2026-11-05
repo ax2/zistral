@@ -256,6 +256,20 @@ fn nonempty(value: Option<String>) -> Option<String> {
     value.filter(|s| !s.trim().is_empty())
 }
 
+// Share the effective key decision with setup: a usable environment source
+// satisfies required-key services without being copied into the saved literal.
+fn resolve_api_key(saved: Option<&str>, key_env: &str) -> (Option<String>, ApiKeySource) {
+    if let Some(key) = nonempty(std::env::var("ZI_API_KEY").ok()) {
+        (Some(key), ApiKeySource::Environment("ZI_API_KEY".into()))
+    } else if let Some(key) = nonempty(std::env::var(key_env).ok()) {
+        (Some(key), ApiKeySource::Environment(key_env.into()))
+    } else if let Some(key) = saved.filter(|key| !key.trim().is_empty()) {
+        (Some(key.into()), ApiKeySource::SavedProfile)
+    } else {
+        (None, ApiKeySource::NotConfigured)
+    }
+}
+
 fn read_config(path: &Path, allow_missing: bool) -> Result<FileConfig> {
     match std::fs::read_to_string(path) {
         // Parser diagnostics include source lines, which may contain an API key.
@@ -554,7 +568,12 @@ fn collect_config(
             Ok(())
         },
     )?;
-    let openai = validate_url(&base_url)?.host_str() == Some("api.openai.com");
+    let service = validate_url(&base_url)?;
+    let openai = service.host_str() == Some("api.openai.com");
+    let key_required = matches!(
+        service.host_str(),
+        Some("api.openai.com" | "api.anthropic.com")
+    );
     let api = ask_value(
         "API protocol (chat/responses/anthropic)",
         cli.api
@@ -570,9 +589,21 @@ fn collect_config(
             Ok(())
         },
     )?;
+    let key_env = file.api_key_env.as_deref().unwrap_or("OPENAI_API_KEY");
+    let (_, source) = resolve_api_key(file.api_key.as_deref(), key_env);
+    let environment = matches!(source, ApiKeySource::Environment(_));
+    if let ApiKeySource::Environment(name) = source {
+        writeln!(
+            output,
+            "Environment credential {} takes precedence over a saved key; its value is not saved.",
+            serde_json::to_string(&name)?
+        )?;
+    }
     loop {
-        let label = if nonempty(file.api_key.clone()).is_some() {
-            "API Key [hidden; Enter keeps saved key, '-' clears]"
+        let label = if environment {
+            "API Key [hidden; Enter uses environment, '-' clears saved key]"
+        } else if nonempty(file.api_key.clone()).is_some() {
+            "API Key [hidden; Enter keeps saved key, '-' clears saved key]"
         } else {
             "API Key [hidden; optional for local services]"
         };
@@ -582,7 +613,7 @@ fn collect_config(
             "-" => None,
             key => Some(key.to_owned()),
         };
-        if openai && key.is_none() {
+        if key_required && resolve_api_key(key.as_deref(), key_env).0.is_none() {
             writeln!(output, "API Key is required for this service.")?;
             continue;
         }
@@ -835,16 +866,7 @@ impl Settings {
         let key_env = file.api_key_env.unwrap_or_else(|| "OPENAI_API_KEY".into());
         // Keep provenance beside the value selected by the actual request path.
         // Do not infer it later from a second config/environment read.
-        let (api_key, api_key_source) =
-            if let Some(key) = nonempty(std::env::var("ZI_API_KEY").ok()) {
-                (Some(key), ApiKeySource::Environment("ZI_API_KEY".into()))
-            } else if let Some(key) = nonempty(std::env::var(&key_env).ok()) {
-                (Some(key), ApiKeySource::Environment(key_env.clone()))
-            } else if let Some(key) = nonempty(file.api_key) {
-                (Some(key), ApiKeySource::SavedProfile)
-            } else {
-                (None, ApiKeySource::NotConfigured)
-            };
+        let (api_key, api_key_source) = resolve_api_key(file.api_key.as_deref(), &key_env);
         if matches!(url.host_str(), Some("api.openai.com" | "api.anthropic.com"))
             && api_key.is_none()
             && !cli.preview
