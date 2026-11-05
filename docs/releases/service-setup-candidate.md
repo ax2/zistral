@@ -34,6 +34,12 @@ wizard clears only the saved literal. This correction belongs to the existing
 credential-reference outcome, not a separately counted release feature. Protocol
 variants, tests, packaging work and documentation likewise are supporting evidence.
 
+Import setup also respects zi's existing effective environment key, avoiding
+redundant key entry while retaining the source's literal/reference. This shares
+the manual setup/request selection rule and safe notice; it belongs to the
+credential-reference outcome rather than another counted feature. Its follow-up
+requires its own exact-source checks, as with the concurrency follow-up below.
+
 Explicit budget clearing also works when a profile has no model or has an
 obsolete generation protocol. It removes only the two preferences; setting new
 preferences and running model tasks retain their normal validation. An actual

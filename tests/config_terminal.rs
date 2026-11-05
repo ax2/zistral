@@ -1107,3 +1107,145 @@ fn stale_wizard_preserves_external_replacement_deletion_and_first_setup_creation
         assert!(!root.path().join("config.toml.lock").exists());
     }
 }
+
+#[test]
+fn import_setup_uses_effective_zi_environment_without_copying_or_replacing_source_keys() {
+    for (case, host, environment) in [
+        (0, "api.openai.com", "ZI_API_KEY"),
+        (1, "api.anthropic.com", "OPENAI_API_KEY"),
+        (2, "api.openai.com", "ZI_API_KEY"),
+        (3, "localhost", "ZI_API_KEY"),
+    ] {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("zi/config.toml");
+        let url = if host == "localhost" {
+            "http://localhost:1/v1".to_owned()
+        } else {
+            format!("https://{host}/v1")
+        };
+        let mut candidate = serde_json::json!({"id":"imported-model", "url":url});
+        if case == 2 {
+            candidate["apiKey"] = "SOURCE_LITERAL_KEEP_993".into();
+        } else if case == 3 {
+            candidate["apiKeyEnv"] = "ZISTRAL_SELECTED_SOURCE_REF_993".into();
+        }
+        let source_text = serde_json::to_string(&vec![candidate]).unwrap();
+        source(home.path(), ".workbuddy/models.json", &source_text);
+        source(
+            home.path(),
+            "zi/config.toml",
+            "model='root'\napi_key='ROOT_KEEP_993'\n[profiles.kept]\nmodel='keep'\napi_key='OTHER_KEEP_993'\n",
+        );
+        let original: toml::Value =
+            toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let transcript = configure_outcome_env(
+            &path,
+            &[("Configuration source", "1")],
+            Some(home.path()),
+            Some("work"),
+            "Saved ",
+            true,
+            &[
+                (environment, "GLOBAL_EFFECTIVE_NOT_SAVED_993"),
+                (
+                    "ZISTRAL_SELECTED_SOURCE_REF_993",
+                    "SOURCE_ENV_NOT_SAVED_993",
+                ),
+            ],
+        );
+        assert!(
+            !transcript.contains("API Key ["),
+            "effective zi key must avoid redundant key entry"
+        );
+        assert!(transcript.contains("Environment credential"));
+        assert!(transcript.contains(&format!("\"{environment}\"")));
+        let bytes = std::fs::read(&path).unwrap();
+        let saved: toml::Value = toml::from_str(std::str::from_utf8(&bytes).unwrap()).unwrap();
+        assert_eq!(saved["api_key"], original["api_key"]);
+        assert_eq!(saved["profiles"]["kept"], original["profiles"]["kept"]);
+        assert_eq!(saved["active_profile"].as_str(), Some("work"));
+        let profile = &saved["profiles"]["work"];
+        assert_eq!(profile["model"].as_str(), Some("imported-model"));
+        assert_eq!(profile["base_url"].as_str(), Some(url.as_str()));
+        if case == 2 {
+            assert_eq!(profile["api_key"].as_str(), Some("SOURCE_LITERAL_KEEP_993"));
+        } else {
+            assert!(profile.get("api_key").is_none());
+        }
+        if case == 3 {
+            assert_eq!(
+                profile["api_key_env"].as_str(),
+                Some("ZISTRAL_SELECTED_SOURCE_REF_993")
+            );
+        } else {
+            assert!(profile.get("api_key_env").is_none());
+        }
+        let out = imported_command(
+            home.path(),
+            &path,
+            environment,
+            "GLOBAL_EFFECTIVE_NOT_SAVED_993",
+        )
+        .env(
+            "ZISTRAL_SELECTED_SOURCE_REF_993",
+            "SOURCE_ENV_NOT_SAVED_993",
+        )
+        .args(["doctor", "--json"])
+        .output()
+        .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(
+            report["configuration"]["details"]["credential"],
+            serde_json::json!({"configured":true,"source":"environment","environment_variable":environment})
+        );
+        let fallback = imported_command(home.path(), &path, environment, "")
+            .env_remove("ZI_API_KEY")
+            .env_remove("OPENAI_API_KEY")
+            .env(
+                "ZISTRAL_SELECTED_SOURCE_REF_993",
+                "SOURCE_ENV_NOT_SAVED_993",
+            )
+            .args(["doctor", "--json"])
+            .output()
+            .unwrap();
+        let fallback_report: serde_json::Value = serde_json::from_slice(&fallback.stdout).unwrap();
+        assert_eq!(fallback.status.success(), case >= 2);
+        if case >= 2 {
+            let expected = if case == 2 {
+                serde_json::json!({"configured":true,"source":"profile","environment_variable":null})
+            } else {
+                serde_json::json!({"configured":true,"source":"environment","environment_variable":"ZISTRAL_SELECTED_SOURCE_REF_993"})
+            };
+            assert_eq!(
+                fallback_report["configuration"]["details"]["credential"],
+                expected
+            );
+        } else {
+            assert_eq!(fallback_report["ok"], false);
+        }
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        assert_eq!(
+            std::fs::read_to_string(home.path().join(".workbuddy/models.json")).unwrap(),
+            source_text
+        );
+        for secret in [
+            "GLOBAL_EFFECTIVE_NOT_SAVED_993",
+            "SOURCE_ENV_NOT_SAVED_993",
+            "ROOT_KEEP_993",
+            "OTHER_KEEP_993",
+            "SOURCE_LITERAL_KEEP_993",
+        ] {
+            assert!(!transcript.contains(secret));
+            assert!(!String::from_utf8_lossy(&out.stdout).contains(secret));
+            assert!(!String::from_utf8_lossy(&fallback.stdout).contains(secret));
+            assert!(!String::from_utf8_lossy(&fallback.stderr).contains(secret));
+        }
+        assert!(!String::from_utf8_lossy(&bytes).contains("GLOBAL_EFFECTIVE_NOT_SAVED_993"));
+        assert!(!String::from_utf8_lossy(&bytes).contains("SOURCE_ENV_NOT_SAVED_993"));
+    }
+}

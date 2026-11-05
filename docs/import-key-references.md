@@ -18,6 +18,16 @@ variable's value in `api_key`. Model, service, protocol and supported exact
 endpoint import behavior are unchanged. Existing named profiles/root settings
 are preserved, and only the replaced profile's budget preferences are reset.
 
+The import wizard uses the same effective-key order as manual setup and requests.
+An available `ZI_API_KEY`, or `OPENAI_API_KEY` when no different source reference
+was selected, avoids redundant hidden-key entry, including for official service
+hosts. A safely quoted notice names the effective variable. This does not change
+source discovery's `Key missing` label, which describes the source configuration.
+The imported source's available literal/reference is kept as before; a zi override
+is not copied into `api_key` or substituted as the source's saved reference. If the
+override is later absent, normal saved-reference/default-variable/literal fallback
+rules resume; importing while an override exists does not permanently provision it.
+
 ## Recognized sources
 
 | Source | Existing recognized environment form |
@@ -29,8 +39,8 @@ are preserved, and only the replaced profile's budget preferences are reset.
 This preserves the **selected credential source**, not an entire upstream fallback
 chain. Existing lookup order is unchanged. If an environment reference is absent
 or blank during discovery and a supported literal fallback is available, that
-literal is still imported. If no usable key is available, the wizard prompts for
-a hidden key as before. A supplied fallback is saved only because it was entered
+literal is still imported. If neither the selected source nor zi's effective environment provides a usable
+key, the wizard prompts for a hidden key as before. A supplied fallback is saved only because it was entered
 explicitly; the environment value itself is never saved by reference import.
 
 Codex `auth.json` API-key fields, WorkBuddy literal keys and supported dsh API-key

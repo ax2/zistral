@@ -270,6 +270,17 @@ fn resolve_api_key(saved: Option<&str>, key_env: &str) -> (Option<String>, ApiKe
     }
 }
 
+fn report_environment_credential(source: &ApiKeySource, output: &mut impl Write) -> Result<()> {
+    if let ApiKeySource::Environment(name) = source {
+        writeln!(
+            output,
+            "Environment credential {} takes precedence over a saved key; its value is not saved.",
+            crate::ui::json_display(&serde_json::to_string(name)?)
+        )?;
+    }
+    Ok(())
+}
+
 fn read_config(path: &Path, allow_missing: bool) -> Result<FileConfig> {
     read_config_snapshot(path, allow_missing).map(|(document, _)| document)
 }
@@ -386,17 +397,15 @@ fn import_config(
         .nth(index)
         .expect("validated selection");
     let key_env = candidate.api_key_env;
-    let environment_available = || {
-        key_env
-            .as_deref()
-            .is_some_and(|name| nonempty(std::env::var(name).ok()).is_some())
-    };
+    let reference = key_env.as_deref().unwrap_or("OPENAI_API_KEY");
     let mut key = candidate.api_key;
-    while key.is_none() && !environment_available() {
+    // Import selection and request authentication are different decisions:
+    // keep the source's literal/reference, but let zi's effective environment
+    // satisfy key entry without copying that overriding value into the profile.
+    while resolve_api_key(key.as_deref(), reference).0.is_none() {
         let answer = ask("API Key [hidden; Enter for no key]", true)?;
         key = nonempty(Some(answer.trim().to_owned()));
-        if key.is_some()
-            || environment_available()
+        if resolve_api_key(key.as_deref(), reference).0.is_some()
             || !matches!(
                 validate_url(&candidate.base_url)?.host_str(),
                 Some("api.openai.com" | "api.anthropic.com")
@@ -413,6 +422,8 @@ fn import_config(
         crate::imports::display(&candidate.model),
         candidate.api
     )?;
+    let (_, effective_source) = resolve_api_key(key.as_deref(), reference);
+    report_environment_credential(&effective_source, output)?;
     if key_env.is_some() {
         writeln!(
             output,
@@ -629,13 +640,7 @@ fn collect_config(
     let key_env = file.api_key_env.as_deref().unwrap_or("OPENAI_API_KEY");
     let (_, source) = resolve_api_key(file.api_key.as_deref(), key_env);
     let environment = matches!(source, ApiKeySource::Environment(_));
-    if let ApiKeySource::Environment(name) = source {
-        writeln!(
-            output,
-            "Environment credential {} takes precedence over a saved key; its value is not saved.",
-            crate::ui::json_display(&serde_json::to_string(&name)?)
-        )?;
-    }
+    report_environment_credential(&source, output)?;
     loop {
         let label = if environment {
             "API Key [hidden; Enter uses environment, '-' clears saved key]"

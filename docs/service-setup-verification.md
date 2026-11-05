@@ -14,6 +14,8 @@ zi config --name work
 zi -p work models --remote
 ```
 
+When zi already has an effective environment key, importing does not ask for it
+again or save its value; the imported source's credential metadata remains intact.
 The first command saves a profile. Available source environment-key references are
 retained as references, so their values are not copied into zi settings. See
 [imported key references](import-key-references.md) for supported forms and fallbacks. The second explicitly queries that service for
