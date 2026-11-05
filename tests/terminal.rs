@@ -921,9 +921,11 @@ fn preview_display_overflow_emits_only_error_in_real_terminal() {
             panic!("preview display boundary did not finish: {output}");
         }
     }
-    let status = exit
-        .or_else(|| child.try_wait().unwrap())
-        .expect("preview did not exit");
+    let status =
+        observed_child_exit(exit, || child.try_wait().unwrap(), deadline).unwrap_or_else(|| {
+            child.kill().ok();
+            panic!("preview did not exit");
+        });
     assert!(!status.success());
     let shown = console::strip_ansi_codes(&output);
     assert!(
@@ -1148,4 +1150,109 @@ fn remote_model_catalogue_terminal_keeps_ids_and_json_without_task_panels() {
         }
         worker.join().unwrap();
     }
+}
+
+// A reader reaching EOF does not acknowledge the child's process exit. Keep the
+// polling seam shared with the PTY preview test and exercise it with a real child.
+fn observed_child_exit<T>(
+    observed: Option<T>,
+    poll: impl FnMut() -> Option<T>,
+    deadline: Instant,
+) -> Option<T> {
+    let mut observed = observed;
+    let mut poll = poll;
+    while observed.is_none() && Instant::now() < deadline {
+        observed = poll();
+        if observed.is_none() {
+            std::thread::sleep(
+                Duration::from_millis(5).min(deadline.saturating_duration_since(Instant::now())),
+            );
+        }
+    }
+    observed
+}
+
+#[test]
+fn terminal_reader_eof_can_precede_child_exit() {
+    const HELPER: &str = "ZISTRAL_TEST_EOF_THEN_EXIT_993";
+    if std::env::var_os(HELPER).is_some() {
+        // Only the spawned --exact helper closes its own output descriptors.
+        // Stdin remains a separate pipe, keeping this child alive until the
+        // parent has observed EOF and polled an unavailable exit status.
+        std::io::stdout().flush().unwrap();
+        std::io::stderr().flush().unwrap();
+        #[cfg(unix)]
+        unsafe {
+            assert_eq!(libc::close(libc::STDOUT_FILENO), 0);
+            assert_eq!(libc::close(libc::STDERR_FILENO), 0);
+        }
+        #[cfg(windows)]
+        unsafe {
+            use std::os::windows::io::AsRawHandle;
+            use windows_sys::Win32::Foundation::CloseHandle;
+            assert_ne!(CloseHandle(std::io::stdout().as_raw_handle()), 0);
+            assert_ne!(CloseHandle(std::io::stderr().as_raw_handle()), 0);
+        }
+        let mut release = [0];
+        std::io::stdin().read_exact(&mut release).unwrap();
+        assert_eq!(release, [b'!']);
+        std::process::exit(23);
+    }
+    let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "terminal_reader_eof_can_precede_child_exit",
+            "--nocapture",
+        ])
+        .env(HELPER, "1")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut reader = child.stdout.take().unwrap();
+    let mut release = child.stdin.take().unwrap();
+    let (eof_tx, eof_rx) = mpsc::channel();
+    let reader = std::thread::spawn(move || {
+        let mut output = Vec::new();
+        reader.read_to_end(&mut output).unwrap();
+        eof_tx.send(()).ok();
+    });
+    if eof_rx.recv_timeout(Duration::from_secs(5)).is_err() {
+        child.kill().ok();
+        child.wait().ok();
+        panic!("fixture did not close stdout before exit");
+    }
+    assert!(
+        child.try_wait().unwrap().is_none(),
+        "fixture must remain alive after EOF"
+    );
+    let (polled_tx, polled_rx) = mpsc::channel();
+    let release = std::thread::spawn(move || {
+        polled_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        release.write_all(b"!").unwrap();
+    });
+    let mut polled_tx = Some(polled_tx);
+    let status = observed_child_exit(
+        None,
+        || {
+            let status = child.try_wait().unwrap();
+            if status.is_none() {
+                if let Some(tx) = polled_tx.take() {
+                    tx.send(()).unwrap();
+                }
+            }
+            status
+        },
+        Instant::now() + Duration::from_secs(5),
+    );
+    release.join().unwrap();
+    reader.join().unwrap();
+    let final_status = child.wait().unwrap();
+    assert_eq!(final_status.code(), Some(23));
+    assert_eq!(
+        status.and_then(|s| s.code()),
+        Some(23),
+        "output EOF is not a process-exit acknowledgement"
+    );
 }
