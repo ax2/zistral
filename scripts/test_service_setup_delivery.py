@@ -165,7 +165,7 @@ api_key_env='DELIVERY_MODEL_KEY'
                 assert not server.errors, (label, 'controlled request failed', server.errors)
                 if unchanged is not None:
                     assert config.read_bytes() == unchanged, 'read-only command modified configuration'
-                for secret in [KEY, 'ROOT_KEY_993', 'SAVED_KEY_993', 'PROVIDER_BODY_993']:
+                for secret in [KEY, 'ROOT_KEY_993', 'SAVED_KEY_993', 'OLD_ENV_KEY_993', 'PROVIDER_BODY_993']:
                     assert secret.encode() not in result.stdout + result.stderr, 'credential/body disclosure'
                 if not allow_input:
                     assert b'PRIVATE_INPUT_993' not in result.stdout + result.stderr, 'unexpected input disclosure'
@@ -214,6 +214,21 @@ api_key_env='DELIVERY_MODEL_KEY'
             assert details['output_budget']['tokens_per_turn'] == 128 and details['output_budget']['field'] == wire
             assert details['output_budget']['tokens_source'] == 'profile' and not server.requests
             checks.append(label + ': select/save budget/offline doctor use the same isolated profile and key source')
+
+            # Change only the reference and explicitly remove its saved fallback.
+            # The old variable stays present with a wrong value: subsequent real
+            # loopback auth checks must use the newly selected reference.
+            env['DELIVERY_REPLACEMENT_KEY'] = KEY
+            env['DELIVERY_MODEL_KEY'] = 'OLD_ENV_KEY_993'
+            run(['config', '--api-key-env', 'DELIVERY_REPLACEMENT_KEY', '--clear-saved-key'])
+            expected['profiles']['work']['api_key_env'] = 'DELIVERY_REPLACEMENT_KEY'
+            expected['profiles']['work'].pop('api_key')
+            assert read() == expected and not server.requests
+            report = json.loads(run(['doctor', '--json']).stdout)
+            assert report['configuration']['details']['credential'] == {
+                'configured': True, 'source': 'environment', 'environment_variable': 'DELIVERY_REPLACEMENT_KEY'}
+            assert source.read_bytes() == before_source and not server.requests
+            checks.append(label + ': explicit offline key-reference edit and saved-key removal preserve the full configuration and source; later requests authenticate with the new reference')
 
             def catalogue(_):
                 value = {'data': [{'id': model}]}
@@ -331,7 +346,7 @@ api_key_env='DELIVERY_MODEL_KEY'
             assert len(server.requests) == len(server.plan) == 6
             checks.append(label + ': offline inactive/active renames and protected removal preserve complete configuration and result')
             total_requests += len(server.requests)
-    assert len(checks) == 36 and total_requests == 24, 'incomplete service delivery verification'
+    assert len(checks) == 40 and total_requests == 24, 'incomplete service delivery verification'
     return {'passed': len(checks), 'checks': checks, 'synthetic_loopback_requests': total_requests,
             'real_provider_requests': 0}
 

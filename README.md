@@ -82,7 +82,10 @@ editing the current settings. Nothing is changed in the source agents.
 **Unreleased main:** a selected environment-sourced API key keeps its variable
 reference instead of saving a plaintext snapshot. Key rotation is picked up by
 the next invocation. Literal key imports remain supported; see
-[imported key references](docs/import-key-references.md).
+[imported key references](docs/import-key-references.md). Existing profiles also support offline
+`zi config --name work --api-key-env WORK_API_KEY` and explicit `--clear-saved-key`;
+see [key settings](docs/key-settings.md). Only the name is saved; changing a reference
+keeps a saved literal fallback unless you explicitly clear it.
 
 For manual setup, enter the service URL (normally ending in `/v1`), model name, API protocol,
 and API key. The protocol defaults to `responses` for api.openai.com and `chat`

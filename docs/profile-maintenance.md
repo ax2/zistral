@@ -53,6 +53,18 @@ variable, clear an already running process or edit Codex/WorkBuddy/dsh settings.
 No backup/history file containing the removed credential is created. This is a
 configuration update, not secure deletion from disk backups or provider accounts.
 
+## Maintain API-key references and saved literals
+
+`zi config --name work --api-key-env WORK_API_KEY` changes only that existing
+profile's key reference. Add `--clear-saved-key` to explicitly remove its saved
+literal fallback, or use that option alone without changing the reference.
+These two options can be combined with each other, but not rename/remove,
+budgets or interactive setup. They use `--name` > `--profile` / `ZI_PROFILE` >
+saved active > root default selection, unlike explicit rename/remove targets.
+They preserve all unrelated settings and the saved default selection, need no
+terminal, and never resolve/copy an environment value. See [key settings](key-settings.md)
+for name validation, override precedence, missing-variable behavior and limits.
+
 ## Saving and errors
 
 Both commands require readable, valid typed TOML. Parse/type/unknown-field errors

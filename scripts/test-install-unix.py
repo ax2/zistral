@@ -68,7 +68,7 @@ def delivery(binary, scripts):
                            capture_output=True, check=True, timeout=20)
     assert json.loads(smoke.stdout)['words'] == 2 and not smoke.stderr, 'installed pipe count failed'
     expected = [('test_pre_sharing_delivery.py', 8), ('test_table_preparation_delivery.py', 7),
-                ('test_service_setup_delivery.py', 36)]
+                ('test_service_setup_delivery.py', 40)]
     result = []
     for script, count in expected:
         completed = invoke([sys.executable, scripts / script, '--binary', binary])
@@ -108,7 +108,7 @@ def verify(binary, dist, target):
             portable = portable_binary(archive, Path(temporary), target, version, expected_digest)
             assert invoke([portable, '--version']).stdout.decode().strip() == version_text
             portable_reports = delivery(portable, scripts)
-            checks.append('portable archive: exact members, executable bytes/mode, Unicode path and all8+7+36 workflow checks')
+            checks.append('portable archive: exact members, executable bytes/mode, Unicode path and all8+7+40 workflow checks')
         for _ in range(2):
             attempted = True
             if platform == 'linux':
@@ -121,7 +121,7 @@ def verify(binary, dist, target):
             assert invoke([installed, '--version']).stdout.decode().strip() == version_text
             native_reports.append(delivery(installed, scripts))
             assert config.read_bytes() == sentinel and config.stat().st_mode & 0o777 == 0o600, 'model configuration changed during install/upgrade'
-        checks.append('native install/reinstall: exact build bytes and all8+7+36 workflows twice')
+        checks.append('native install/reinstall: exact build bytes and all8+7+40 workflows twice')
     finally:
         # Fresh-runner guards and digest checks prevent removing somebody else's
         # payload if a failed test leaves unexpected filesystem state.

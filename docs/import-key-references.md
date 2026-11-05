@@ -80,7 +80,7 @@ that it does not replace the profile's selected variable.
 These synthetic loopback checks do not establish real account access or model quality.
 
 The native installed-service workflow also verifies source discovery under all
-four protocol variants: 36 checks and the same 24 loopback requests. Its source
+four protocol variants: 40 checks and the same 24 loopback requests. Its source
 files contain only declared variable names. Python remains a test-host dependency;
 installed zi is still one executable with no additional runtime.
 

@@ -744,6 +744,62 @@ fn profile_budget(file: &FileConfig) -> Result<OutputBudget> {
     )
 }
 
+/// New CLI references use a portable name; existing imported references remain
+/// readable, and clearing a literal never validates or rewrites their names.
+pub fn parse_key_env(value: &str) -> Result<String> {
+    let mut bytes = value.bytes();
+    if value.len() > 128
+        || !bytes
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || c == b'_')
+        || !bytes.all(|c| c.is_ascii_alphanumeric() || c == b'_')
+    {
+        bail!(
+            "API-key environment name must be 1-128 ASCII letters, digits or underscores, starting with a letter or underscore; pass a variable name, not its value"
+        );
+    }
+    Ok(value.into())
+}
+
+pub fn set_key_settings(
+    cli: &Cli,
+    name: Option<&str>,
+    key_env: Option<&str>,
+    clear: bool,
+) -> Result<()> {
+    // Validate before opening configuration, even for non-CLI callers.
+    let key_env = key_env.map(parse_key_env).transpose()?;
+    let path = path(cli)?;
+    let mut document = read_config(&path, false)?;
+    let name = name
+        .or(cli.profile.as_deref())
+        .or(document.active_profile.as_deref())
+        .unwrap_or("default")
+        .to_owned();
+    let mut updated = selected(&document, &name)?;
+    if let Some(key_env) = key_env {
+        updated.api_key_env = Some(key_env);
+    }
+    if clear {
+        updated.api_key = None;
+    }
+    // Credential metadata can repair obsolete profiles without generation or
+    // environment validation. Never resolve/copy a variable value during save.
+    if name == "default" {
+        document.api_key_env = updated.api_key_env;
+        document.api_key = updated.api_key;
+    } else {
+        document
+            .profiles
+            .insert(name.clone(), Profile::from(&updated));
+    }
+    save_config(&path, &document)?;
+    eprintln!(
+        "Saved API key settings for profile {name}. Environment overrides still apply; use zi doctor to inspect the effective source."
+    );
+    Ok(())
+}
+
 pub fn set_output_budget(
     cli: &Cli,
     name: Option<&str>,

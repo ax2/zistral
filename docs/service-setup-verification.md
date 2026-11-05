@@ -93,10 +93,13 @@ and contacts only its own loopback service. It does not modify a user's selected
 profile, key, installed executable or PATH. All fixtures are removed on exit.
 
 It tests the same journey under modern Chat, explicit legacy Chat, Responses and
-Anthropic: 36 checks and 24 controlled HTTP requests. Requests verify actual
+Anthropic: 40 checks and 24 controlled HTTP requests. Requests verify actual
 auth/protocol/budget fields; the first task body equals the preview, a real native
 count result returns on the correlated tool followup, and saved/CLI/probe caps
 remain distinct. Offline profile rename/remove and default-selection protection are checked too.
+An explicit key-reference edit plus saved-literal removal is compared against the
+entire reference mapping; subsequent requests must authenticate through the new
+variable while the old variable remains present with a deliberately wrong value.
 Exact Unicode stream output, error-body redaction, no retry and
 old-file preservation are checked. The whole parsed configuration is compared
 with a reference mapping after every intended edit or no-write operation.

@@ -248,6 +248,12 @@ enum Commands {
         /// Remove an inactive named profile; default and saved active profiles are protected
         #[arg(long, value_name = "NAME", conflicts_with_all = ["name", "manual", "list", "request_limit", "chat_limit_field", "clear_output_budget"])]
         remove: Option<String>,
+        /// Set the API-key environment reference of an existing profile, offline
+        #[arg(long = "api-key-env", value_name = "NAME", value_parser = config::parse_key_env, conflicts_with_all = ["manual", "list", "request_limit", "chat_limit_field", "clear_output_budget", "rename", "remove"])]
+        key_env: Option<String>,
+        /// Remove only the saved literal key; keep environment references and other settings
+        #[arg(long, conflicts_with_all = ["manual", "list", "request_limit", "chat_limit_field", "clear_output_budget", "rename", "remove"])]
+        clear_saved_key: bool,
     },
 }
 
@@ -537,6 +543,8 @@ fn run(mut cli: Cli) -> Result<()> {
         clear_output_budget,
         rename,
         remove,
+        key_env,
+        clear_saved_key,
     }) = &cli.command
     {
         if cli.input.is_some()
@@ -550,6 +558,14 @@ fn run(mut cli: Cli) -> Result<()> {
             || !cli.prompt.is_empty()
         {
             bail!("invalid options for zi config; see zi config --help");
+        }
+        if key_env.is_some() || *clear_saved_key {
+            return config::set_key_settings(
+                &cli,
+                name.as_deref(),
+                key_env.as_deref(),
+                *clear_saved_key,
+            );
         }
         if !rename.is_empty() {
             return config::rename_profile(&cli, &rename[0], &rename[1]);
