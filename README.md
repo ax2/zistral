@@ -100,7 +100,14 @@ Run `zi config --manual` to edit saved settings; Enter keeps each saved value. E
 at the API key prompt to remove a saved key, for example when switching to a
 local service. Ctrl+C cancels without replacing the configuration. You can
 choose another file with `zi config --config PATH`. The wizard requires a
-terminal and does not consume piped data. To use the single word `config` as a
+terminal and does not consume piped data.
+
+**Unreleased main:** invalid saved/CLI service, protocol or model defaults are
+hidden before prompting and require an explicit valid replacement. Control-bearing
+defaults/metadata are escaped for display; valid raw values are retained by Enter.
+See [setup display](docs/terminal-output.md#setup-defaults-and-metadata-labels-unreleased).
+
+To use the single word `config` as a
 model instruction instead of the setup command, use `zi -- config`.
 
 Preview discovery without a terminal or saving anything:

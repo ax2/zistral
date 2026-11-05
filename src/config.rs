@@ -137,9 +137,9 @@ pub fn models(cli: &Cli) -> Result<()> {
             output,
             "{} {}  {} [{}; Key {}]",
             if name == active { "*" } else { " " },
-            crate::ui::clean(&name),
-            crate::ui::clean(p.model.as_deref().unwrap_or("(unset)")),
-            crate::ui::clean(p.api.as_deref().unwrap_or("chat")),
+            crate::ui::label(&name),
+            crate::ui::label(p.model.as_deref().unwrap_or("(unset)")),
+            crate::ui::label(p.api.as_deref().unwrap_or("chat")),
             if nonempty(p.api_key).is_some() || p.api_key_env.is_some() {
                 "saved/reference"
             } else {
@@ -276,11 +276,16 @@ fn read_config(path: &Path, allow_missing: bool) -> Result<FileConfig> {
         Ok(text) => toml::from_str(&text).map_err(|_| {
             anyhow!(
                 "invalid configuration {}; check TOML syntax and field names",
-                path.display()
+                crate::ui::label(&path.display().to_string())
             )
         }),
         Err(e) if e.kind() == io::ErrorKind::NotFound && allow_missing => Ok(FileConfig::default()),
-        Err(e) => Err(e).with_context(|| format!("cannot read configuration {}", path.display())),
+        Err(e) => Err(e).with_context(|| {
+            format!(
+                "cannot read configuration {}",
+                crate::ui::label(&path.display().to_string())
+            )
+        }),
     }
 }
 
@@ -454,7 +459,11 @@ pub fn configure_named(cli: &Cli, manual: bool, name: Option<&str>) -> Result<()
         output,
         "Configure zi. Press Enter to keep the value in brackets; Ctrl+C cancels."
     )?;
-    writeln!(output, "Config file: {}", path.display())?;
+    writeln!(
+        output,
+        "Config file: {}",
+        crate::ui::label(&path.display().to_string())
+    )?;
     let mut ask = |label: &str, secret: bool| -> Result<String> {
         eprint!("{label}: ");
         io::stderr().flush()?;
@@ -496,7 +505,7 @@ pub fn configure_named(cli: &Cli, manual: bool, name: Option<&str>) -> Result<()
     writeln!(
         output,
         "Saved {}. You can now run zi with an instruction.",
-        path.display()
+        crate::ui::label(&path.display().to_string())
     )?;
     let overrides: Vec<_> = [
         "ZI_PROFILE",
@@ -527,8 +536,26 @@ fn ask_value(
     output: &mut impl Write,
     validate: impl Fn(&str) -> Result<()>,
 ) -> Result<String> {
+    let default = if default.is_empty() {
+        default
+    } else {
+        match validate(default) {
+            Ok(()) => default,
+            Err(error) => {
+                // Unsupported defaults can contain credentials or unrelated
+                // data. Keep the safe validation reason, never echo the value
+                // or silently choose a different service/model/protocol.
+                writeln!(
+                    output,
+                    "Selected {label} is invalid: {error}; enter a replacement (value hidden)."
+                )?;
+                ""
+            }
+        }
+    };
     loop {
-        let answer = ask(&format!("{label} [{default}]"), false)?;
+        let shown = crate::ui::label(default);
+        let answer = ask(&format!("{label} [{shown}]"), false)?;
         let value = if answer.trim().is_empty() {
             default
         } else {
@@ -563,7 +590,7 @@ fn collect_config(
         ask,
         output,
         |v| {
-            if v.is_empty() {
+            if v.trim().is_empty() {
                 bail!("model name cannot be empty");
             }
             Ok(())
@@ -1104,5 +1131,93 @@ mod tests {
         let error = read_config(&path, false).err().unwrap().to_string();
         assert!(error.contains("invalid configuration"));
         assert!(!error.contains("test-secret"));
+    }
+
+    #[test]
+    fn manual_default_invalid_url_is_hidden_and_requires_explicit_replacement() {
+        for invalid in [
+            "https://user:URL_DEFAULT_SECRET_993@service.example/v1",
+            "https://service.example/v1?key=URL_DEFAULT_SECRET_993",
+            "https://service.example/v1#URL_DEFAULT_SECRET_993",
+            "http://remote.example/v1",
+            "not-a-url",
+        ] {
+            let file = FileConfig {
+                base_url: Some(invalid.into()),
+                model: Some("kept".into()),
+                api: Some("chat".into()),
+                api_key: Some("SAVED_DEFAULT_SECRET_993".into()),
+                endpoint: Some("https://service.example/exact".into()),
+                max_output_tokens: Some(128),
+                ..FileConfig::default()
+            };
+            let (updated, output, prompts) =
+                collect(file, &["", "http://localhost:1/v1", "", "", ""]);
+            assert!(
+                prompts.iter().all(|(label, _)| !label.contains(invalid)),
+                "unsupported URL default was printed"
+            );
+            assert_eq!(prompts[0].0, "Service URL []");
+            assert_eq!(prompts[1].0, "Service URL []");
+            assert!(output.contains("value hidden"));
+            assert!(!output.contains("URL_DEFAULT_SECRET_993"));
+            assert!(!output.contains("SAVED_DEFAULT_SECRET_993"));
+            assert_eq!(updated.base_url.as_deref(), Some("http://localhost:1/v1"));
+            assert_eq!(updated.model.as_deref(), Some("kept"));
+            assert_eq!(updated.api_key.as_deref(), Some("SAVED_DEFAULT_SECRET_993"));
+            assert_eq!(updated.max_output_tokens, Some(128));
+            assert!(updated.endpoint.is_none());
+        }
+    }
+
+    #[test]
+    fn manual_default_model_display_keeps_the_original_value() {
+        for (model, expected) in [
+            (
+                "before\nline\t中\x1b[2J\u{009b}2J\u{007f}\"\\tail",
+                r#""before\nline\t中\u001b[2J\u009b2J\u007f\"\\tail""#,
+            ),
+            (r"regular\model-中", r"regular\model-中"),
+        ] {
+            let file = FileConfig {
+                base_url: Some("http://localhost:1/v1".into()),
+                model: Some(model.into()),
+                api: Some("chat".into()),
+                api_key: Some("SAVED_DEFAULT_SECRET_993".into()),
+                ..FileConfig::default()
+            };
+            let (updated, _, prompts) = collect(file, &["", "", "", ""]);
+            assert_eq!(prompts[1].0, format!("Model name [{expected}]"));
+            assert_eq!(updated.model.as_deref(), Some(model));
+            assert_eq!(updated.api_key.as_deref(), Some("SAVED_DEFAULT_SECRET_993"));
+        }
+    }
+
+    #[test]
+    fn manual_default_invalid_protocol_and_blank_model_require_replacement() {
+        let file = FileConfig {
+            base_url: Some("http://localhost:1/v1".into()),
+            model: Some(" \n\t ".into()),
+            api: Some("INVALID_PROTOCOL_SECRET_993".into()),
+            api_key: Some("SAVED_DEFAULT_SECRET_993".into()),
+            ..FileConfig::default()
+        };
+        let (updated, output, prompts) = collect(file, &["", "", "repaired", "", "chat", ""]);
+        assert!(
+            prompts
+                .iter()
+                .all(|(label, _)| !label.contains("INVALID_PROTOCOL_SECRET_993")),
+            "unsupported protocol default was printed"
+        );
+        assert!(
+            prompts
+                .iter()
+                .filter(|(label, _)| label.starts_with("Model name"))
+                .all(|(label, _)| label == "Model name []")
+        );
+        assert!(output.contains("value hidden"));
+        assert_eq!(updated.model.as_deref(), Some("repaired"));
+        assert_eq!(updated.api.as_deref(), Some("chat"));
+        assert_eq!(updated.api_key.as_deref(), Some("SAVED_DEFAULT_SECRET_993"));
     }
 }

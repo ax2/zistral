@@ -943,3 +943,46 @@ fn required_key_errors_quote_legacy_environment_names() {
         assert_eq!(std::fs::read_to_string(&path).unwrap(), config);
     }
 }
+
+#[test]
+fn configuration_path_labels_escape_controls_without_changing_lookup() {
+    let root = tempfile::tempdir().unwrap();
+    for (filename, escaped) in [
+        ("config\u{007f}.toml", r"config\u007f.toml"),
+        ("config\u{009b}2J.toml", r"config\u009b2J.toml"),
+    ] {
+        let path = root.path().join(filename);
+        let original = "model='fixture'\nbase_url='http://localhost:1/v1'\napi_key='METADATA_PATH_SECRET_993'\n";
+        std::fs::write(&path, original).unwrap();
+        let out = command()
+            .args(["--config", path.to_str().unwrap(), "doctor"])
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        let report = String::from_utf8_lossy(&out.stdout);
+        assert!(report.contains(escaped), "{report}");
+        assert!(!report.contains(filename));
+        assert!(!report.contains("METADATA_PATH_SECRET_993"));
+        let json = command()
+            .args(["--config", path.to_str().unwrap(), "doctor", "--json"])
+            .output()
+            .unwrap();
+        assert!(json.status.success());
+        assert_eq!(
+            serde_json::from_slice::<Value>(&json.stdout).unwrap()["configuration"]["path"],
+            path.to_str().unwrap()
+        );
+        let invalid = "api_key='METADATA_PATH_SECRET_993' broken";
+        std::fs::write(&path, invalid).unwrap();
+        let out = command()
+            .args(["--config", path.to_str().unwrap(), "doctor"])
+            .output()
+            .unwrap();
+        assert!(!out.status.success());
+        let error = String::from_utf8_lossy(&out.stderr);
+        assert!(error.contains(escaped), "{error}");
+        assert!(!error.contains(filename));
+        assert!(!error.contains("METADATA_PATH_SECRET_993"));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), invalid);
+    }
+}

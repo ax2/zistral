@@ -157,14 +157,15 @@ api_key_env='DELIVERY_MODEL_KEY'
             def read():
                 return tomllib.loads(config.read_text(encoding='utf-8'))
 
-            def run(args, data=b'', success=True, allow_input=False):
-                unchanged = config.read_bytes() if args[0] not in {'use', 'config'} else None
-                result = subprocess.run([str(binary), '--config', str(config), '--timeout', '3', *map(str, args)],
+            def run(args, data=b'', success=True, allow_input=False, config_file=None):
+                selected_config = config if config_file is None else config_file
+                unchanged = selected_config.read_bytes() if args[0] not in {'use', 'config'} else None
+                result = subprocess.run([str(binary), '--config', str(selected_config), '--timeout', '3', *map(str, args)],
                                         input=data, capture_output=True, cwd=root, env=env, timeout=15)
                 assert (result.returncode == 0) == success, (label, 'unexpected command exit', result.returncode)
                 assert not server.errors, (label, 'controlled request failed', server.errors)
                 if unchanged is not None:
-                    assert config.read_bytes() == unchanged, 'read-only command modified configuration'
+                    assert selected_config.read_bytes() == unchanged, 'read-only command modified configuration'
                 for secret in [KEY, 'ROOT_KEY_993', 'SAVED_KEY_993', 'OLD_ENV_KEY_993', 'PROVIDER_BODY_993']:
                     assert secret.encode() not in result.stdout + result.stderr, 'credential/body disclosure'
                 if not allow_input:
@@ -213,7 +214,23 @@ api_key_env='DELIVERY_MODEL_KEY'
                                              'environment_variable': 'DELIVERY_MODEL_KEY'}
             assert details['output_budget']['tokens_per_turn'] == 128 and details['output_budget']['field'] == wire
             assert details['output_budget']['tokens_source'] == 'profile' and not server.requests
-            checks.append(label + ': select/save budget/offline doctor use the same isolated profile and key source')
+            # Check human metadata and original JSON values on a legacy/control
+            # fixture too, without sending that model ID or path to a service.
+            metadata = root / 'config \u009b2J.toml'
+            raw_model = 'before\nline\t中\\tail\x1b[2J\u009b2J\x7f"'
+            encoded_model = json.dumps(raw_model, ensure_ascii=True)
+            metadata.write_text(f'model={encoded_model}\nbase_url="{url}"\napi="{api}"\napi_key="{KEY}"\n', encoding='utf-8')
+            shown_model = json.dumps(raw_model, ensure_ascii=False).replace('\u009b', '\\u009b').replace('\x7f', '\\u007f')
+            human = run(['doctor'], config_file=metadata).stdout.decode()
+            assert 'Model: ' + shown_model in human, 'human metadata model was not escaped'
+            assert r'config \u009b2J.toml' in human and raw_model not in human
+            saved_models = run(['models'], config_file=metadata).stdout.decode()
+            assert shown_model in saved_models and raw_model not in saved_models
+            raw_report = json.loads(run(['doctor', '--json'], config_file=metadata).stdout)
+            assert raw_report['configuration']['details']['model'] == raw_model
+            assert raw_report['configuration']['path'] == str(metadata)
+            assert read() == expected and not server.requests
+            checks.append(label + ': select/save budget/offline doctor preserve the effective profile/key source; metadata labels escape controls while JSON retains original values')
 
             # Change only the reference and explicitly remove its saved fallback.
             # The old variable stays present with a wrong value: subsequent real

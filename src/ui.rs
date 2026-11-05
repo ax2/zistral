@@ -49,6 +49,17 @@ pub fn clean(text: &str) -> String {
     out
 }
 
+// Metadata labels keep their usual appearance unless they contain controls.
+// Quote/escape those values instead of executing controls or losing their identity.
+// This representation is never used for request values or task pipe/file data.
+pub fn label(text: &str) -> String {
+    if text.chars().any(char::is_control) {
+        json_display(&serde_json::Value::String(text.to_owned()).to_string())
+    } else {
+        text.to_owned()
+    }
+}
+
 // Only for already validated JSON sent to a terminal. Keep legal JSON whitespace.
 // Escaping keeps literal DEL/C1 values without changing original number/key tokens.
 fn escaped_json_control(c: char) -> bool {
@@ -113,7 +124,7 @@ pub fn welcome(cli: &Cli) {
             .map(std::fs::canonicalize)
             .unwrap_or_else(std::env::current_dir)
         {
-            let path = clean(&cwd.display().to_string());
+            let path = label(&cwd.display().to_string());
             eprintln!(
                 "  {} {}",
                 style("│").cyan(),
@@ -143,7 +154,7 @@ pub fn model(settings: &Settings, cli: &Cli) {
         eprintln!(
             "  {} {}  {} {}",
             style("model").dim(),
-            style(clean(&settings.model)).cyan(),
+            style(label(&settings.model)).cyan(),
             style("·").dim(),
             style(&settings.api).dim()
         );
@@ -530,5 +541,30 @@ mod display_limit_tests {
         );
         assert!(!shown.contains('\u{009b}'));
         assert!(json_display_with_limit(&fitting, expected - 1).is_none());
+    }
+}
+
+#[cfg(test)]
+mod metadata_label_tests {
+    use super::*;
+
+    #[test]
+    fn labels_preserve_ordinary_text_and_round_trip_all_controls() {
+        for text in [
+            "ordinary",
+            "中文",
+            r"C:\work\models",
+            "[already quoted]",
+            "a\"b",
+        ] {
+            assert_eq!(label(text), text);
+        }
+        for value in (0..=31).chain(127..=159) {
+            let control = char::from_u32(value).unwrap();
+            let text = format!("left{control}中\\\"right");
+            let shown = label(&text);
+            assert!(shown.chars().all(|c| !c.is_control()));
+            assert_eq!(serde_json::from_str::<String>(&shown).unwrap(), text);
+        }
     }
 }

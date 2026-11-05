@@ -9,12 +9,12 @@ pub fn run(cli: &Cli, probe: bool) -> Result<()> {
     report!("zi doctor {}", env!("CARGO_PKG_VERSION"));
     report!(
         "Config: {}",
-        ui::clean(&config::path(cli)?.display().to_string())
+        ui::label(&config::path(cli)?.display().to_string())
     );
     let settings =
         config::Settings::load(cli).context("configuration check failed; run zi config")?;
-    report!("Profile: {}", ui::clean(&settings.profile_name));
-    report!("Model: {}", ui::clean(&settings.model));
+    report!("Profile: {}", ui::label(&settings.profile_name));
+    report!("Model: {}", ui::label(&settings.model));
     report!("Protocol: {}", settings.api);
     let url = config::validate_url(&settings.base_url)?;
     report!("Service host: {}", url.host_str().unwrap_or("(unset)"));

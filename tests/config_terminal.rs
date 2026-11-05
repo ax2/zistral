@@ -882,3 +882,78 @@ fn manual_configuration_quotes_legacy_environment_names_without_changing_referen
         assert!(!saved.contains("DISPLAY_ENV_VALUE_993"));
     }
 }
+
+#[test]
+fn repair_invalid_url_and_display_control_defaults_without_rewriting_metadata() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("config\u{009b}2J.toml");
+    let model = "before\nline\t中\x1b[2J\u{009b}2J\u{007f}\"\\tail";
+    let shown = r#""before\nline\t中\u001b[2J\u009b2J\u007f\"\\tail""#;
+    let original = format!(
+        "model={shown}\nbase_url='https://user:URL_DEFAULT_SECRET_993@service.example/v1'\napi='chat'\napi_key='SAVED_DEFAULT_SECRET_993'\napi_key_env='UNSET_DISPLAY_REF_993'\nendpoint='https://service.example/exact'\nmax_output_tokens=128\n[profiles.other]\nmodel='other'\napi_key='OTHER_DEFAULT_SECRET_993'\n"
+    );
+    std::fs::write(&path, &original).unwrap();
+    let mut expected: toml::Value = toml::from_str(&original).unwrap();
+    assert_eq!(expected["model"].as_str(), Some(model));
+    expected["base_url"] = toml::Value::String("http://localhost:1/v1".into());
+    expected.as_table_mut().unwrap().remove("endpoint");
+    let model_prompt = format!("Model name [{shown}]");
+    let shown_path = serde_json::to_string(path.to_str().unwrap())
+        .unwrap()
+        .replace('\u{009b}', "\\u009b");
+    let finish = format!("Saved {shown_path}.");
+    let output = configure_outcome_env(
+        &path,
+        &[
+            ("Service URL []", ""),
+            ("Service URL []", "http://localhost:1/v1"),
+            (&model_prompt, ""),
+            ("API protocol", ""),
+            ("API Key", ""),
+        ],
+        None,
+        None,
+        &finish,
+        true,
+        &[("UNSET_DISPLAY_REF_993", "")],
+    );
+    for secret in [
+        "URL_DEFAULT_SECRET_993",
+        "SAVED_DEFAULT_SECRET_993",
+        "OTHER_DEFAULT_SECRET_993",
+    ] {
+        assert!(!output.contains(secret));
+    }
+    assert_eq!(output.matches(r"config\u009b2J.toml").count(), 2);
+    assert!(!output.contains(model));
+    let saved = std::fs::read_to_string(&path).unwrap();
+    assert_eq!(toml::from_str::<toml::Value>(&saved).unwrap(), expected);
+    for args in [["doctor"].as_slice(), ["models"].as_slice()] {
+        let out = imported_command(root.path(), &path, "UNSET_DISPLAY_REF_993", "")
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let text = String::from_utf8_lossy(&out.stdout);
+        assert!(text.contains(shown), "{text}");
+        assert!(!text.contains(model));
+        for secret in ["SAVED_DEFAULT_SECRET_993", "OTHER_DEFAULT_SECRET_993"] {
+            assert!(!text.contains(secret));
+        }
+    }
+    let out = imported_command(root.path(), &path, "UNSET_DISPLAY_REF_993", "")
+        .args(["doctor", "--json"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&out.stdout).unwrap()["configuration"]["details"]
+            ["model"],
+        model
+    );
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), saved);
+}

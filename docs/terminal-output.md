@@ -76,3 +76,29 @@ diagnostics and real terminals use this representation; key values remain hidden
 The saved reference, lookup precedence, actual request authentication and task
 pipe/file data are unchanged. New CLI variable names remain portable; this display
 rule does not enable new source formats or automatically migrate existing profiles.
+
+## Setup defaults and metadata labels (unreleased)
+
+Configuration prompt defaults, config-file paths, saved-model summaries, human
+doctor fields and rich model/directory labels keep their ordinary appearance for
+values without control characters. A control-bearing value uses a quoted,
+JSON-style representation, including escaped newlines/tabs, ESC, DEL and C1.
+The original selected/stored value is used for lookup and requests; pressing
+Enter retains a valid raw default, not its displayed encoding. Human management
+output follows this label rule even when redirected. Diagnostic JSON still
+contains the actual values and keeps its existing pipe/terminal encoding contract.
+
+Before displaying a nonempty setup default, the wizard checks the same field
+validator used for a new answer. An invalid URL/protocol/model default is hidden
+and the safe validation reason is shown. The prompt then has an empty default;
+Enter retries rather than choosing another service or keeping the invalid value.
+This prevents unsupported URL credentials/query tokens from appearing in a
+default prompt. A whitespace-only model name requires explicit replacement too.
+Absent first-use fields keep the ordinary setup flow. Explicit valid replacements
+still follow existing profile, key, budget and endpoint rules; cancellation/failure
+does not save a partial configuration. No provider request is made by setup.
+
+This is metadata display and repair guidance. Model answers, native task data,
+JSON values, file bytes, credential precedence and tool permissions are unchanged.
+It does not infer private URL path values, validate a model's service capability,
+add a source format, save task history or introduce a runtime dependency.

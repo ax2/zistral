@@ -100,6 +100,9 @@ remain distinct. Offline profile rename/remove and default-selection protection 
 An explicit key-reference edit plus saved-literal removal is compared against the
 entire reference mapping; subsequent requests must authenticate through the new
 variable while the old variable remains present with a deliberately wrong value.
+A separate legacy fixture checks escaped model/path labels in human doctor/model
+summaries while diagnostic JSON retains the original control-bearing values and
+the main configuration remains unchanged, without any provider call.
 Exact Unicode stream output, error-body redaction, no retry and
 old-file preservation are checked. The whole parsed configuration is compared
 with a reference mapping after every intended edit or no-write operation.
