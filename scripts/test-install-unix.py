@@ -14,6 +14,8 @@ import sys
 import tarfile
 import tempfile
 
+from upgrade_baseline import verify as verified_baseline
+
 
 IDENTIFIER = 'io.github.ax2.zistral'
 TARGETS = {'x86_64-unknown-linux-gnu': ('linux', Path('/usr/bin/zi'), 'linux-amd64.deb'),
@@ -80,7 +82,7 @@ def delivery(binary, scripts):
     return result
 
 
-def verify(binary, dist, target):
+def verify(binary, dist, target, baseline_assets=None):
     if sys.flags.optimize:
         raise RuntimeError('Run installer verification without -O; safety checks require assertions')
     platform, installed, suffix = TARGETS[target]
@@ -95,7 +97,9 @@ def verify(binary, dist, target):
     config_home = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config')
     config = config_home / 'zistral/config.toml'
     ensure_fresh(installed, target, config)
-    sentinel = b"model='installer-sentinel'\nbase_url='http://127.0.0.1:1/v1'\napi_key='SYNTHETIC_INSTALL_SENTINEL_993'\n"
+    baseline = verified_baseline(baseline_assets, target) if baseline_assets is not None else None
+    owned_digests = {expected_digest, *([baseline['binary_sha256']] if baseline else [])}
+    sentinel = b"# Stable-compatible upgrade fixture; formatting must survive.\nmodel='installer-sentinel'\nbase_url='http://127.0.0.1:1/v1'\napi_key='SYNTHETIC_INSTALL_SENTINEL_993'\nactive_profile='work'\n[profiles.work]\nmodel='stable-work-model'\nbase_url='http://127.0.0.1:1/v1'\napi='responses'\napi_key_env='ZISTRAL_UPGRADE_UNSET_993'\napi_key='SYNTHETIC_WORK_SENTINEL_993'\nendpoint='http://127.0.0.1:1/v1/responses'\n[profiles.other]\nmodel='stable-other-model'\napi_key='SYNTHETIC_OTHER_SENTINEL_993'\n"
     checks, native_reports, portable_reports = [], [], []
     attempted = False
     scripts = Path(__file__).resolve().parent
@@ -109,6 +113,17 @@ def verify(binary, dist, target):
             assert invoke([portable, '--version']).stdout.decode().strip() == version_text
             portable_reports = delivery(portable, scripts)
             checks.append('portable archive: exact members, executable bytes/mode, Unicode path and all8+7+40 workflow checks')
+        if baseline:
+            attempted = True
+            if platform == 'linux':
+                invoke(['sudo', 'dpkg', '-i', baseline['installer']])
+                assert receipt(target).stdout.decode().strip() == baseline['version']
+            else:
+                invoke(['sudo', 'installer', '-pkg', baseline['installer'], '-target', '/'])
+            assert installed.is_file() and not installed.is_symlink() and digest(installed) == baseline['binary_sha256'], 'published executable differs from pinned release'
+            assert invoke([installed, '--version']).stdout.decode().strip() == 'zi ' + baseline['version']
+            assert 'stable-work-model' in invoke([installed, '--config', config, 'models']).stdout.decode(), 'published version could not read legacy fixture'
+            assert config.read_bytes() == sentinel, 'published installer changed configuration'
         for _ in range(2):
             attempted = True
             if platform == 'linux':
@@ -119,14 +134,17 @@ def verify(binary, dist, target):
                 assert receipt(target).returncode == 0
             assert installed.is_file() and not installed.is_symlink() and digest(installed) == expected_digest, 'installed executable differs from build'
             assert invoke([installed, '--version']).stdout.decode().strip() == version_text
+            assert 'stable-work-model' in invoke([installed, '--config', config, 'models']).stdout.decode()
             native_reports.append(delivery(installed, scripts))
             assert config.read_bytes() == sentinel and config.stat().st_mode & 0o777 == 0o600, 'model configuration changed during install/upgrade'
         checks.append('native install/reinstall: exact build bytes and all8+7+40 workflows twice')
+        if baseline:
+            checks.append('pinned published release to candidate: exact old/new executable digests and unchanged complete legacy configuration')
     finally:
         # Fresh-runner guards and digest checks prevent removing somebody else's
         # payload if a failed test leaves unexpected filesystem state.
         if attempted and installed.exists():
-            assert not installed.is_symlink() and digest(installed) == expected_digest, 'preserve unexpected installed executable; cleanup refused'
+            assert not installed.is_symlink() and digest(installed) in owned_digests, 'preserve unexpected installed executable; cleanup refused'
             if platform == 'linux':
                 invoke(['sudo', 'dpkg', '-r', 'zistral'])
             else:
@@ -140,13 +158,15 @@ def verify(binary, dist, target):
     checks.append('uninstall: owned payload removed; model configuration preserved before isolated fixture cleanup')
     if platform == 'darwin':
         assert receipt(target).returncode != 0, 'native receipt not removed'
-    assert len(checks) == 3 and len(native_reports) == 2
-    return {'passed': 3, 'checks': checks, 'target': target, 'version': version,
+    assert len(checks) == (4 if baseline else 3) and len(native_reports) == 2
+    return {'passed': len(checks), 'checks': checks, 'target': target, 'version': version,
             'binary_sha256': expected_digest, 'native_installs': 2,
             'portable_workflows': [v['passed'] for v in portable_reports],
             'native_workflows': [[v['passed'] for v in group] for group in native_reports],
             'real_provider_requests': 0, 'configuration_preserved': True,
-            'scope': 'Unreleased same-version packaging rehearsal; no GitHub Release published.'}
+            'published_baseline': baseline, 'baseline_installs': int(baseline is not None),
+            'package_version_changed': baseline is not None and baseline['version'] != version,
+            'scope': 'Published-release to candidate replacement when requested; same-version reinstall. No GitHub Release published.'}
 
 
 if __name__ == '__main__':
@@ -154,5 +174,6 @@ if __name__ == '__main__':
     parser.add_argument('--binary', type=Path, required=True)
     parser.add_argument('--dist', type=Path, required=True)
     parser.add_argument('--target', choices=TARGETS, required=True)
+    parser.add_argument('--baseline-assets', type=Path)
     args = parser.parse_args()
-    print(json.dumps(verify(args.binary.resolve(strict=True), args.dist.resolve(strict=True), args.target), ensure_ascii=True))
+    print(json.dumps(verify(args.binary.resolve(strict=True), args.dist.resolve(strict=True), args.target, args.baseline_assets), ensure_ascii=True))

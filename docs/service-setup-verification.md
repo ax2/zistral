@@ -113,8 +113,19 @@ Normal three-platform CI runs it against the built executable. Candidate install
 checks also run it against actual native copies on all three platforms. Windows
 retains its install/upgrade/PATH ownership scenarios; Linux/macOS verify a portable
 copy plus native install and same-version reinstall before cleanup. Release uses
-the same Unix verifier on its final packages. These checks do not themselves
-publish a Release or prove a previous-version upgrade/final-artifact result.
+the same Unix verifier on its final packages. Candidate checks additionally
+install a pinned official v0.33.0 package first: native package size/SHA256 and
+the installed executable's digest/version must match the reviewed baseline. Both
+the old and new executable read a stable-compatible multi-profile fixture; its
+complete bytes, selected profile, credential references and exact endpoint must
+survive replacement and uninstall. The baseline download is explicit, bounded,
+uses `gh` on the test host and never follows a mutable latest-release choice.
+
+The candidate still reports 0.33.0, so this proves published-code to candidate-code
+replacement, not package-manager behavior across different version numbers.
+Reports say `package_version_changed: false` until versions actually differ.
+A selected final release still needs its new-version upgrade/final-asset checks.
+No Release is published by these read-only-permission CI jobs.
 The helper's zero exit and JSON check count must both be verified. A nonzero exit
 or missing/count-mismatched report is failure, even if earlier checks printed OK.
 

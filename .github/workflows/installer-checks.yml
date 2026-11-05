@@ -2,9 +2,9 @@ name: Installer checks
 on:
   push:
     branches: [main]
-    paths: ['Cargo.toml', 'Cargo.lock', 'src/config.rs', 'src/imports.rs', 'packaging/**', 'scripts/package.py', 'scripts/test-install.ps1', 'scripts/test-install-unix.py', 'scripts/test_unix_installer_rules.py', 'scripts/test_pre_sharing_delivery.py', 'scripts/test_table_preparation_delivery.py', 'scripts/test_service_setup_delivery.py', '.github/workflows/installer-checks.yml']
+    paths: ['Cargo.toml', 'Cargo.lock', 'src/config.rs', 'src/imports.rs', 'packaging/**', 'scripts/package.py', 'scripts/upgrade_baseline.py', 'scripts/stable-upgrade-baseline.json', 'scripts/test_upgrade_baseline.py', 'scripts/test-install.ps1', 'scripts/test-install-unix.py', 'scripts/test_unix_installer_rules.py', 'scripts/test_pre_sharing_delivery.py', 'scripts/test_table_preparation_delivery.py', 'scripts/test_service_setup_delivery.py', '.github/workflows/installer-checks.yml']
   pull_request:
-    paths: ['Cargo.toml', 'Cargo.lock', 'src/config.rs', 'src/imports.rs', 'packaging/**', 'scripts/package.py', 'scripts/test-install.ps1', 'scripts/test-install-unix.py', 'scripts/test_unix_installer_rules.py', 'scripts/test_pre_sharing_delivery.py', 'scripts/test_table_preparation_delivery.py', 'scripts/test_service_setup_delivery.py', '.github/workflows/installer-checks.yml']
+    paths: ['Cargo.toml', 'Cargo.lock', 'src/config.rs', 'src/imports.rs', 'packaging/**', 'scripts/package.py', 'scripts/upgrade_baseline.py', 'scripts/stable-upgrade-baseline.json', 'scripts/test_upgrade_baseline.py', 'scripts/test-install.ps1', 'scripts/test-install-unix.py', 'scripts/test_unix_installer_rules.py', 'scripts/test_pre_sharing_delivery.py', 'scripts/test_table_preparation_delivery.py', 'scripts/test_service_setup_delivery.py', '.github/workflows/installer-checks.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -27,9 +27,13 @@ jobs:
         run: cargo build --release --locked --target $env:TARGET
       - name: Package installer and portable archive
         run: python scripts/package.py --target $env:TARGET
-      - name: Check Unicode path install, upgrade and uninstall
+      - name: Download and verify pinned published installer
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/upgrade_baseline.py --download --assets upgrade-baseline --target $env:TARGET
+      - name: Check Unicode path published replacement, reinstall and uninstall
         shell: pwsh
-        run: ./scripts/test-install.ps1
+        run: ./scripts/test-install.ps1 -BaselineAssets upgrade-baseline
       - uses: actions/upload-artifact@v4
         with:
           name: installer-check-${{ github.sha }}
@@ -68,8 +72,12 @@ jobs:
         run: cargo build --release --locked --target "$TARGET"
       - name: Package native installer and portable archive
         run: python scripts/package.py --target "$TARGET"
-      - name: Check portable and native install, reinstall, workflows and uninstall
-        run: python scripts/test-install-unix.py --target "$TARGET" --binary "target/$TARGET/release/zi" --dist dist
+      - name: Download and verify pinned published installer
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/upgrade_baseline.py --download --assets upgrade-baseline --target "$TARGET"
+      - name: Check portable, published replacement, reinstall, workflows and uninstall
+        run: python scripts/test-install-unix.py --target "$TARGET" --binary "target/$TARGET/release/zi" --dist dist --baseline-assets upgrade-baseline
       - uses: actions/upload-artifact@v4
         with:
           name: installer-check-${{ matrix.target }}-${{ github.sha }}

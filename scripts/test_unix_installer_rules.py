@@ -92,11 +92,24 @@ class PortableRules(unittest.TestCase):
     def test_optimized_python_refuses_before_installer_commands(self):
         with tempfile.TemporaryDirectory() as temporary:
             root=Path(temporary);binary=root/'unused';binary.write_bytes(b'NOT_EXECUTABLE')
-            result=subprocess.run([sys.executable,'-O',str(Path(module.__file__)),
+            result=subprocess.run([sys.executable,'-B','-O',str(Path(module.__file__)),
                 '--binary',str(binary),'--dist',str(root),'--target','x86_64-unknown-linux-gnu'],capture_output=True)
             self.assertNotEqual(result.returncode,0)
             self.assertIn(b'without -O',result.stderr)
             self.assertEqual(binary.read_bytes(),b'NOT_EXECUTABLE')
+
+    def test_bad_published_baseline_refuses_before_config_or_native_install(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary);binary=root/'zi';binary.write_bytes(b'candidate')
+            dist=root/'dist';dist.mkdir()
+            for name in ['zistral-v0.33.0-linux-amd64.deb','zistral-v0.33.0-x86_64-unknown-linux-gnu.tar.gz']:
+                (dist/name).write_bytes(b'unused')
+            config_home=root/'config-home'
+            with patch.object(module.sys,'platform','linux'), patch.dict(module.os.environ,{'XDG_CONFIG_HOME':str(config_home)}), patch.object(module,'ensure_fresh'), patch.object(module,'invoke',return_value=SimpleNamespace(stdout=b'zi 0.33.0')) as invoke:
+                with self.assertRaises(ValueError):
+                    module.verify(binary,dist,'x86_64-unknown-linux-gnu',root/'missing-baseline')
+            self.assertEqual(invoke.call_count,1)  # Read candidate version only.
+            self.assertFalse(config_home.exists())
 
     def test_wrong_platform_refuses_before_any_installer_command(self):
         with patch.object(module.sys,'platform','win32'), patch.object(module,'invoke') as invoke, self.assertRaises(AssertionError):

@@ -165,6 +165,22 @@ Its exact source must pass CI and native installation checks before selection.
 It adds no schema field or runtime dependency. The installed release remains
 v0.33.0.
 
+## Published-baseline replacement follow-up (unreleased)
+
+Candidate installer checks now start with the official v0.33.0 native package,
+pinned by filename, size, SHA256 and matching portable executable digest in
+`scripts/stable-upgrade-baseline.json`. They refuse existing installation/config
+state, load one stable-compatible multi-profile fixture in both old and candidate
+executables, and compare its exact bytes through replacement/reinstall/uninstall.
+This is additional delivery evidence for the same eight outcomes, not a feature.
+Its source needs its own passing native jobs; the historical baseline above does
+not establish this new check's result.
+
+Candidate metadata remains 0.33.0: the report distinguishes a published-to-candidate
+binary replacement from a genuinely different package version. Final-version
+upgrade checks remain required after a version is selected. Only the pinned
+public installer is downloaded; no model service or user's settings are involved.
+
 ## Remaining publication work
 
 Keep the current package version until the grouped batch is selected for release.
