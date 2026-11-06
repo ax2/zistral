@@ -387,3 +387,59 @@ fn concurrent_preset_imports_never_both_succeed_and_lose_a_definition() {
         }
     }
 }
+
+#[cfg(unix)]
+#[test]
+fn linked_configuration_is_readable_but_offline_writers_preserve_the_link() {
+    for args in [
+        vec!["use", "other"],
+        vec!["config", "--rename", "other", "renamed"],
+        vec!["config", "--remove", "other"],
+        vec!["config", "--name", "work", "--max-output-tokens", "256"],
+        vec!["config", "--name", "work", "--clear-output-budget"],
+        vec![
+            "config",
+            "--name",
+            "work",
+            "--api-key-env",
+            "TRANSACTION_REF_993",
+        ],
+        vec!["config", "--name", "default", "--clear-saved-key"],
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let before = seed(root.path());
+        let path = root.path().join("config.toml");
+        let target = root.path().join("tracked.toml");
+        std::fs::rename(&path, &target).unwrap();
+        std::os::unix::fs::symlink("tracked.toml", &path).unwrap();
+        for read in [
+            vec!["config", "--list"],
+            vec!["models"],
+            vec!["doctor", "--json"],
+        ] {
+            let output = command(root.path()).args(read).output().unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(!String::from_utf8_lossy(&output.stdout).contains("TRANSACTION_SECRET_993"));
+        }
+        let output = command(root.path()).args(&args).output().unwrap();
+        assert!(
+            check(&output, false).contains("actual regular file path"),
+            "{args:?}"
+        );
+        assert_eq!(
+            std::fs::read_link(&path).unwrap(),
+            Path::new("tracked.toml")
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        assert_eq!(std::fs::read(&target).unwrap(), before);
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 2);
+        // Selecting the real file is the explicit, supported way to edit it.
+        std::fs::remove_file(&path).unwrap();
+        std::fs::rename(&target, &path).unwrap();
+        check(&command(root.path()).args(&args).output().unwrap(), true);
+    }
+}

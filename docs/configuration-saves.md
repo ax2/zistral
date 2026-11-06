@@ -14,6 +14,16 @@ read-only; see [preset import](preset-import.md). Creation, deletion, comment-on
 and replacement with invalid bytes also count as changes. Read-only commands
 such as `models`, `doctor` and `config --list` do not create coordination files.
 
+## Linked configuration files
+
+Read-only commands may read a configuration through a symbolic link. Saves refuse
+to replace a symbolic link, including a dangling link or one introduced while
+the wizard was open. The wizard checks before asking for settings or a key; all
+writers check again before publication. Use `--config` with the actual regular
+file path when editing linked settings. An already linked destination remains
+unchanged and creates no save or coordination artifact. This guard checks the
+configuration file itself; it does not reject symbolic links in parent paths.
+
 ## One small coordination file
 
 A save creates or reuses a sibling named `<configuration filename>.lock`, for

@@ -554,6 +554,7 @@ pub fn configure_named(cli: &Cli, manual: bool, name: Option<&str>) -> Result<()
         .clone()
         .or_else(config_path)
         .context("cannot locate config directory; use zi config --config PATH")?;
+    regular_configuration_destination(&path)?;
     let (mut document, original) = read_config_snapshot(&path, true)?;
     let name = name
         .or(cli.profile.as_deref())
@@ -768,6 +769,17 @@ fn collect_config(
     Ok(file)
 }
 
+fn regular_configuration_destination(path: &Path) -> Result<()> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => Ok(()),
+        Ok(_) => bail!(
+            "configuration destination must be a regular file; nothing saved; use --config with the actual regular file path"
+        ),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error).context("cannot inspect configuration destination; nothing saved"),
+    }
+}
+
 fn configuration_unchanged(path: &Path, original: Option<&[u8]>) -> Result<()> {
     let current = match std::fs::read(path) {
         Ok(bytes) => Some(bytes),
@@ -857,6 +869,7 @@ fn save_config(path: &Path, file: &FileConfig, original: Option<&[u8]>) -> Resul
     let text = toml::to_string_pretty(file).context("cannot serialize configuration")?;
     // Reject an already changed/deleted file before creating any directory or
     // coordination artifact. Recheck again under the OS lock before publication.
+    regular_configuration_destination(path)?;
     configuration_unchanged(path, original)?;
     let parent = path
         .parent()
@@ -880,6 +893,7 @@ fn save_config(path: &Path, file: &FileConfig, original: Option<&[u8]>) -> Resul
         .as_file()
         .sync_all()
         .context("cannot flush configuration")?;
+    regular_configuration_destination(path)?;
     configuration_unchanged(path, original)?;
     temporary
         .persist(path)
@@ -1432,6 +1446,18 @@ mod tests {
         assert_eq!(updated.model.as_deref(), Some("repaired"));
         assert_eq!(updated.api.as_deref(), Some("chat"));
         assert_eq!(updated.api_key.as_deref(), Some("SAVED_DEFAULT_SECRET_993"));
+    }
+
+    #[test]
+    fn non_regular_configuration_destinations_are_preserved_without_save_artifacts() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("config.toml");
+        std::fs::create_dir(&path).unwrap();
+        std::fs::write(path.join("owned"), b"preserve").unwrap();
+        let error = save_config(&path, &FileConfig::default(), None).unwrap_err();
+        assert!(error.to_string().contains("actual regular file path"));
+        assert_eq!(std::fs::read(path.join("owned")).unwrap(), b"preserve");
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
     }
 
     #[test]

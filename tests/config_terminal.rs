@@ -1249,3 +1249,87 @@ fn import_setup_uses_effective_zi_environment_without_copying_or_replacing_sourc
         assert!(!String::from_utf8_lossy(&bytes).contains("SOURCE_ENV_NOT_SAVED_993"));
     }
 }
+
+#[cfg(unix)]
+#[test]
+fn linked_configuration_is_rejected_before_manual_or_import_prompts() {
+    for exists in [false, true] {
+        for automatic in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let path = root.path().join("config.toml");
+            let target = root.path().join("tracked.toml");
+            let original = b"model='old'\napi_key='LINK_TERMINAL_SECRET_993'\n";
+            if exists {
+                std::fs::write(&target, original).unwrap();
+            }
+            std::os::unix::fs::symlink("tracked.toml", &path).unwrap();
+            let output = configure_outcome(
+                &path,
+                &[],
+                automatic.then_some(root.path()),
+                None,
+                "zi: ",
+                false,
+            );
+            assert!(output.contains("actual regular file path"), "{output}");
+            for unexpected in [
+                "Service URL",
+                "API Key",
+                "Detected",
+                "Saved ",
+                "LINK_TERMINAL_SECRET_993",
+            ] {
+                assert!(!output.contains(unexpected), "{output}");
+            }
+            assert_eq!(
+                std::fs::read_link(&path).unwrap(),
+                std::path::Path::new("tracked.toml")
+            );
+            if exists {
+                assert_eq!(std::fs::read(&target).unwrap(), original);
+            } else {
+                assert!(!target.exists());
+            }
+            assert!(!root.path().join("config.toml.lock").exists());
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn wizard_does_not_replace_a_link_introduced_after_reading_identical_bytes() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("config.toml");
+    let target = root.path().join("tracked.toml");
+    let original = b"model='old'\nbase_url='http://localhost:1/v1'\napi='chat'\napi_key='LINK_TERMINAL_SECRET_993'\n";
+    std::fs::write(&path, original).unwrap();
+    let (output, success) = configure_with_hook(
+        &path,
+        &[
+            ("Service URL", ""),
+            ("Model name", "edited"),
+            ("API protocol", ""),
+            ("API Key", ""),
+        ],
+        None,
+        None,
+        &["Saved ", "zi: "],
+        &[],
+        || {
+            std::fs::rename(&path, &target).unwrap();
+            std::os::unix::fs::symlink("tracked.toml", &path).unwrap();
+        },
+    );
+    assert!(
+        !success && output.contains("actual regular file path"),
+        "{output}"
+    );
+    assert!(!output.contains("Saved ") && !output.contains("LINK_TERMINAL_SECRET_993"));
+    assert_eq!(
+        std::fs::read_link(&path).unwrap(),
+        std::path::Path::new("tracked.toml")
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), original);
+    assert_eq!(std::fs::read(&target).unwrap(), original);
+    assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 2);
+}

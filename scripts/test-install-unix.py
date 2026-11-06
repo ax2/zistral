@@ -65,6 +65,39 @@ def ensure_fresh(installed, target, config):
     assert not config.parent.exists() and not config.parent.is_symlink(), 'preserve existing model settings; use a clean CI runner'
 
 
+def configuration_links(binary):
+    """Read linked settings, but never replace links during an explicit save."""
+    environment = {key: value for key, value in os.environ.items()
+                   if not key.upper().startswith('ZI_') and key.upper() not in {'OPENAI_API_KEY', 'ANTHROPIC_API_KEY'}}
+    original = b"model='root'\nbase_url='http://127.0.0.1:1/v1'\napi_key='SYNTHETIC_LINK_KEY_993'\nactive_profile='work'\n[profiles.work]\nmodel='work'\napi_key='SYNTHETIC_LINK_KEY_993'\napi='chat'\nmax_output_tokens=128\n[profiles.other]\nmodel='other'\n"
+    writers = [['use', 'other'], ['config', '--rename', 'other', 'renamed'],
+               ['config', '--remove', 'other'], ['config', '--name', 'work', '--max-output-tokens', '256'],
+               ['config', '--name', 'work', '--clear-output-budget'],
+               ['config', '--name', 'work', '--api-key-env', 'ZISTRAL_LINK_REF_993'],
+               ['config', '--name', 'default', '--clear-saved-key']]
+    with tempfile.TemporaryDirectory(prefix='zi linked config-测试 ') as temporary:
+        root = Path(temporary)
+        target, alias = root / 'tracked.toml', root / 'config.toml'
+        target.write_bytes(original)
+        alias.symlink_to(target.name)
+        for arguments in [['config', '--list'], ['models'], ['doctor', '--json']]:
+            output = subprocess.run([str(binary), '--config', str(alias), *arguments],
+                                    input=b'', capture_output=True, env=environment, timeout=20)
+            assert output.returncode == 0, 'reading a linked configuration must still work'
+            assert b'SYNTHETIC_LINK_KEY_993' not in output.stdout + output.stderr
+        for arguments in writers:
+            output = subprocess.run([str(binary), '--config', str(alias), *arguments],
+                                    input=b'', capture_output=True, env=environment, timeout=20)
+            assert output.returncode != 0, 'saving through a symbolic link must fail explicitly'
+            assert b'actual regular file path' in output.stderr and not output.stdout
+            assert b'SYNTHETIC_LINK_KEY_993' not in output.stderr
+            assert alias.is_symlink() and os.readlink(alias) == target.name, 'configuration link was replaced'
+            assert target.read_bytes() == original and alias.read_bytes() == original, 'linked settings changed'
+            assert {p.name for p in root.iterdir()} == {'tracked.toml', 'config.toml'}, 'unexpected save artifact'
+    return {'linked_readers': 3, 'rejected_link_writers': len(writers), 'links_and_target_preserved': True,
+            'real_provider_requests': 0}
+
+
 def delivery(binary, scripts):
     smoke = subprocess.run([str(binary), '--count'], input=b'hello world\n',
                            capture_output=True, check=True, timeout=20)
@@ -101,6 +134,7 @@ def verify(binary, dist, target, baseline_assets=None):
     owned_digests = {expected_digest, *([baseline['binary_sha256']] if baseline else [])}
     sentinel = b"# Stable-compatible upgrade fixture; formatting must survive.\nmodel='installer-sentinel'\nbase_url='http://127.0.0.1:1/v1'\napi_key='SYNTHETIC_INSTALL_SENTINEL_993'\nactive_profile='work'\n[profiles.work]\nmodel='stable-work-model'\nbase_url='http://127.0.0.1:1/v1'\napi='responses'\napi_key_env='ZISTRAL_UPGRADE_UNSET_993'\napi_key='SYNTHETIC_WORK_SENTINEL_993'\nendpoint='http://127.0.0.1:1/v1/responses'\n[profiles.other]\nmodel='stable-other-model'\napi_key='SYNTHETIC_OTHER_SENTINEL_993'\n"
     checks, native_reports, portable_reports = [], [], []
+    link_reports = []
     attempted = False
     scripts = Path(__file__).resolve().parent
     # The directory is verified absent; remove only this known file/empty dir.
@@ -112,6 +146,7 @@ def verify(binary, dist, target, baseline_assets=None):
             portable = portable_binary(archive, Path(temporary), target, version, expected_digest)
             assert invoke([portable, '--version']).stdout.decode().strip() == version_text
             portable_reports = delivery(portable, scripts)
+            link_reports.append(configuration_links(portable))
             checks.append('portable archive: exact members, executable bytes/mode, Unicode path and all8+7+40 workflow checks')
         if baseline:
             attempted = True
@@ -136,6 +171,7 @@ def verify(binary, dist, target, baseline_assets=None):
             assert invoke([installed, '--version']).stdout.decode().strip() == version_text
             assert 'stable-work-model' in invoke([installed, '--config', config, 'models']).stdout.decode()
             native_reports.append(delivery(installed, scripts))
+            link_reports.append(configuration_links(installed))
             assert config.read_bytes() == sentinel and config.stat().st_mode & 0o777 == 0o600, 'model configuration changed during install/upgrade'
         checks.append('native install/reinstall: exact build bytes and all8+7+40 workflows twice')
         if baseline:
@@ -163,6 +199,7 @@ def verify(binary, dist, target, baseline_assets=None):
             'binary_sha256': expected_digest, 'native_installs': 2,
             'portable_workflows': [v['passed'] for v in portable_reports],
             'native_workflows': [[v['passed'] for v in group] for group in native_reports],
+            'configuration_link_checks': link_reports,
             'real_provider_requests': 0, 'configuration_preserved': True,
             'published_baseline': baseline, 'baseline_installs': int(baseline is not None),
             'package_version_changed': baseline is not None and baseline['version'] != version,
