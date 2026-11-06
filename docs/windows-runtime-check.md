@@ -62,9 +62,9 @@ which must not be mistaken for the Rust executable's supported platform range.
 
 The existing native installer checks compile and exercise the package on the
 current Windows CI host. They do not simulate an older Windows version or claim
-an acceptance test on every supported edition/build. This change adds no bundled
-runtime and leaves application logic, model settings and installed file contents
-unchanged.
+an acceptance test on every supported edition/build. This change updates installer
+metadata and packaged README text; application logic and model settings stay
+unchanged, with no added runtime payload.
 
 References: [Rust MSVC target requirements](https://github.com/rust-lang/rust/blob/main/src/doc/rustc/src/platform-support/windows-msvc.md),
 [Inno Setup MinVersion](https://jrsoftware.org/ishelp/topic_setup_minversion.htm).
