@@ -11,3 +11,8 @@ PATH detection walks segments using Unicode character indices consistently with 
 copying. The native smoke test installs/upgrades in a path containing spaces and Chinese
 characters so repeated installation cannot silently duplicate the owned PATH entry.
 Packaging changes run a separate installer-only CI check without publishing a release.
+
+Windows setup explicitly requires Windows 10 / Windows Server 2016 or newer
+(`MinVersion=10.0`), matching the Rust MSVC payload's supported OS floor. Portable
+downloads have the same OS requirement. This is separate from static CRT/DLL
+dependency checking; see [Windows payload checks](../docs/windows-runtime-check.md).

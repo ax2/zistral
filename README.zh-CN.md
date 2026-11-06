@@ -27,6 +27,7 @@ git diff | zi "生成一句简洁的提交说明"
 | Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.33.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | 双击安装，命令放到 `/usr/local/bin/zi` |
 
+Windows 构建面向 Windows 10+ / Windows Server 2016+（x64）。
 安装后直接运行 `zi`。Windows 安装结束可立即启动，或在开始菜单打开 zi；
 已经打开的终端需要重开一次以读取新的 PATH。无需安装 Rust、Python、Node.js 或 Visual C++ 运行库。
 升级保留已有模型配置；Windows 卸载只移除自身添加的 PATH 项，保留配置。

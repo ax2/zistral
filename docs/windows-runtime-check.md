@@ -52,6 +52,23 @@ loading, or replace clean-machine acceptance and actual installed behavior.
 It does not inspect the installer's own imports, bundle a model, or establish
 model-service access. Supported OS components still come from Windows.
 
+## Minimum Windows version
+
+Unreleased `main` explicitly sets `MinVersion=10.0` in the Windows installer,
+matching the Rust MSVC target's Windows 10+ / Windows Server 2016+ requirement.
+The check applies to the installer; portable users need the same supported OS.
+Leaving this directive unspecified uses Inno Setup's Windows 7 SP1 default,
+which must not be mistaken for the Rust executable's supported platform range.
+
+The existing native installer checks compile and exercise the package on the
+current Windows CI host. They do not simulate an older Windows version or claim
+an acceptance test on every supported edition/build. This change adds no bundled
+runtime and leaves application logic, model settings and installed file contents
+unchanged.
+
+References: [Rust MSVC target requirements](https://github.com/rust-lang/rust/blob/main/src/doc/rustc/src/platform-support/windows-msvc.md),
+[Inno Setup MinVersion](https://jrsoftware.org/ishelp/topic_setup_minversion.htm).
+
 Primary references: [Microsoft DUMPBIN /DEPENDENTS](https://learn.microsoft.com/en-us/cpp/build/reference/dependents?view=msvc-170),
 [Rust C runtime linkage](https://doc.rust-lang.org/reference/linkage.html#static-and-dynamic-c-runtimes),
 [Microsoft vswhere output encoding](https://github.com/microsoft/vswhere/wiki/Encoding).

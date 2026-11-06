@@ -32,6 +32,7 @@ Download a native installer from [Releases](https://github.com/ax2/zistral/relea
 
 Then type `zi`. On first launch, choose an existing Codex, WorkBuddy or dsh configuration,
 or enter your service and API key. No Rust, Python, Node.js or VC++ redistributable is needed.
+Windows builds target Windows 10+ / Windows Server 2016+ (x64).
 Windows setup can launch zi immediately; reopen existing terminals to refresh PATH.
 Upgrades retain your model settings. Uninstalling on Windows retains configuration and removes
 only the PATH entry owned by the installer. Linux requires glibc 2.35+ and system CA certificates.

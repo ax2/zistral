@@ -14,6 +14,7 @@ DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
+MinVersion=10.0
 ChangesEnvironment=yes
 WizardStyle=modern
 Compression=lzma2
