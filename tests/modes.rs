@@ -13,7 +13,7 @@ fn command(root: &Path) -> Command {
     let mut c = Command::new(binary);
     c.current_dir(root);
     for (name, _) in std::env::vars() {
-        if name.starts_with("ZI_")
+        if name.to_uppercase().starts_with("ZI_")
             || matches!(
                 name.to_uppercase().as_str(),
                 "OPENAI_API_KEY" | "ANTHROPIC_API_KEY" | "HTTP_PROXY" | "HTTPS_PROXY" | "ALL_PROXY"
@@ -322,4 +322,114 @@ fn model_tasks_still_allow_project_selectors_with_no_tools_in_every_protocol() {
         server.join().unwrap();
         assert!(!root.join("missing-project").exists());
     }
+}
+
+#[test]
+fn help_hides_environment_values_on_root_and_inherited_help_paths() {
+    let root = tempfile::tempdir().unwrap();
+    for args in [
+        vec!["--help"],
+        vec!["-h"],
+        vec!["help"],
+        vec!["config", "--help"],
+        vec!["models", "--help"],
+        vec!["doctor", "--help"],
+        vec!["use", "--help"],
+        vec!["data", "--help"],
+        vec!["presets", "--help"],
+        vec!["presets", "import", "--help"],
+        vec!["presets", "render", "--help"],
+        vec!["help", "config"],
+        vec!["help", "data"],
+        vec!["help", "presets", "import"],
+    ] {
+        let output = command(root.path())
+            .env(
+                "ZI_BASE_URL",
+                "https://user:HELP_URL_SECRET_993@service.example/v1?token=HELP_QUERY_SECRET_993",
+            )
+            .env("ZI_MODEL", "HELP_MODEL_VALUE_993-中\x1b[31mcolor\x1b[0m")
+            .env("ZI_API", "chat")
+            .env("ZI_CONFIG", root.path().join("HELP_CONFIG_VALUE_993.toml"))
+            .env("ZI_PROFILE", "HELP_PROFILE_VALUE_993")
+            .env(
+                "ZI_PRESETS",
+                root.path().join("HELP_PRESETS_VALUE_993.toml"),
+            )
+            .env("NO_COLOR", "1")
+            .args(&args)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "help failed: {args:?}");
+        assert!(
+            output.stderr.is_empty(),
+            "help wrote unexpected stderr: {args:?}"
+        );
+        let text = String::from_utf8(output.stdout).unwrap();
+        for marker in [
+            "HELP_URL_SECRET_993",
+            "HELP_QUERY_SECRET_993",
+            "HELP_MODEL_VALUE_993",
+            "HELP_CONFIG_VALUE_993",
+            "HELP_PROFILE_VALUE_993",
+            "HELP_PRESETS_VALUE_993",
+        ] {
+            assert!(
+                !text.contains(marker),
+                "help echoed an environment value: {args:?}"
+            );
+        }
+        let root_help = args.len() == 1;
+        for name in if root_help {
+            &[
+                "ZI_BASE_URL",
+                "ZI_MODEL",
+                "ZI_API",
+                "ZI_CONFIG",
+                "ZI_PROFILE",
+                "ZI_PRESETS",
+            ][..]
+        } else {
+            &["ZI_CONFIG", "ZI_PROFILE", "ZI_PRESETS"][..]
+        } {
+            assert!(
+                text.contains(&format!("[env: {name}]")),
+                "environment name missing from help: {name}, {args:?}"
+            );
+        }
+        assert!(!text.contains("ZI_API=chat"));
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
+    }
+}
+
+#[test]
+fn hiding_help_values_keeps_effective_environment_settings_for_model_preview() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("config.toml");
+    let original = b"model='saved-root'\nbase_url='http://localhost:2/v1'\napi='responses'\n[profiles.work]\nmodel='saved-work'\nbase_url='http://localhost:3/v1'\napi='responses'\n";
+    std::fs::write(&path, original).unwrap();
+    let output = command(root.path())
+        .env("ZI_CONFIG", &path)
+        .env("ZI_PROFILE", "work")
+        .env("ZI_MODEL", "selected-env-model")
+        .env("ZI_API", "chat")
+        .env("ZI_BASE_URL", "http://127.0.0.1:1/v1")
+        .env("ZI_API_KEY", "HELP_EFFECTIVE_KEY_993")
+        .args(["--preview", "--no-stream", "--no-tools", "Explain pipes"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "preview failed after help-only settings change"
+    );
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["request"]["body"]["model"], "selected-env-model");
+    assert_eq!(
+        value["request"]["url"],
+        "http://127.0.0.1:1/v1/chat/completions"
+    );
+    assert_eq!(value["network_requests"], 0);
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("HELP_EFFECTIVE_KEY_993"));
+    assert_eq!(std::fs::read(&path).unwrap(), original);
+    assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
 }

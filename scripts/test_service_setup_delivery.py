@@ -234,7 +234,27 @@ api_key_env='DELIVERY_MODEL_KEY'
             assert coordination.is_file() and not coordination.is_symlink() and coordination.stat().st_size == 0
             assert not metadata.with_name(metadata.name + '.lock').exists()
             assert read() == expected and not server.requests
-            checks.append(label + ': select/save budget/offline doctor preserve the effective profile/key source; metadata labels escape controls while JSON retains original values')
+            # Generated help must not disclose environment values, even when
+            # --config already overrides its inherited environment value.
+            help_settings = {'ZI_BASE_URL': 'https://user:' + KEY + '@service.example/v1?token=PROVIDER_BODY_993',
+                             'ZI_MODEL': 'HELP_ENV_VALUE_993-中', 'ZI_API': 'chat',
+                             'ZI_CONFIG': str(root / 'HELP_ENV_VALUE_993.toml'),
+                             'ZI_PROFILE': 'HELP_ENV_VALUE_993',
+                             'ZI_PRESETS': str(root / 'HELP_ENV_VALUE_993-presets.toml')}
+            assert not any(name in env for name in help_settings)
+            env.update(help_settings)
+            try:
+                for arguments in [['--help'], ['config', '--help'], ['help', 'config']]:
+                    text = run(arguments).stdout.decode('utf-8')
+                    assert 'HELP_ENV_VALUE_993' not in text, 'help disclosed environment values'
+                    assert all(name + '=' not in text for name in help_settings)
+                    for name in ['ZI_CONFIG', 'ZI_PROFILE', 'ZI_PRESETS']:
+                        assert '[env: ' + name + ']' in text, 'help lost an environment variable name'
+            finally:
+                for name in help_settings:
+                    env.pop(name)
+            assert read() == expected and not server.requests
+            checks.append(label + ': select/save budget/offline doctor preserve the effective profile/key source; metadata labels escape controls, JSON retains values and help hides environment values')
 
             # Change only the reference and explicitly remove its saved fallback.
             # The old variable stays present with a wrong value: subsequent real

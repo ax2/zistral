@@ -102,3 +102,23 @@ This is metadata display and repair guidance. Model answers, native task data,
 JSON values, file bytes, credential precedence and tool permissions are unchanged.
 It does not infer private URL path values, validate a model's service capability,
 add a source format, save task history or introduce a runtime dependency.
+
+## CLI help environment metadata (unreleased)
+
+Generated `-h`, `--help` and `help COMMAND` output keeps the supported environment
+variable names while hiding their current values. This covers model, service URL,
+protocol, profile, config path and preset path, including inherited global options
+on subcommand help. A URL containing unsupported user credentials or a query token
+must not be echoed just because help was requested; an explicit CLI override does
+not make printing the overridden environment value appropriate either.
+
+This changes help metadata only. Environment lookup, precedence, selected model
+and first-request preview remain unchanged. Help still exits successfully before
+configuration reads, input consumption, writes or model requests. Existing human
+diagnostics and versioned JSON retain their own display contracts; this does not
+redact arbitrary supplied arguments or the intentional contents of a preview.
+
+Actual CLI regressions cover 14 root/nested help paths and a model preview using
+the effective environment settings. Installed service workflows exercise root
+and inherited help under all protocol variants without extra provider requests.
+No dependency, command, permission, stored field or agent behavior is added.

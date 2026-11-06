@@ -55,25 +55,31 @@ pub struct Cli {
     #[arg(short = 's', long)]
     preset: Option<String>,
     /// User preset file (default: presets.toml beside the selected config)
-    #[arg(long, env = "ZI_PRESETS", global = true)]
+    #[arg(long, env = "ZI_PRESETS", hide_env_values = true, global = true)]
     presets: Option<PathBuf>,
     /// Set a literal preset variable; repeat for multiple NAME=VALUE pairs
     #[arg(long = "var", global = true)]
     vars: Vec<String>,
     /// Model identifier, overrides configuration
-    #[arg(short, long, env = "ZI_MODEL")]
+    #[arg(short, long, env = "ZI_MODEL", hide_env_values = true)]
     model: Option<String>,
     /// API root, normally ending in /v1
-    #[arg(long, env = "ZI_BASE_URL")]
+    #[arg(long, env = "ZI_BASE_URL", hide_env_values = true)]
     base_url: Option<String>,
     /// Wire protocol: chat, responses or anthropic
-    #[arg(long, env = "ZI_API", value_parser = ["chat", "responses", "anthropic"])]
+    #[arg(long, env = "ZI_API", hide_env_values = true, value_parser = ["chat", "responses", "anthropic"])]
     api: Option<String>,
     /// Configuration file (default: platform config directory/zistral/config.toml)
-    #[arg(long, env = "ZI_CONFIG", global = true)]
+    #[arg(long, env = "ZI_CONFIG", hide_env_values = true, global = true)]
     config: Option<PathBuf>,
     /// Select a saved model profile for this invocation
-    #[arg(short = 'p', long, env = "ZI_PROFILE", global = true)]
+    #[arg(
+        short = 'p',
+        long,
+        env = "ZI_PROFILE",
+        hide_env_values = true,
+        global = true
+    )]
     profile: Option<String>,
     /// Stream text even when stdout is redirected (partial output on errors)
     #[arg(long, conflicts_with_all = ["no_stream", "json", "count", "select", "config_example"])]
