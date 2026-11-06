@@ -21,6 +21,9 @@ tag = 'v' + version
 assert os.environ.get('RELEASE_TAG', tag) == tag
 binary_name = 'zi.exe' if os.name == 'nt' else 'zi'
 binary = (args.binary or root / 'target' / args.target / 'release' / binary_name).resolve()
+if os.name == 'nt':
+    from windows_runtime import verify as verify_windows_runtime
+    print(json.dumps(verify_windows_runtime(binary), sort_keys=True))
 assert subprocess.check_output([str(binary), '--version'], text=True).strip() == 'zi ' + version
 count = json.loads(subprocess.check_output([str(binary), '--count'], input='你好'.encode()))
 assert count['characters'] == 2 and count['cjk_characters'] == 2

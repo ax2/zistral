@@ -99,6 +99,16 @@ that exact SHA to pass when present, alongside normal CI. These temporary artifa
 are CI candidates, not a GitHub Release; the package version remains unchanged during
 ordinary development and can match an already published version.
 
+Before producing Windows archives/installers, packaging inspects the actual binary
+with the build host's Microsoft DUMPBIN and refuses unreviewed DLL imports. The
+[standalone-payload gate](windows-runtime-check.md) records the checked binary's
+digest; six portable rules join the existing 27 metadata rules in normal CI.
+Release preparation runs these rules too, and actual Release packaging uses the
+same gate. DUMPBIN/Visual Studio discovery and Python stay on the build host.
+Changes to `.cargo/config.toml` or the checker trigger candidate native checks.
+This is direct-import validation, not proof of all OS/dynamic-loading behavior;
+retain the actual install/workflow/uninstall checks below.
+
 Windows exercises repeated installation into a path with spaces/Chinese characters,
 legacy duplicate PATH repair, user-owned PATH preservation, uninstall and configuration
 preservation. The Unix verifier checks the entire portable archive's expected members,

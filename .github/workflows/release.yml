@@ -34,6 +34,7 @@ jobs:
           python scripts/test_release_notes.py
           python scripts/test_release_target.py
           python scripts/test_unix_installer_rules.py
+          python scripts/test_windows_runtime.py
           python scripts/release_notes.py "${{ steps.version.outputs.tag }}" > /dev/null
       - name: Skip versions already released
         id: check

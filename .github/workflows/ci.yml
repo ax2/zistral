@@ -17,6 +17,7 @@ jobs:
       - run: python scripts/test_release_target.py
       - run: python scripts/test_unix_installer_rules.py
       - run: python scripts/test_upgrade_baseline.py
+      - run: python scripts/test_windows_runtime.py
   test:
     strategy:
       fail-fast: false
