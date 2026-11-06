@@ -34,7 +34,7 @@ use std::path::PathBuf;
     bin_name = "zi",
     version,
     subcommand_precedence_over_arg = true,
-    after_help = "Examples:\n  zi config\n  zi --preview --no-stream -i data.json 'Summarize the input'\n  cat data.json | zi 'Join the first item of .abc'\n  cat article.txt | zi 对内容进行字数统计\n  cat article.txt | zi --count\n  cat data.json | zi --select /abc/0 --join ','\n\nRun zi config once to save your model service and API key.\nUse --config-example to print a configuration template."
+    after_help = "Examples:\n  zi config\n  zi use work\n  zi doctor --json\n  zi --preview --no-stream -i data.json 'Summarize the input'\n  cat data.json | zi 'Join the first item of .abc'\n  cat article.txt | zi 对内容进行字数统计\n  cat article.txt | zi --count\n  cat data.json | zi --select /abc/0 --join ','\n\nRun zi config once to save your model service and API key.\nUse zi COMMAND --help for command-specific options and examples.\nUse --config-example to print a configuration template.\nmodels is offline; models --remote and doctor --probe explicitly contact the service."
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -43,34 +43,62 @@ pub struct Cli {
     #[arg(trailing_var_arg = true)]
     prompt: Vec<String>,
     /// Read UTF-8 data from a file instead of stdin; '-' means stdin
-    #[arg(short = 'i', long, global = true)]
+    #[arg(short = 'i', long, global = true, help_heading = "Input and output")]
     input: Option<PathBuf>,
     /// Save the complete result to a file; '-' keeps stdout. Default: never overwrite
-    #[arg(short = 'o', long, global = true)]
+    #[arg(short = 'o', long, global = true, help_heading = "Input and output")]
     output: Option<PathBuf>,
     /// Replace an existing regular output file after a successful task
-    #[arg(long, global = true, requires = "output")]
+    #[arg(
+        long,
+        global = true,
+        requires = "output",
+        help_heading = "Input and output"
+    )]
     force: bool,
     /// Use a builtin or user-defined task preset (zi presets lists names)
-    #[arg(short = 's', long)]
+    #[arg(short = 's', long, help_heading = "Task presets")]
     preset: Option<String>,
     /// User preset file (default: presets.toml beside the selected config)
-    #[arg(long, env = "ZI_PRESETS", hide_env_values = true, global = true)]
+    #[arg(
+        long,
+        env = "ZI_PRESETS",
+        hide_env_values = true,
+        global = true,
+        help_heading = "Task presets"
+    )]
     presets: Option<PathBuf>,
     /// Set a literal preset variable; repeat for multiple NAME=VALUE pairs
-    #[arg(long = "var", global = true)]
+    #[arg(long = "var", global = true, help_heading = "Task presets")]
     vars: Vec<String>,
     /// Model identifier, overrides configuration
-    #[arg(short, long, env = "ZI_MODEL", hide_env_values = true)]
+    #[arg(
+        short,
+        long,
+        env = "ZI_MODEL",
+        hide_env_values = true,
+        help_heading = "Models and service"
+    )]
     model: Option<String>,
     /// API root, normally ending in /v1
-    #[arg(long, env = "ZI_BASE_URL", hide_env_values = true)]
+    #[arg(
+        long,
+        env = "ZI_BASE_URL",
+        hide_env_values = true,
+        help_heading = "Models and service"
+    )]
     base_url: Option<String>,
     /// Wire protocol: chat, responses or anthropic
-    #[arg(long, env = "ZI_API", hide_env_values = true, value_parser = ["chat", "responses", "anthropic"])]
+    #[arg(long, env = "ZI_API", hide_env_values = true, value_parser = ["chat", "responses", "anthropic"], help_heading = "Models and service")]
     api: Option<String>,
     /// Configuration file (default: platform config directory/zistral/config.toml)
-    #[arg(long, env = "ZI_CONFIG", hide_env_values = true, global = true)]
+    #[arg(
+        long,
+        env = "ZI_CONFIG",
+        hide_env_values = true,
+        global = true,
+        help_heading = "Models and service"
+    )]
     config: Option<PathBuf>,
     /// Select a saved model profile for this invocation
     #[arg(
@@ -78,83 +106,89 @@ pub struct Cli {
         long,
         env = "ZI_PROFILE",
         hide_env_values = true,
-        global = true
+        global = true,
+        help_heading = "Models and service"
     )]
     profile: Option<String>,
     /// Stream text even when stdout is redirected (partial output on errors)
-    #[arg(long, conflicts_with_all = ["no_stream", "json", "count", "select", "config_example"])]
+    #[arg(long, conflicts_with_all = ["no_stream", "json", "count", "select", "config_example"], help_heading = "Results and previews")]
     stream: bool,
     /// Wait for the complete answer, including in a terminal
-    #[arg(long)]
+    #[arg(long, help_heading = "Results and previews")]
     no_stream: bool,
     /// Print a configuration template without reading input or contacting a model
-    #[arg(long, conflicts_with_all = ["count", "select", "json", "input", "prompt"])]
+    #[arg(long, conflicts_with_all = ["count", "select", "json", "input", "prompt"], help_heading = "Models and service")]
     config_example: bool,
     /// Require valid JSON output and emit compact JSON
-    #[arg(long)]
+    #[arg(long, help_heading = "Results and previews")]
     json: bool,
     /// Return one successful native data tool result without a model rewrite
-    #[arg(long, conflicts_with_all = ["no_tools", "stream", "count", "select", "config_example", "agent", "cwd", "read_only", "no_exec"])]
+    #[arg(long, conflicts_with_all = ["no_tools", "stream", "count", "select", "config_example", "agent", "cwd", "read_only", "no_exec"], help_heading = "Results and previews")]
     exact: bool,
     /// Export the chosen native transform as a version-1 TOML recipe, without executing it
-    #[arg(long, requires = "exact", conflicts_with = "json")]
+    #[arg(
+        long,
+        requires = "exact",
+        conflicts_with = "json",
+        help_heading = "Results and previews"
+    )]
     export_plan: bool,
     /// Preview the first model request as JSON, without network/tool execution or credential headers
-    #[arg(long, conflicts_with_all = ["count", "select", "config_example"])]
+    #[arg(long, conflicts_with_all = ["count", "select", "config_example"], help_heading = "Results and previews")]
     preview: bool,
     /// Disable built-in agent tools (for text-only models)
-    #[arg(long)]
+    #[arg(long, help_heading = "Request controls")]
     no_tools: bool,
     /// Disable terminal decorations and progress (pipe output is always plain)
-    #[arg(long, global = true)]
+    #[arg(long, global = true, help_heading = "Display")]
     plain: bool,
     /// Print tool activity to stderr
-    #[arg(short, long)]
+    #[arg(short, long, help_heading = "Display")]
     verbose: bool,
     /// Enable project file, planning, Git and shell tools in the current directory
-    #[arg(long)]
+    #[arg(long, help_heading = "Project tools")]
     agent: bool,
     /// Select a project directory and enable project tools
-    #[arg(short = 'C', long)]
+    #[arg(short = 'C', long, help_heading = "Project tools")]
     cwd: Option<PathBuf>,
     /// Enable project inspection but disable file changes and shell commands
-    #[arg(long)]
+    #[arg(long, help_heading = "Project tools")]
     read_only: bool,
     /// Enable project tools but disable arbitrary shell commands
-    #[arg(long)]
+    #[arg(long, help_heading = "Project tools")]
     no_exec: bool,
     /// Maximum duration of each project command (seconds)
-    #[arg(long, default_value_t = 60, value_parser = clap::value_parser!(u64).range(1..=3600))]
+    #[arg(long, default_value_t = 60, value_parser = clap::value_parser!(u64).range(1..=3600), help_heading = "Project tools")]
     command_timeout: u64,
     /// Maximum model turns, excluding transient retries (default: project 32, data 8)
-    #[arg(long, value_parser = clap::value_parser!(u32).range(1..=128))]
+    #[arg(long, value_parser = clap::value_parser!(u32).range(1..=128), help_heading = "Request controls")]
     max_steps: Option<u32>,
     /// Timeout per HTTP request in seconds
-    #[arg(long, default_value_t = 120, value_parser = clap::value_parser!(u64).range(1..=3600))]
+    #[arg(long, default_value_t = 120, value_parser = clap::value_parser!(u64).range(1..=3600), help_heading = "Request controls")]
     timeout: u64,
     /// Extra attempts per model turn for transient HTTP errors (0-3; default: no retry)
-    #[arg(long, default_value_t = 0, value_parser = clap::value_parser!(u32).range(0..=3))]
+    #[arg(long, default_value_t = 0, value_parser = clap::value_parser!(u32).range(0..=3), help_heading = "Request controls")]
     retries: u32,
     /// Requested output-token cap per model turn (Anthropic default: 4096; others: omitted)
-    #[arg(long, value_parser = clap::value_parser!(u32).range(1..=65536))]
+    #[arg(long, value_parser = clap::value_parser!(u32).range(1..=65536), help_heading = "Request controls")]
     max_output_tokens: Option<u32>,
     /// Ignore saved model request-budget preferences for this invocation
-    #[arg(long)]
+    #[arg(long, help_heading = "Request controls")]
     no_profile_budget: bool,
     /// Chat cap field (model default: max_completion_tokens; probe default: max_tokens)
-    #[arg(long, value_parser = ["max_completion_tokens", "max_tokens"])]
+    #[arg(long, value_parser = ["max_completion_tokens", "max_tokens"], help_heading = "Request controls")]
     chat_token_limit_field: Option<String>,
     /// Maximum input size in bytes
-    #[arg(long, global = true, default_value_t = 8_388_608, value_parser = clap::value_parser!(u64).range(1..=67_108_864))]
+    #[arg(long, global = true, default_value_t = 8_388_608, value_parser = clap::value_parser!(u64).range(1..=67_108_864), help_heading = "Input and output")]
     max_input: u64,
     /// Count text locally, without a model or API key
-    #[arg(long, conflicts_with = "select")]
+    #[arg(long, conflicts_with = "select", help_heading = "Offline shortcuts")]
     count: bool,
     /// Select a JSON value locally using an RFC 6901 pointer, e.g. /abc/0
-    #[arg(long)]
+    #[arg(long, help_heading = "Offline shortcuts")]
     select: Option<String>,
     /// Join selected array values with this separator (requires --select)
-    #[arg(long, requires = "select")]
+    #[arg(long, requires = "select", help_heading = "Offline shortcuts")]
     join: Option<String>,
 }
 
@@ -229,36 +263,39 @@ enum Commands {
         json_report: bool,
     },
     /// Save or import a model configuration (optionally named)
+    #[command(
+        after_help = "Examples:\n  zi config --name work\n  zi config --list\n  zi config --name work --manual\n  zi config --name work --max-output-tokens 512\n  zi config --name work --api-key-env WORK_API_KEY\n  zi config --rename work personal\n  zi config --name personal --clear-output-budget\n\nWithout maintenance flags, setup uses an interactive terminal; --manual skips detection.\nBudget, key-reference and profile maintenance edit existing settings offline.\n--api-key-env stores a variable name, not its value; set that variable separately.\nTask input/output options do not apply to this command."
+    )]
     Config {
         /// Save/edit this named profile, preserving all other models
-        #[arg(long)]
+        #[arg(long, help_heading = "Models and service")]
         name: Option<String>,
         /// Skip detection and enter settings manually
-        #[arg(long)]
+        #[arg(long, help_heading = "Setup and import")]
         manual: bool,
         /// List detected model configurations without importing or showing keys
-        #[arg(long, conflicts_with_all = ["manual", "name"])]
+        #[arg(long, conflicts_with_all = ["manual", "name"], help_heading = "Setup and import")]
         list: bool,
         /// Save a per-turn token cap for an existing profile, without interactive setup
-        #[arg(long = "max-output-tokens", value_parser = clap::value_parser!(u32).range(1..=65536), conflicts_with_all = ["manual", "list"])]
+        #[arg(long = "max-output-tokens", value_parser = clap::value_parser!(u32).range(1..=65536), conflicts_with_all = ["manual", "list"], help_heading = "Saved request preferences")]
         request_limit: Option<u32>,
         /// Save the Chat budget field for an existing profile
-        #[arg(long = "chat-token-limit-field", value_parser = ["max_completion_tokens", "max_tokens"], conflicts_with_all = ["manual", "list"])]
+        #[arg(long = "chat-token-limit-field", value_parser = ["max_completion_tokens", "max_tokens"], conflicts_with_all = ["manual", "list"], help_heading = "Saved request preferences")]
         chat_limit_field: Option<String>,
         /// Clear both saved output-budget preferences; keep model/key/default selection
-        #[arg(long, conflicts_with_all = ["manual", "list", "request_limit", "chat_limit_field"])]
+        #[arg(long, conflicts_with_all = ["manual", "list", "request_limit", "chat_limit_field"], help_heading = "Saved request preferences")]
         clear_output_budget: bool,
         /// Rename a saved named profile; update the saved selection if necessary
-        #[arg(long, num_args = 2, value_names = ["OLD", "NEW"], conflicts_with_all = ["name", "manual", "list", "request_limit", "chat_limit_field", "clear_output_budget", "remove"])]
+        #[arg(long, num_args = 2, value_names = ["OLD", "NEW"], conflicts_with_all = ["name", "manual", "list", "request_limit", "chat_limit_field", "clear_output_budget", "remove"], help_heading = "Profile maintenance")]
         rename: Vec<String>,
         /// Remove an inactive named profile; default and saved active profiles are protected
-        #[arg(long, value_name = "NAME", conflicts_with_all = ["name", "manual", "list", "request_limit", "chat_limit_field", "clear_output_budget"])]
+        #[arg(long, value_name = "NAME", conflicts_with_all = ["name", "manual", "list", "request_limit", "chat_limit_field", "clear_output_budget"], help_heading = "Profile maintenance")]
         remove: Option<String>,
         /// Set the API-key environment reference of an existing profile, offline
-        #[arg(long = "api-key-env", value_name = "NAME", value_parser = config::parse_key_env, conflicts_with_all = ["manual", "list", "request_limit", "chat_limit_field", "clear_output_budget", "rename", "remove"])]
+        #[arg(long = "api-key-env", value_name = "NAME", value_parser = config::parse_key_env, conflicts_with_all = ["manual", "list", "request_limit", "chat_limit_field", "clear_output_budget", "rename", "remove"], help_heading = "Saved credentials")]
         key_env: Option<String>,
         /// Remove only the saved literal key; keep environment references and other settings
-        #[arg(long, conflicts_with_all = ["manual", "list", "request_limit", "chat_limit_field", "clear_output_budget", "rename", "remove"])]
+        #[arg(long, conflicts_with_all = ["manual", "list", "request_limit", "chat_limit_field", "clear_output_budget", "rename", "remove"], help_heading = "Saved credentials")]
         clear_saved_key: bool,
     },
 }

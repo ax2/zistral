@@ -60,3 +60,17 @@ See [exact data results](exact-results.md).
 resolution. Incompatible preset tasks fail before input/output or model requests; an
 interactive rejected task clears any retained result. The output is a version-1 TOML
 recipe; no data transformation runs. Existing exact-mode conflicts remain.
+
+## Finding options in help (unreleased)
+
+`zi --help` groups existing options by input/output, task presets, models/service,
+result/preview behavior, request controls, display, project tools and offline
+shortcuts. `zi config --help` separates target selection, interactive setup/import,
+saved request preferences, profile maintenance and saved credentials. Its examples
+distinguish interactive setup from offline edits of existing profiles.
+
+These headings and examples are navigation only: no flag, default, accepted
+combination, environment precedence or task mode changes. Shared task input/output
+options still do not apply to `config`. Environment variable names remain visible
+without their values; use `doctor` to inspect effective settings. Machine-readable
+diagnostics, request previews and task pipe/file output retain their own contracts.
