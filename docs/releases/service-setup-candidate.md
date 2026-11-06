@@ -11,7 +11,8 @@ The verified source for this review is
 Its application source is unchanged from `c736fca`; the follow-up adds pinned
 published-installer verification. Later runtime, packaging or test changes need
 their own evidence. This document replaces the earlier incremental candidate
-notes; the links below refer to this exact baseline.
+notes; the original validation section refers to this exact baseline.
+Subsequent changes are recorded separately below rather than folded into its counts.
 
 ## One complete use case
 
@@ -35,6 +36,10 @@ Existing offline data/recipe workflows remain independent of model services.
 
 Prompt/display corrections, protocol variants, regressions, packaging and this
 documentation support those eight outcomes; they are not extra counted features.
+
+For step-by-step Chinese instructions, see the [usage guide](../service-setup.zh-CN.md).
+It distinguishes offline diagnosis/preview from explicit provider calls and shows
+exit-status-aware PowerShell handling; it is not an installation guide for stable 0.33.0.
 
 ## Configure, inspect, run
 
@@ -148,6 +153,42 @@ preview/request equality, native-tool followups, stream output and failed-file
 preservation. Real-terminal tests additionally exercise effective-key imports,
 override removal and stale-wizard conflicts. These are controlled checks, not
 real-account access or model-quality scores.
+
+## Verified follow-ups (2026-11-06)
+
+The original `0850ca6` baseline and its counts above remain unchanged. These later
+commits have their own exact-source CI and native-installation evidence:
+
+| Source | Refinement within the same eight outcomes | Exact validation | Rust tests: Windows / macOS / Linux |
+| --- | --- | --- | --- |
+| [`4b4f2a9`](https://github.com/ax2/zistral/commit/4b4f2a93195bc3a96bca1e9621c5ac3b083801ba) | Coordinate preset-library imports across destination reading, merging and publication; avoid successful concurrent imports losing a definition | [CI](https://github.com/ax2/zistral/actions/runs/41991451363), [native](https://github.com/ax2/zistral/actions/runs/41991451411) | 409 / 412 / 413 |
+| [`88c970d`](https://github.com/ax2/zistral/commit/88c970d0ef3e7e09c89ac33585d9c418554d7437) | Fixed typed configuration error codes/advice in diagnostic JSON, preserving existing human errors and IO cause chains | [CI](https://github.com/ax2/zistral/actions/runs/41998926373), [native](https://github.com/ax2/zistral/actions/runs/41998926189) | 412 / 415 / 416 |
+| [`88d1e77`](https://github.com/ax2/zistral/commit/88d1e7764691bbd73aadf7bfde31ad6583307824) | Preserve configuration-file symbolic links; reject saves before prompts and at publication, retaining read-only support | [CI](https://github.com/ax2/zistral/actions/runs/42141374032), [native](https://github.com/ax2/zistral/actions/runs/42141373779) | 413 / 419 / 420 |
+
+Each row passed five CI jobs, 23 Rust suites per platform with zero ignored tests,
+the same 8 + 7 + 40 executable workflow checks and 27 metadata rules. Its three
+native jobs installed the pinned official 0.33.0 baseline and replaced/reinstalled
+with the candidate; Windows retained five candidate installation scenarios, and
+each Unix platform checked one portable copy plus two native installations.
+Every row still reports `package_version_changed: false`; none is a new release.
+
+At `88d1e77`, Unix portable/native checks additionally read linked settings through
+three commands and reject seven write variants on each of three copies per
+platform, preserving both the link and target bytes without save artifacts.
+Terminal regressions cover manual/import startup, dangling links and an
+identical-byte link introduced while the wizard is open. Windows local file-link
+creation was unavailable (OS privilege 1314); that local capability failure is not
+claimed as a passed Windows symbolic-link exercise. The shared non-regular-file
+guard and ordinary Windows regression/installation checks passed.
+
+The Chinese guide's noninteractive examples were replayed against the actual
+optimized Windows executable from `88d1e77`: 28 checks, seven synthetic loopback
+requests, zero real-provider requests. They cover diagnostic status/version
+handling in PowerShell, modern/legacy saved caps, explicit catalogue/probe,
+preview/request equality, pipe/file/stream output, failed-file preservation and
+offline maintenance. Manual/import prompts use the separate terminal regressions;
+the guide replay is not additional feature count, provider access or final-asset
+evidence. Its fixtures and keys are synthetic and temporary.
 
 ## Compatibility and remaining publication work
 

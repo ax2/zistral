@@ -17,6 +17,8 @@ cat notes.txt | zi "Summarize in three sentences" > summary.txt
 collects eight related configuration, diagnosis, request-control and credential
 improvements with exact CI/native evidence. Stable v0.33.0 downloads do not contain
 that batch; ordinary development commits do not publish a new version.
+A [Chinese walkthrough](docs/service-setup.zh-CN.md) covers setup, offline checks,
+preview, pipes/files and maintenance, including a PowerShell report consumer.
 
 ## Install and start
 
