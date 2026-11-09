@@ -34,6 +34,7 @@ jobs:
           python scripts/test_release_notes.py
           python scripts/test_release_target.py
           python scripts/test_unix_installer_rules.py
+          python scripts/test_upgrade_baseline.py
           python scripts/test_windows_runtime.py
           python scripts/release_notes.py "${{ steps.version.outputs.tag }}" > /dev/null
       - name: Skip versions already released
@@ -89,18 +90,18 @@ jobs:
       - run: cargo build --release --locked --target ${{ matrix.target }}
       - name: Package native installer and portable archive
         run: python scripts/package.py --target ${{ matrix.target }}
-      - name: Test Windows installation, upgrade and uninstall
+      - name: Download pinned upgrade baseline and require a newer release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/upgrade_baseline.py --download --assets upgrade-baseline --target ${{ matrix.target }} --candidate-tag ${{ env.RELEASE_TAG }}
+      - name: Test published Windows upgrade, reinstall and uninstall
         if: runner.os == 'Windows'
         shell: pwsh
-        run: ./scripts/test-install.ps1
-      - name: Test Linux installation and uninstall
-        if: runner.os == 'Linux'
+        run: ./scripts/test-install.ps1 -BaselineAssets upgrade-baseline
+      - name: Test portable and published native Unix upgrades
+        if: runner.os != 'Windows'
         run: |
-          python scripts/test-install-unix.py --target "$TARGET" --binary "target/$TARGET/release/zi" --dist dist
-      - name: Test macOS installation
-        if: runner.os == 'macOS'
-        run: |
-          python scripts/test-install-unix.py --target "$TARGET" --binary "target/$TARGET/release/zi" --dist dist
+          python scripts/test-install-unix.py --target "$TARGET" --binary "target/$TARGET/release/zi" --dist dist --baseline-assets upgrade-baseline
       - uses: actions/upload-artifact@v4
         with:
           name: release-${{ matrix.target }}

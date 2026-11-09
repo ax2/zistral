@@ -7,15 +7,28 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import re
 import subprocess
 import sys
 
 BASELINE = json.loads(Path(__file__).with_name('stable-upgrade-baseline.json').read_text())
 
 
-def verify(assets, target, download=False):
+def require_newer(candidate_tag, baseline_version):
+    stable_tag = r'v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)'
+    candidate = re.fullmatch(stable_tag, candidate_tag)
+    baseline = re.fullmatch(stable_tag, 'v' + baseline_version)
+    if not candidate or not baseline:
+        raise ValueError('candidate and baseline must use stable major.minor.patch versions')
+    if tuple(map(int, candidate.groups())) <= tuple(map(int, baseline.groups())):
+        raise ValueError('release candidate must be newer than the pinned upgrade baseline')
+
+
+def verify(assets, target, download=False, *, candidate_tag=None):
     if sys.flags.optimize:
         raise RuntimeError('Run baseline verification without -O')
+    if candidate_tag is not None:
+        require_newer(candidate_tag, BASELINE['version'])
     entry = BASELINE['targets'].get(target)
     if entry is None:
         raise ValueError('unsupported upgrade baseline target')
@@ -54,5 +67,10 @@ if __name__ == '__main__':
     parser.add_argument('--assets', type=Path, required=True)
     parser.add_argument('--target', choices=BASELINE['targets'], required=True)
     parser.add_argument('--download', action='store_true')
+    parser.add_argument('--candidate-tag', help='Require a release newer than the pinned baseline')
     args = parser.parse_args()
-    print(json.dumps(verify(args.assets, args.target, args.download)))
+    try:
+        report = verify(args.assets, args.target, args.download, candidate_tag=args.candidate_tag)
+    except ValueError as error:
+        parser.error(str(error))
+    print(json.dumps(report))

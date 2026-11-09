@@ -94,6 +94,25 @@ class BaselineRules(unittest.TestCase):
             with self.assertRaises(ValueError):module.verify(self.root/'missing','test',True)
         run.assert_not_called();self.assertFalse((self.root/'missing').exists())
 
+    def test_release_candidate_must_be_strictly_newer_before_download(self):
+        destination = self.root / 'download'
+        with patch.object(module.subprocess, 'run') as run:
+            for tag in ['v0.33.0', 'v0.32.99', 'v0.9.100', 'v0.33.1-rc1', 'v0.033.1', '']:
+                with self.subTest(tag=tag), self.assertRaises(ValueError):
+                    module.verify(destination, 'test', download=True, candidate_tag=tag)
+            run.assert_not_called()
+        self.assertFalse(destination.exists())
+
+    def test_newer_release_tags_use_numeric_order_and_verify_the_same_baseline(self):
+        self.manifest['version'] = '0.9.9'
+        self.manifest['tag'] = 'v0.9.9'
+        path = self.seed()
+        for tag in ['v0.9.10', 'v0.10.0', 'v1.0.0']:
+            with self.subTest(tag=tag):
+                report = module.verify(self.root, 'test', candidate_tag=tag)
+                self.assertEqual(report['tag'], 'v0.9.9')
+                self.assertEqual(report['installer'], str(path.resolve()))
+
     def test_optimized_python_refuses_before_creating_download_directory(self):
         destination=self.root/'download'
         result=subprocess.run([sys.executable,'-B','-O',str(Path(module.__file__)),

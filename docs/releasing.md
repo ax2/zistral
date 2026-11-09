@@ -121,22 +121,23 @@ only for clean disposable runners. Python optimization is rejected before instal
 commands because verification assertions must stay enabled. No recursive user-directory
 cleanup or system package removal outside the known fresh test installation is used.
 
-Candidate checks additionally install the checksum-pinned official v0.33.0 package
-before the candidate, verifying both executable identities and byte-for-byte legacy
+Candidate and Release checks install the checksum-pinned official v0.33.0 package
+before the new build, verifying both executable identities and byte-for-byte legacy
 configuration preservation. Download preparation uses `gh` only on the disposable
 test host. The [baseline manifest](../scripts/stable-upgrade-baseline.json) fixes
 the public installer size/digest and matching executable digest; updating it requires
 review of verified official assets, rather than following a mutable latest release.
 
 Candidate metadata currently still says 0.33.0, so reports explicitly distinguish
-published-code replacement from a different package version. Before publishing a
-selected version, require actual stable-to-new-version native upgrades and final
-official artifact verification; same-version replacements do not establish them.
+published-code replacement from a different package version. The Release workflow
+requires a version newer than the pinned baseline and upgrades all three native
+packages before publishing. Final verification checks the actual downloadable
+assets after publication.
 The isolated configuration is removed only after preservation checks; it is not a credential migration or secure-erasure test. Archive/guard rule tests
 run in normal CI without native installation. No new zi runtime dependency is added.
 Keep the Windows artifact name `installer-check-SHA`; Unix artifacts add their target
 to that name. All candidate artifacts expire after seven days. Release reuses the same
-Unix verifier against its final native/portable packages before publication.
+Windows and Unix verifiers against the final packages before publication.
 The installed executable also runs the [service-setup delivery check](service-setup-verification.md)
 against a synthetic loopback server: profile selection, saved budgets, catalogue discovery,
 versioned diagnostics/probe, a native-tool followup, explicit streaming and failed-file
