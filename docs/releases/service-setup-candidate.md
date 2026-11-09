@@ -229,10 +229,21 @@ zi config --name default --clear-output-budget
 zi config --name personal --clear-output-budget
 ```
 
-Repeat for every other affected named profile. Clearing requires valid typed TOML,
-not a model/protocol; other config edits still reserialize formatting/comments.
-Existing key-reference fields are not new schema fields. An older zi does not
-honor the new coordination lock. Runtime settings remain snapshots per task.
+Repeat for every other affected named profile. Clearing requires valid typed
+TOML and also works for a profile without a model or with an obsolete protocol.
+Config writes reserialize the document, so layout and comments can change.
+
+A Windows and Linux rollback rehearsal used the official v0.33.0 executable and
+candidate [`f5e330f`](https://github.com/ax2/zistral/commit/f5e330f235f8a0770d7bc438641b5c6ec646c216).
+The stable binary rejected the document until budgets were cleared from all four
+fixture profiles, including an inactive profile and an unconfigured profile.
+After clearing, the parsed TOML matched the legacy settings. The stable binary
+listed the same models and used the same exact endpoint and environment key in
+controlled loopback requests. This exercised configuration compatibility on
+Windows and Linux, with no real provider calls.
+
+Existing key-reference fields are unchanged. An older zi does not honor the new
+coordination lock. Runtime settings remain snapshots per task.
 
 Keep package metadata unchanged until a grouped release is selected. Normal
 reviews are at most weekly; completion of this review or a commit is not a
