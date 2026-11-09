@@ -31,7 +31,7 @@ Existing offline data/recipe workflows remain independent of model services.
 | Diagnose in scripts | `doctor --json` returns one bounded version-1 report and meaningful exit code | Offline by default; explicit probe only. Safe typed errors, no keys or raw provider bodies. [JSON contract](../doctor-json.md) |
 | Discover a service's model IDs | Explicit `models --remote [--json]` | Bounded same-origin catalogue GETs; no task body, selection or config write. Plain `models` and `/models` stay offline. [Catalogue](../model-catalogue.md) |
 | Maintain saved profiles and keys offline | Rename/remove named profiles, change a key-variable reference, explicitly clear a saved literal | Protect root/saved-active removal; preserve unrelated settings/default selection. Key metadata edits do not read/copy variable values. [Profiles](../profile-maintenance.md), [keys](../key-settings.md) |
-| Import reusable credential references | Supported Codex/WorkBuddy/CodeBuddy/dsh imports retain an available selected variable name | Effective zi environment keys avoid redundant entry without replacing the source's literal/reference. No account/session-token import, source-file edits or automatic migration. [Import rules](../import-key-references.md) |
+| Import reusable credential references | Supported Codex, WorkBuddy/CodeBuddy, dsh and personal Claude Code API imports retain an available selected variable name | The wizard uses zi’s effective credential precedence and leaves source files untouched. Claude Code uses ordinary Anthropic Messages authentication. [Import rules](../import-key-references.md), [Claude Code scope](../claude-code-import.md) |
 | Save safely from multiple terminals | Stale wizards cannot overwrite newer settings or restore a removed key | Exact snapshots plus a local OS lock; busy/conflict saves fail without merging. Restart to reload. [Save conflicts and scope](../configuration-saves.md) |
 
 Prompt/display corrections, protocol variants, regressions, packaging and this
@@ -189,6 +189,28 @@ preview/request equality, pipe/file/stream output, failed-file preservation and
 offline maintenance. Manual/import prompts use the separate terminal regressions;
 the guide replay is not additional feature count, provider access or final-asset
 evidence. Its fixtures and keys are synthetic and temporary.
+
+## Current candidate evidence (2026-11-09)
+
+[`206825f`](https://github.com/ax2/zistral/commit/206825f189810f79b962962de9968a03aa7ce12c)
+adds personal Claude Code API settings to the existing import outcome. Terminal
+checks cover a literal key, an environment reference with rotation, missing-key
+entry, and source-file preservation. The rotation suite exercises eight source
+forms and 16 controlled requests. The Chinese guide also passed its 28 checks
+against the optimized Windows build, using seven synthetic loopback requests.
+The guide replay and terminal suite make no real provider requests.
+[CI](https://github.com/ax2/zistral/actions/runs/42551328623) ·
+[Candidate installs](https://github.com/ax2/zistral/actions/runs/42551328604)
+
+[`6bf5bd1`](https://github.com/ax2/zistral/commit/6bf5bd1172ec83710c0e793d9859f48969f895d9)
+adds a gate to the formal Release workflow. Each platform must install the
+checksum-pinned v0.33.0 package, then install the newer release build and verify
+the executable and complete legacy configuration before artifact upload.
+The exact commit passed 418 Windows, 424 macOS and 425 Linux Rust tests,
+35 metadata rules and three candidate installer jobs. Those candidate jobs still
+report `package_version_changed: false`. The formal cross-version gate runs after
+version selection. [CI](https://github.com/ax2/zistral/actions/runs/42552081709) ·
+[Candidate installs](https://github.com/ax2/zistral/actions/runs/42552081657)
 
 ## Compatibility and remaining publication work
 
