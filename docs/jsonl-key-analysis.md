@@ -105,8 +105,14 @@ offline operations/preview do not. No arbitrary model-supplied scripts are execu
   you explicitly deduplicate first. There is no sum, numeric sort or multidimensional
   grouping hidden behind the command.
 
-Every record is validated, even one later removed as a duplicate. Blank records, invalid
-JSON/strings, missing keys, ambiguous referenced duplicate object keys or nonstring selected
+The development build supports `jsonl-count-by --pointer /error/code --if-present`
+to skip valid records with an absent key. A recipe can set `if_present = true` on
+the count step. A present null or any other nonstring value still fails.
+Sorting and deduplication require a key in every record.
+
+Every record is validated, even one later removed as a duplicate or skipped by
+explicit optional counting. Blank records, invalid
+JSON/strings, missing keys in strict mode, ambiguous referenced duplicate object keys or nonstring selected
 values fail the complete operation with a 1-based record position. Diagnostics do not echo
 the input, selected key or pointer. Empty input succeeds with zero bytes; a blank record is
 an error. CRLF input is accepted and normal leading UTF-8 BOM handling is unchanged.

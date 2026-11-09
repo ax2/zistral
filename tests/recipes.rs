@@ -1788,6 +1788,60 @@ fn builtin_top_counts_rank_integers_stably_and_export_an_editable_offline_plan()
 }
 
 #[test]
+fn optional_counting_skips_only_absent_keys_and_preserves_source_positions() {
+    let root = tempfile::tempdir().unwrap();
+    let dir = root.path();
+    let args = ["data", "jsonl-count-by", "--pointer", "/error/code"];
+    let mut optional = args.to_vec();
+    optional.push("--if-present");
+    let input = br#"{"error":{"code":"B"}}
+{}
+{"error":1e9999}
+{"error":{"code":"A"}}
+{"error":{"code":"\u0042"}}
+"#;
+    let expected = b"{\"value\":\"B\",\"count\":2}\n{\"value\":\"A\",\"count\":1}\n";
+    let strict = invoke(dir, &args, input);
+    assert!(!strict.status.success() && strict.stdout.is_empty());
+    let out = invoke(dir, &optional, input);
+    assert!(out.status.success() && out.stderr.is_empty());
+    assert_eq!(out.stdout, expected);
+
+    let plan = invoke(
+        dir,
+        &[&optional[..], &["--show-plan"]].concat(),
+        b"not JSONL",
+    );
+    assert!(plan.status.success() && plan.stderr.is_empty());
+    assert!(
+        std::str::from_utf8(&plan.stdout)
+            .unwrap()
+            .contains("if_present = true")
+    );
+    std::fs::write(dir.join("count.toml"), &plan.stdout).unwrap();
+    let out = invoke(dir, &["data", "--recipe", "count.toml"], input);
+    assert!(out.status.success() && out.stderr.is_empty());
+    assert_eq!(out.stdout, expected);
+
+    std::fs::write(dir.join("keep.jsonl"), b"prior").unwrap();
+    optional.extend(["-o", "keep.jsonl", "--force"]);
+    for invalid in [
+        r#"{"error":{"code":null}}"#,
+        r#"{"error":{"code":"A","code":"PRIVATE_DUP"}}"#,
+        r#"{"elsewhere":"\ud800"}"#,
+        r#"{"elsewhere":PRIVATE_BAD_JSON}"#,
+    ] {
+        let mut records = input.to_vec();
+        records.extend_from_slice(invalid.as_bytes());
+        let out = invoke(dir, &optional, &records);
+        assert!(!out.status.success() && out.stdout.is_empty());
+        let error = String::from_utf8_lossy(&out.stderr);
+        assert!(error.contains("record 6") && !error.contains("PRIVATE"));
+        assert_eq!(std::fs::read(dir.join("keep.jsonl")).unwrap(), b"prior");
+    }
+}
+
+#[test]
 fn equality_filters_skip_only_absent_paths_when_requested() {
     let root = tempfile::tempdir().unwrap();
     let dir = root.path();

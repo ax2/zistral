@@ -176,9 +176,12 @@ impl Step {
                     | Operation::JsonlRedact
                     | Operation::JsonlWhere
                     | Operation::JsonlWhereInt
+                    | Operation::JsonlCountBy
             )
         {
-            bail!("if_present is only valid for JSON redaction or JSONL equality filtering");
+            bail!(
+                "if_present is only valid for JSON redaction, JSONL equality filtering or jsonl-count-by"
+            );
         }
         match (&self.equals, self.operation) {
             (Some(value), Operation::JsonlWhere | Operation::JsonlWhereInt)
@@ -521,19 +524,25 @@ fn jsonl_sort_int(input: &str, step: &Step, out: &mut Buffer) -> Result<()> {
 /// Keys borrow no JSON values other than decoded strings; record payloads remain lexical text.
 fn jsonl_by_key(input: &str, step: &Step, out: &mut Buffer) -> Result<()> {
     let pointer = step.pointer.as_deref().expect("validated pointer");
-    let records = input.lines().enumerate().map(|(index, line)| -> Result<_> {
-        if index == MAX_ITEMS {
-            bail!("JSONL key operations accept at most 100000 records");
-        }
-        let key = crate::selection::string_key(line, pointer).with_context(|| {
-            format!(
-                "cannot read JSONL key at record {} ({})",
-                index + 1,
-                step.operation
-            )
-        })?;
-        Ok((key, line))
-    });
+    let if_present = step.if_present.unwrap_or(false);
+    let records = input
+        .lines()
+        .enumerate()
+        .map(|(index, line)| -> Result<_> {
+            if index == MAX_ITEMS {
+                bail!("JSONL key operations accept at most 100000 records");
+            }
+            let key =
+                crate::selection::string_key(line, pointer, if_present).with_context(|| {
+                    format!(
+                        "cannot read JSONL key at record {} ({})",
+                        index + 1,
+                        step.operation
+                    )
+                })?;
+            Ok(key.map(|key| (key, line)))
+        })
+        .filter_map(Result::transpose);
     match step.operation {
         Operation::JsonlCountBy => {
             let mut counts: HashMap<String, (usize, usize)> = HashMap::new();
@@ -2131,6 +2140,31 @@ mod jsonl_key_tests {
             assert!(transform(r#"{"a":["ok","PRIVATE"]}"#, &s, MAX_INPUT, CLI_OUTPUT).is_err());
         }
     }
+    #[test]
+    fn optional_counting_counts_discarded_records_toward_limits() {
+        let mut count = step(Operation::JsonlCountBy, "/code", false);
+        count.if_present = Some(true);
+        let input = "{}\n".repeat(MAX_ITEMS);
+        assert_eq!(
+            transform(&input, &count, MAX_INPUT, CLI_OUTPUT).unwrap(),
+            ""
+        );
+        assert!(transform(&(input + "{}\n"), &count, MAX_INPUT, CLI_OUTPUT).is_err());
+
+        let args =
+            r#"{"steps":[{"operation":"jsonl-count-by","pointer":"/code","if_present":true}]}"#;
+        let result: serde_json::Value =
+            serde_json::from_str(&execute(args, "{}\n{\"code\":\"TIMEOUT\"}\n").unwrap()).unwrap();
+        assert_eq!(result["output"], "{\"value\":\"TIMEOUT\",\"count\":1}\n");
+        for invalid in [
+            r#"{"operation":"jsonl-sort","pointer":"/code","if_present":true}"#,
+            r#"{"operation":"jsonl-dedupe","pointer":"/code","if_present":true}"#,
+            r#"{"operation":"jsonl-count-by","pointer":"/code","if_present":null}"#,
+        ] {
+            assert!(execute(invalid, "{}").is_err());
+        }
+    }
+
     #[test]
     fn key_operations_enforce_input_record_depth_and_complete_output_limits() {
         for operation in OPS {

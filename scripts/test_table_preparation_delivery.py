@@ -86,8 +86,12 @@ operation="jsonl-to-tsv"
             modified = original.replace(b'equals = "ERROR"\n', b'equals = "ERROR"\nif_present = true\n', 1)
             assert modified != original
             log_recipe.write_bytes(modified)
-            logs = b'{"level":"ERROR","error":{"code":"TIMEOUT"}}\n{}\n{"level":"INFO"}\n'
+            logs = b'{"level":"ERROR","error":{"code":"TIMEOUT"}}\n{}\n{"level":"ERROR"}\n{"level":"INFO"}\n'
             assert not run(['data', '--recipe', 'builtin:top-error-codes'], logs, success=False).stdout
+            assert not run(['data', '--recipe', log_recipe], logs, success=False).stdout
+            optional_count = modified.replace(b'pointer = "/error/code"\n', b'pointer = "/error/code"\nif_present = true\n', 1)
+            assert optional_count != modified
+            log_recipe.write_bytes(optional_count)
             result = run(['data', '--recipe', log_recipe], logs)
             assert result.stdout == b'{"value":"TIMEOUT","count":1}\n' and not result.stderr
             context = run(['data', 'lines-include', '--contains', 'ERROR', '--context', '1', '--show-plan'])

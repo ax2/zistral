@@ -296,10 +296,13 @@ pub(crate) fn validated_record(input: &str) -> Result<&RawValue> {
     key_value(input, "")
 }
 
-/// Strict decoded-string key; never coerce other JSON types.
-pub(crate) fn string_key(input: &str, pointer: &str) -> Result<String> {
-    let raw = key_value(input, pointer)?;
+/// Decode a string key and distinguish an explicitly optional absent path.
+pub(crate) fn string_key(input: &str, pointer: &str, if_present: bool) -> Result<Option<String>> {
+    let Some(raw) = validated_value(input, pointer, if_present)? else {
+        return Ok(None);
+    };
     serde_json::from_str::<String>(raw.get())
+        .map(Some)
         .map_err(|_| anyhow::anyhow!("selected key must be a JSON string; no type coercion"))
 }
 
