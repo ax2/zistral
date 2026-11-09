@@ -15,6 +15,7 @@ import tarfile
 import tempfile
 
 from upgrade_baseline import verify as verified_baseline
+from test_service_setup_delivery import verify_legacy_budget_cleanup
 
 
 IDENTIFIER = 'io.github.ax2.zistral'
@@ -135,6 +136,7 @@ def verify(binary, dist, target, baseline_assets=None):
     sentinel = b"# Stable-compatible upgrade fixture; formatting must survive.\nmodel='installer-sentinel'\nbase_url='http://127.0.0.1:1/v1'\napi_key='SYNTHETIC_INSTALL_SENTINEL_993'\nactive_profile='work'\n[profiles.work]\nmodel='stable-work-model'\nbase_url='http://127.0.0.1:1/v1'\napi='responses'\napi_key_env='ZISTRAL_UPGRADE_UNSET_993'\napi_key='SYNTHETIC_WORK_SENTINEL_993'\nendpoint='http://127.0.0.1:1/v1/responses'\n[profiles.other]\nmodel='stable-other-model'\napi_key='SYNTHETIC_OTHER_SENTINEL_993'\n"
     checks, native_reports, portable_reports = [], [], []
     link_reports = []
+    rollback = None
     attempted = False
     scripts = Path(__file__).resolve().parent
     # The directory is verified absent; remove only this known file/empty dir.
@@ -159,6 +161,8 @@ def verify(binary, dist, target, baseline_assets=None):
             assert invoke([installed, '--version']).stdout.decode().strip() == 'zi ' + baseline['version']
             assert 'stable-work-model' in invoke([installed, '--config', config, 'models']).stdout.decode(), 'published version could not read legacy fixture'
             assert config.read_bytes() == sentinel, 'published installer changed configuration'
+            if baseline['version'] == '0.33.0':
+                rollback = verify_legacy_budget_cleanup(binary, installed)
         for _ in range(2):
             attempted = True
             if platform == 'linux':
@@ -200,6 +204,7 @@ def verify(binary, dist, target, baseline_assets=None):
             'portable_workflows': [v['passed'] for v in portable_reports],
             'native_workflows': [[v['passed'] for v in group] for group in native_reports],
             'configuration_link_checks': link_reports,
+            'output_budget_rollback': rollback,
             'real_provider_requests': 0, 'configuration_preserved': True,
             'published_baseline': baseline, 'baseline_installs': int(baseline is not None),
             'package_version_changed': baseline is not None and baseline['version'] != version,
