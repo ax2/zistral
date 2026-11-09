@@ -255,7 +255,7 @@ v0.31.0 起：`zi data jsonl-sort-int --pointer /count --reverse` 按 JSON 整�
 [规则与配方示例](docs/integer-ranking.md)。
 
 
-v0.31.0 起：程序已内嵌五份经过审阅的配方，无需下载源码或另行放置配方文件：
+v0.31.0 起，程序内嵌经过审阅的配方，可直接从已安装的程序查看和运行：
 
 ```sh
 zi data --list-recipes
@@ -272,6 +272,9 @@ zi data --recipe recent.toml -i events.jsonl
 类别、ID 和时间字段必须是字符串；时间按字符串排序，需要先统一格式与时区。名称区分大小写，
 未知的 `builtin:` 名称不会回退到本地文件。目录与预览不读取 stdin，不加载模型配置；
 目录模式拒绝显式 `--input` 和处理步骤。导出后可审阅、修改，再用显式文件路径执行。
+
+开发版本还内置 `builtin:top-error-codes` 和 `builtin:top-http-5xx-codes`，分别汇总
+应用错误日志和 HTTP 5xx 请求日志，按频次输出 JSONL。见[日志样例与配方导出](docs/data-recipes.md)。
 
 
 ```sh

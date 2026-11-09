@@ -57,7 +57,7 @@ pub enum Operation {
     JsonlRedact,
     /// Keep complete JSONL records whose selected JSON string equals a literal
     JsonlWhere,
-    /// Keep complete JSONL records whose selected integer exactly equals an explicit integer
+    /// Keep complete JSONL records by exact integer equality or inclusive bounds
     JsonlWhereInt,
     /// Keep the first whole JSONL record for each decoded string at an explicit pointer
     JsonlDedupe,
