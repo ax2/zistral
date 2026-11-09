@@ -34,9 +34,12 @@ selects a whole JSONL value and can match root string records.
 
 ## Failure is complete, including discarded records
 
-Missing pointers, ambiguous referenced duplicate keys, invalid pointer traversal,
-malformed/blank records or selected strings that cannot be decoded fail the entire
-operation. They are not silently treated as nonmatches. The error identifies the
+By default, a missing pointer fails the entire operation. The development build
+supports explicit `--if-present` or recipe `if_present = true` to skip valid
+records with an absent path. A missing field, non-container ancestor or
+out-of-range canonical array index counts as absent. A present null still fails
+to match a string. Ambiguous referenced keys, invalid array indexes, malformed
+records and invalid Unicode in optional mode still fail. The error identifies the
 1-based record position, not raw input, pointer or match literals. Every source record
 is checked, including records that would not match. An invalid later record never
 publishes a prefix or replaces an existing output file, even with explicit `--force`.

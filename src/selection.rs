@@ -229,8 +229,20 @@ fn find<'a>(input: &'a str, pointer: &str) -> Result<&'a RawValue> {
 }
 
 /// Validate the whole record and reference before exact decoded-string comparison.
-pub(crate) fn string_equals(input: &str, pointer: &str, expected: &str) -> Result<bool> {
-    let raw = find(input, pointer)?;
+pub(crate) fn string_equals(
+    input: &str,
+    pointer: &str,
+    expected: &str,
+    if_present: bool,
+) -> Result<bool> {
+    let raw = if if_present {
+        let Some(raw) = validated_value(input, pointer, true)? else {
+            return Ok(false);
+        };
+        raw
+    } else {
+        find(input, pointer)?
+    };
     if !raw.get().starts_with('"') {
         return Ok(false);
     }
@@ -241,7 +253,15 @@ pub(crate) fn string_equals(input: &str, pointer: &str, expected: &str) -> Resul
 
 /// Shared key validation includes string scalar validity in unselected fields.
 fn key_value<'a>(input: &'a str, pointer: &str) -> Result<&'a RawValue> {
-    let raw = find(input, pointer)?;
+    validated_value(input, pointer, false)?.context("JSON pointer does not exist in the input")
+}
+
+fn validated_value<'a>(
+    input: &'a str,
+    pointer: &str,
+    if_present: bool,
+) -> Result<Option<&'a RawValue>> {
+    let raw = locate(input, pointer, if_present)?;
     validate_strings(input)?;
     Ok(raw)
 }
@@ -288,6 +308,19 @@ pub(crate) fn integer_key<'a>(input: &'a str, pointer: &str) -> Result<crate::in
     crate::integer::Key::parse(key_value(input, pointer)?.get())
 }
 
+/// Optional integer filtering still rejects an existing noninteger value.
+pub(crate) fn integer_equals(
+    input: &str,
+    pointer: &str,
+    expected: crate::integer::Key<'_>,
+    if_present: bool,
+) -> Result<bool> {
+    let Some(raw) = validated_value(input, pointer, if_present)? else {
+        return Ok(false);
+    };
+    Ok(crate::integer::Key::parse(raw.get())? == expected)
+}
+
 /// Replace exactly the borrowed value span, never an equal value elsewhere in the record.
 /// Validation covers the complete original input before any value is hidden.
 pub(crate) fn redact_json(
@@ -296,17 +329,10 @@ pub(crate) fn redact_json(
     if_present: bool,
     limit: usize,
 ) -> Result<String> {
-    let raw = if if_present {
-        let selected = locate(input, pointer, true)?;
-        // Even a missing path must validate every original string before publishing.
-        validate_strings(input)?;
-        match selected {
-            Some(raw) => raw.get(),
-            None => return crate::transforms::compact_valid_json(input, limit),
-        }
-    } else {
-        key_value(input, pointer)?.get()
+    let Some(raw) = validated_value(input, pointer, if_present)? else {
+        return crate::transforms::compact_valid_json(input, limit);
     };
+    let raw = raw.get();
     // RawValue borrows a substring of this input. Address arithmetic locates that span
     // without unsafe pointer operations or a textual search that could match another value.
     let start = (raw.as_ptr() as usize)
@@ -327,9 +353,7 @@ pub(crate) fn select_json_or_default(
     default: &str,
     limit: usize,
 ) -> Result<String> {
-    let selected = locate(input, pointer, true)?;
-    // A fallback must not hide malformed Unicode in the original record.
-    validate_strings(input)?;
+    let selected = validated_value(input, pointer, true)?;
     let raw = selected.map_or(default, RawValue::get);
     crate::transforms::compact_valid_json(raw, limit)
 }
@@ -477,12 +501,14 @@ mod string_match_tests {
     use super::*;
     #[test]
     fn decoded_string_match_respects_unicode_pointers_and_complete_record_validation() {
-        assert!(string_equals(r#"{"a/b":{"~":"\u0045RROR"}}"#, "/a~1b/~0", "ERROR").unwrap());
-        assert!(string_equals(r#""\r\n\t\u0000""#, "", "\r\n\t\0").unwrap());
-        assert!(string_equals(r#"["",1.2300E+400]"#, "/0", "").unwrap());
-        assert!(!string_equals(r#""é""#, "", "e\u{301}").unwrap());
+        assert!(
+            string_equals(r#"{"a/b":{"~":"\u0045RROR"}}"#, "/a~1b/~0", "ERROR", false).unwrap()
+        );
+        assert!(string_equals(r#""\r\n\t\u0000""#, "", "\r\n\t\0", false).unwrap());
+        assert!(string_equals(r#"["",1.2300E+400]"#, "/0", "", false).unwrap());
+        assert!(!string_equals(r#""é""#, "", "e\u{301}", false).unwrap());
         for json in ["null", "true", "-0", "1.2300E+400", "[]", "{}"] {
-            assert!(!string_equals(json, "", json).unwrap());
+            assert!(!string_equals(json, "", json, false).unwrap());
         }
         for (json, pointer) in [
             (r#"{"x":"ERROR"} trailing"#, "/x"),
@@ -491,7 +517,7 @@ mod string_match_tests {
             (r#"{"x":"ERROR"}"#, "/missing"),
             (r#"{"x":"\uD800"}"#, "/x"),
         ] {
-            assert!(string_equals(json, pointer, "ERROR").is_err());
+            assert!(string_equals(json, pointer, "ERROR", false).is_err());
         }
     }
 }

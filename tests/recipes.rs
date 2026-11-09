@@ -1701,6 +1701,89 @@ fn builtin_top_counts_rank_integers_stably_and_export_an_editable_offline_plan()
 }
 
 #[test]
+fn equality_filters_skip_only_absent_paths_when_requested() {
+    let root = tempfile::tempdir().unwrap();
+    let dir = root.path();
+    for (op, expected, input, kept, invalid_selected) in [
+        (
+            "jsonl-where",
+            "ERROR",
+            br#"{"log":{"value":"\u0045RROR"},"n":1e9999}
+{"log":null}
+{}
+{"log":{"value":null}}
+"#
+            .as_slice(),
+            br#"{"log":{"value":"\u0045RROR"},"n":1e9999}
+"#
+            .as_slice(),
+            r#"{"log":{"value":"\ud800"}}"#,
+        ),
+        (
+            "jsonl-where-int",
+            "0",
+            b"{\"log\":{\"value\":-0}}\n{\"log\":1e9999}\n{}\n{\"log\":{\"value\":1}}\n",
+            b"{\"log\":{\"value\":-0}}\n",
+            r#"{"log":{"value":null}}"#,
+        ),
+    ] {
+        let strict = ["data", op, "--pointer", "/log/value", "--equals", expected];
+        let mut optional = strict.to_vec();
+        optional.push("--if-present");
+        let out = invoke(dir, &strict, input);
+        assert!(!out.status.success() && out.stdout.is_empty());
+        let out = invoke(dir, &optional, input);
+        assert!(out.status.success() && out.stderr.is_empty());
+        assert_eq!(out.stdout, kept);
+
+        let mut plan = optional.clone();
+        plan.push("--show-plan");
+        let out = invoke(dir, &plan, b"invalid input ignored");
+        assert!(out.status.success() && out.stderr.is_empty());
+        let recipe: toml::Value =
+            toml::from_str(std::str::from_utf8(&out.stdout).unwrap()).unwrap();
+        assert_eq!(recipe["steps"][0]["if_present"].as_bool(), Some(true));
+        std::fs::write(dir.join("replay.toml"), &out.stdout).unwrap();
+        let out = invoke(dir, &["data", "--recipe", "replay.toml"], input);
+        assert!(out.status.success() && out.stderr.is_empty());
+        assert_eq!(out.stdout, kept);
+
+        std::fs::write(dir.join("keep.jsonl"), b"original").unwrap();
+        optional.extend(["-o", "keep.jsonl", "--force"]);
+        for invalid in [
+            invalid_selected,
+            r#"{"log":{"value":1,"value":2}}"#,
+            r#"{"other":"\ud800"}"#,
+            r#"{"other":PRIVATE_BAD_SYNTAX}"#,
+        ] {
+            let mut combined = input.to_vec();
+            combined.extend_from_slice(invalid.as_bytes());
+            let out = invoke(dir, &optional, &combined);
+            assert!(!out.status.success() && out.stdout.is_empty());
+            assert!(!String::from_utf8_lossy(&out.stderr).contains("PRIVATE_BAD_SYNTAX"));
+            assert_eq!(std::fs::read(dir.join("keep.jsonl")).unwrap(), b"original");
+        }
+    }
+    for (pointer, success) in [("/a/9", true), ("/a/01", false)] {
+        let out = invoke(
+            dir,
+            &[
+                "data",
+                "jsonl-where",
+                "--pointer",
+                pointer,
+                "--equals",
+                "x",
+                "--if-present",
+            ],
+            br#"{"a":["x"]}"#,
+        );
+        assert_eq!(out.status.success(), success);
+        assert!(out.stdout.is_empty());
+    }
+}
+
+#[test]
 fn builtin_top_error_codes_filters_ranks_and_exports_an_editable_plan() {
     let root = tempfile::tempdir().unwrap();
     let dir = root.path();

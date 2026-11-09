@@ -166,10 +166,13 @@ impl Step {
         if self.if_present.is_some()
             && !matches!(
                 self.operation,
-                Operation::JsonRedact | Operation::JsonlRedact
+                Operation::JsonRedact
+                    | Operation::JsonlRedact
+                    | Operation::JsonlWhere
+                    | Operation::JsonlWhereInt
             )
         {
-            bail!("if_present is only valid for json-redact or jsonl-redact");
+            bail!("if_present is only valid for JSON redaction or JSONL equality filtering");
         }
         match (&self.equals, self.operation) {
             (Some(value), Operation::JsonlWhere | Operation::JsonlWhereInt)
@@ -436,6 +439,7 @@ fn jsonl_to_array(input: &str, out: &mut Buffer) -> Result<()> {
 fn jsonl_where(input: &str, step: &Step, out: &mut Buffer) -> Result<()> {
     let pointer = step.pointer.as_deref().expect("validated pointer");
     let equals = step.equals.as_deref().expect("validated equals");
+    let if_present = step.if_present.unwrap_or(false);
     let integer = if step.operation == Operation::JsonlWhereInt {
         Some(crate::integer::Key::parse(equals)?)
     } else {
@@ -446,9 +450,9 @@ fn jsonl_where(input: &str, step: &Step, out: &mut Buffer) -> Result<()> {
             bail!("JSONL filtering accepts at most 100000 records");
         }
         let matched = if let Some(expected) = integer {
-            crate::selection::integer_key(line, pointer).map(|value| value == expected)
+            crate::selection::integer_equals(line, pointer, expected, if_present)
         } else {
-            crate::selection::string_equals(line, pointer, equals)
+            crate::selection::string_equals(line, pointer, equals, if_present)
         }
         .with_context(|| format!("cannot filter JSONL record {}", index + 1))?;
         if matched {
@@ -2469,7 +2473,28 @@ mod conditional_redaction_tests {
     use super::*;
     use serde_json::json;
     #[test]
-    fn if_present_is_typed_redaction_only_and_shares_direct_and_pipeline_schemas() {
+    fn equality_tool_steps_can_explicitly_skip_missing_values() {
+        for (op, equals, value) in [
+            ("jsonl-where", "ERROR", json!("ERROR")),
+            ("jsonl-where-int", "0", json!(0)),
+        ] {
+            let step = json!({"operation":op,"pointer":"/v","equals":equals,"if_present":true});
+            let kept = json!({"v":value});
+            let records = format!("{{}}\n{kept}\n");
+            let result = execute(&json!({"steps":[step.clone()]}).to_string(), &records).unwrap();
+            let result: serde_json::Value = serde_json::from_str(&result).unwrap();
+            assert_eq!(result["output"], format!("{kept}\n"));
+            let mut strict = step.clone();
+            strict["if_present"] = json!(false);
+            assert!(execute(&strict.to_string(), &records).is_err());
+            let mut invalid = step;
+            invalid["if_present"] = json!("true");
+            assert!(execute(&invalid.to_string(), &records).is_err());
+        }
+    }
+
+    #[test]
+    fn redaction_if_present_is_typed_and_shares_direct_and_pipeline_schemas() {
         for operation in ["json-redact", "jsonl-redact"] {
             for value in [json!(null), json!(0), json!("true"), json!([]), json!({})] {
                 assert!(

@@ -78,7 +78,19 @@ operation="jsonl-to-tsv"
             replay = root/'reviewed.toml'
             replay.write_bytes(exported.stdout)
             assert run(['data', '--recipe', replay], raw).stdout == expected
-            checks.append('plan export: ignored stdin and executable definition replay')
+            log_plan = run(['data', '--show-plan', '--recipe', 'builtin:top-error-codes'], b'not log data')
+            assert not log_plan.stderr
+            assert b'operation = "jsonl-where"' in log_plan.stdout
+            log_recipe = root/'error report-测试.toml'
+            original = log_plan.stdout
+            modified = original.replace(b'equals = "ERROR"\n', b'equals = "ERROR"\nif_present = true\n', 1)
+            assert modified != original
+            log_recipe.write_bytes(modified)
+            logs = b'{"level":"ERROR","error":{"code":"TIMEOUT"}}\n{}\n{"level":"INFO"}\n'
+            assert not run(['data', '--recipe', 'builtin:top-error-codes'], logs, success=False).stdout
+            result = run(['data', '--recipe', log_recipe], logs)
+            assert result.stdout == b'{"value":"TIMEOUT","count":1}\n' and not result.stderr
+            checks.append('plan export: offline table replay and explicit missing-path handling in an exported log recipe')
             projected = run(['data', 'jsonl-project', '--field', 'tag=/tag',
                              '--field-default', 'tag=""'], b'{"tag":null}\n{}\n')
             assert projected.stdout == b'{"tag":null}\n{"tag":""}\n' and not projected.stderr

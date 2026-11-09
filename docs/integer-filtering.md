@@ -23,7 +23,10 @@ There is no machine-integer precision bound, floating-point conversion or coerci
 
 Every selected value must be an integer literal. A string `"2"`, `2.0`, `2e0`,
 boolean, null or container is an error rather than a nonmatching record. Missing or
-ambiguous paths and invalid array indexes also fail. The original JSON and Unicode
+ambiguous paths and invalid array indexes also fail by default. In the development
+build, `--if-present` or recipe `if_present = true` skips only absent paths.
+A present noninteger, ambiguous path or invalid array index still fails.
+The original JSON and Unicode
 strings are checked even in discarded records. A malformed later record discards
 the complete result and preserves an existing `-o` file, including with `--force`.
 Empty input yields zero bytes after definition validation. Existing byte/depth and

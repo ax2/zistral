@@ -52,6 +52,8 @@ zi data --recipe error-report.toml -i events.jsonl
 `/error/code`。输出是 `{"value":"TIMEOUT","count":12}` 这样的 JSONL，按次数从高到低保留
 前 20 组，同频保留首次出现的顺序。所有记录的 `/level` 都需要有效，只有命中记录需要
 `/error/code`。没有匹配时输出为空。导出后可更改级别、字段路径或条数，再运行自己的配方。
+日志结构混杂时，可以在导出的第一个 `jsonl-where` 步骤显式加上
+`if_present = true`，只跳过路径缺失的有效记录。
 
 ## Compose your own definition / 编写配方
 
