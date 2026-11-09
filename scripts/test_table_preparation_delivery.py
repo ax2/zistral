@@ -107,7 +107,24 @@ operation="jsonl-to-tsv"
             range_result = run(['data', '--recipe', range_recipe],
                                b'{"status":499}\n{"status":500}\n{"status":599}\n{"status":600}\n')
             assert range_result.stdout == b'{"status":500}\n{"status":599}\n' and not range_result.stderr
-            checks.append('plan export: table replay, missing paths, line context and integer ranges in log recipes')
+            http_logs = (b'{"status":499}\n{"status":500,"error":{"code":"TIMEOUT"}}\n'
+                         b'{"status":503}\n{"message":"healthcheck"}\n'
+                         b'{"status":599,"error":{"code":"TIMEOUT"}}\n'
+                         b'{"status":502,"error":{"code":"BAD_GATEWAY"}}\n{"status":600}\n')
+            report_plan = run(['data', '--show-plan', '--recipe', 'builtin:top-http-5xx-codes'], b'not JSONL')
+            assert not report_plan.stderr
+            report_recipe = root/'HTTP report-测试.toml'
+            report_recipe.write_bytes(report_plan.stdout)
+            expected_http = b'{"value":"TIMEOUT","count":2}\n{"value":"BAD_GATEWAY","count":1}\n'
+            for definition in ['builtin:top-http-5xx-codes', report_recipe]:
+                report = run(['data', '--recipe', definition], http_logs)
+                assert report.stdout == expected_http and not report.stderr
+            report_path = root/'existing-http.jsonl'
+            report_path.write_bytes(expected_http)
+            invalid = run(['data', '--recipe', report_recipe, '-o', report_path, '--force'],
+                          http_logs + b'{"status":501,"error":{"code":null}}\n', success=False)
+            assert not invalid.stdout and report_path.read_bytes() == expected_http
+            checks.append('plan export: table replay, line context and integrated HTTP 5xx ranking')
             projected = run(['data', 'jsonl-project', '--field', 'tag=/tag',
                              '--field-default', 'tag=""'], b'{"tag":null}\n{}\n')
             assert projected.stdout == b'{"tag":null}\n{"tag":""}\n' and not projected.stderr

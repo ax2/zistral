@@ -20,6 +20,7 @@ zi data --recipe recent.toml -i events.jsonl
 | `builtin:unique-severity-counts` | Keep first string `/id`, then count retained string `/level` as CSV. |
 | `builtin:top-severity-counts` | Count string `/level`, stably rank integer counts descending, take 20 groups as CSV. |
 | `builtin:top-error-codes` (development) | Keep exact `ERROR` levels, rank string `/error/code` counts, emit 20 groups as JSONL. |
+| `builtin:top-http-5xx-codes` (development) | Rank string `/error/code` values from integer `/status` values 500–599. Skip absent paths explicitly. |
 | `builtin:recent-unique-events` | Keep first string `/id`, stably sort string `/time` descending, take first 20 records as JSONL. |
 
 去重保留首条，不会自动选取同一 ID 的最新记录。时间只做字符串排序，不解析日期；应先统一
@@ -55,6 +56,46 @@ zi data --recipe error-report.toml -i events.jsonl
 日志结构混杂时，可以在导出的第一个 `jsonl-where` 步骤显式加上
 `if_present = true`，只跳过级别路径缺失的有效记录。如果旧日志有级别却缺错误码，
 也可以给第二个 `jsonl-count-by` 步骤单独启用该选项。存在但不是字符串的错误码仍会报错。
+
+## 从 HTTP 5xx 统计定位文本日志
+
+在离线日志开发分支上，把下面的内容保存为 UTF-8 的 `requests.jsonl`：
+
+```jsonl
+{"status":499}
+{"status":500,"error":{"code":"TIMEOUT"}}
+{"status":503}
+{"message":"healthcheck"}
+{"status":599,"error":{"code":"TIMEOUT"}}
+{"status":502,"error":{"code":"BAD_GATEWAY"}}
+{"status":600}
+```
+
+```sh
+zi data --recipe builtin:top-http-5xx-codes -i requests.jsonl
+zi data --show-plan --recipe builtin:top-http-5xx-codes -o service-errors.toml
+zi data --recipe service-errors.toml -i requests.jsonl
+```
+
+```jsonl
+{"value":"TIMEOUT","count":2}
+{"value":"BAD_GATEWAY","count":1}
+```
+
+区间包含 500 和 599。配方跳过没有状态码的记录，以及没有错误码的 5xx 记录。
+状态码必须是整数，命中的错误码必须是字符串。字段存在却是 `null` 或其他错误类型时，
+整次运行失败。报告按频次降序，最多 20 组，同频按首次出现顺序。导出的四个步骤可以
+分别调整路径、缺字段规则、阈值和条数。配方源文件见
+[top-http-5xx-codes.toml](examples/top-http-5xx-codes.toml)。
+
+如果应用的文本日志也记录了 `TIMEOUT`，可以用字面匹配保留附近的堆栈：
+
+```sh
+zi data lines-include --contains TIMEOUT --context 3 -i app.log -o timeout-context.log
+```
+
+统计和摘录都是离线命令，适合先核对错误分布和原始日志。上下文的具体行为见
+[字面行筛选](line-filtering.md)。
 
 ## Compose your own definition / 编写配方
 

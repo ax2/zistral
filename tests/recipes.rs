@@ -1411,6 +1411,7 @@ fn embedded_catalog_and_preview_finish_without_stdin_eof_or_model_configuration(
                     "builtin:unique-severity-counts",
                     "builtin:top-severity-counts",
                     "builtin:top-error-codes",
+                    "builtin:top-http-5xx-codes",
                     "builtin:recent-unique-events"
                 ]
             );

@@ -8,7 +8,7 @@ use std::{io::Read, path::Path};
 const MAX_RECIPE: u64 = 64 * 1024;
 
 // Embed reviewed source examples so installed binaries need no companion recipe files.
-const BUILTINS: [(&str, &str, &str); 6] = [
+const BUILTINS: [(&str, &str, &str); 7] = [
     (
         "cleanup",
         "Trim lines, keep unique lines, sort descending",
@@ -33,6 +33,11 @@ const BUILTINS: [(&str, &str, &str); 6] = [
         "top-error-codes",
         "Rank the top 20 string /error/code values from ERROR records as JSONL",
         include_str!("../docs/examples/top-error-codes.toml"),
+    ),
+    (
+        "top-http-5xx-codes",
+        "Rank the top 20 error codes from HTTP 5xx records as JSONL",
+        include_str!("../docs/examples/top-http-5xx-codes.toml"),
     ),
     (
         "recent-unique-events",
