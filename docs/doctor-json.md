@@ -66,7 +66,9 @@ The error object always has `kind`, `http_status`, `retries` and `message`:
 
 For non-HTTP errors, `http_status` and `retries` are null. Messages are fixed safe
 guidance; no raw error chain, provider error body, model answer, task input or
-authentication value is included. HTTP status comes from the typed request error,
+authentication value is included. Task errors and human-readable probes use the
+same safe guidance for connection failures and omit private URL paths.
+HTTP status comes from the typed request error,
 not text parsing. It does not identify whether a service or intervening proxy
 originated the response. The usual stderr failure notice is generic in this mode.
 

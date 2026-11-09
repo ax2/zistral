@@ -30,6 +30,39 @@ impl std::fmt::Display for HttpFailure {
 }
 impl std::error::Error for HttpFailure {}
 
+/// Keep the classification while dropping request URLs and library error chains.
+#[derive(Debug)]
+pub(crate) struct TransportFailure {
+    pub kind: &'static str,
+    pub advice: &'static str,
+}
+
+impl From<reqwest::Error> for TransportFailure {
+    fn from(error: reqwest::Error) -> Self {
+        let (kind, advice) = if error.is_timeout() {
+            ("timeout", "model request timed out")
+        } else if error.is_builder() {
+            (
+                "request",
+                "cannot prepare the model request; check service/authentication settings",
+            )
+        } else {
+            (
+                "network",
+                "model request failed; check service availability, TLS and network/proxy settings",
+            )
+        };
+        Self { kind, advice }
+    }
+}
+
+impl std::fmt::Display for TransportFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.advice)
+    }
+}
+impl std::error::Error for TransportFailure {}
+
 pub struct Answer {
     pub text: String,
     pub streamed: bool,
@@ -337,7 +370,7 @@ fn run_prepared(
         .redirect(reqwest::redirect::Policy::none())
         .user_agent(concat!("zistral/", env!("CARGO_PKG_VERSION")))
         .build()
-        .context("cannot initialize HTTP client")?;
+        .map_err(TransportFailure::from)?;
     let max_steps = cli
         .max_steps
         .unwrap_or(if crate::project::enabled(cli) { 32 } else { 8 });
@@ -360,7 +393,7 @@ fn run_prepared(
                 request = request.header("anthropic-version", "2023-06-01");
             }
             activity.attempt();
-            let response = request.send().context("API request failed")?;
+            let response = request.send().map_err(TransportFailure::from)?;
             let status = response.status();
             if status.is_success() {
                 break response;

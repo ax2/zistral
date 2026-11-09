@@ -108,20 +108,8 @@ fn probe_error(error: &anyhow::Error) -> serde_json::Value {
     if let Some(http) = error.downcast_ref::<crate::agent::HttpFailure>() {
         return serde_json::json!({"kind":"http","http_status":http.status,"retries":http.retries,"message":http.advice});
     }
-    if let Some(network) = error.downcast_ref::<reqwest::Error>() {
-        return if network.is_timeout() {
-            diagnostic_error("timeout", "model probe timed out")
-        } else if network.is_builder() {
-            diagnostic_error(
-                "request",
-                "cannot prepare the model request; check service/authentication settings",
-            )
-        } else {
-            diagnostic_error(
-                "network",
-                "model request failed; check service availability, TLS and network/proxy settings",
-            )
-        };
+    if let Some(network) = error.downcast_ref::<crate::agent::TransportFailure>() {
+        return diagnostic_error(network.kind, network.advice);
     }
     diagnostic_error(
         "response",

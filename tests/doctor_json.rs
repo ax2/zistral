@@ -366,28 +366,46 @@ fn doctor_json_network_and_timeout_errors_are_redacted() {
         "",
     );
     let worker = std::thread::spawn(move || {
-        let end = Instant::now() + Duration::from_secs(10);
-        let mut s = loop {
-            match l.accept() {
-                Ok((s, _)) => break s,
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    assert!(Instant::now() < end);
-                    std::thread::sleep(Duration::from_millis(10));
+        for _ in 0..3 {
+            let end = Instant::now() + Duration::from_secs(10);
+            let mut s = loop {
+                match l.accept() {
+                    Ok((s, _)) => break s,
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        assert!(Instant::now() < end);
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(e) => panic!("{e}"),
                 }
-                Err(e) => panic!("{e}"),
-            }
-        };
-        s.set_nonblocking(false).unwrap();
-        s.write_all(b"not a TLS record\r\n").unwrap();
-        s.shutdown(std::net::Shutdown::Write).unwrap();
+            };
+            s.set_nonblocking(false).unwrap();
+            s.write_all(b"not a TLS record\r\n").unwrap();
+            s.shutdown(std::net::Shutdown::Write).unwrap();
+        }
     });
     let out = command(root.path(), "5")
         .args(["doctor", "--json", "--probe"])
         .output()
         .unwrap();
-    worker.join().unwrap();
     let v = report(&out, false);
     assert_eq!(v["error"]["kind"], "network");
+    for args in [
+        &["doctor", "--probe"][..],
+        &["--no-tools", "--no-stream", "task"],
+    ] {
+        let out = command(root.path(), "5").args(args).output().unwrap();
+        assert_eq!(out.status.code(), Some(1));
+        if args[0] != "doctor" {
+            assert!(out.stdout.is_empty());
+        }
+        let stdout = String::from_utf8(out.stdout).unwrap();
+        let stderr = String::from_utf8(out.stderr).unwrap();
+        assert!(stderr.contains("check service availability, TLS"));
+        for hidden in ["BODY_SECRET_993", "AUTH_SECRET_993", "https://"] {
+            assert!(!stdout.contains(hidden) && !stderr.contains(hidden));
+        }
+    }
+    worker.join().unwrap();
     let (l, url) = listener();
     std::fs::write(
         root.path().join("config.toml"),
