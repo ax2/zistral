@@ -53,13 +53,17 @@ pub fn discover() -> Discovery {
                 .filter(|p| !p.is_empty())
                 .map(PathBuf::from)
                 .as_deref(),
+            std::env::var_os("CLAUDE_CONFIG_DIR")
+                .filter(|p| !p.is_empty())
+                .map(PathBuf::from)
+                .as_deref(),
         ),
         None => Discovery::default(),
     }
 }
 
 // These are configuration readers, never plugin loaders or credential commands.
-fn discover_at(home: &Path, codex_home: Option<&Path>) -> Discovery {
+fn discover_at(home: &Path, codex_home: Option<&Path>, claude_home: Option<&Path>) -> Discovery {
     let mut found = Discovery::default();
     read_codex(codex_home.unwrap_or(&home.join(".codex")), &mut found);
     read_workbuddy(
@@ -73,6 +77,11 @@ fn discover_at(home: &Path, codex_home: Option<&Path>) -> Discovery {
         &mut found,
     );
     read_dsh(&home.join(".dsh"), &mut found);
+    read_claude(
+        claude_home.unwrap_or(&home.join(".claude")),
+        &|name| std::env::var(name).ok(),
+        &mut found,
+    );
     found
 }
 
@@ -198,6 +207,190 @@ fn merge(base: &mut Value, patch: &Value) {
         }
     } else {
         *base = patch.clone();
+    }
+}
+
+type ClaudeModel = (String, String, Option<Credential>);
+
+// Claude user settings are data, not a source of hooks, login tokens or commands.
+fn claude_file_env<'a>(
+    config: &'a Value,
+    name: &str,
+) -> std::result::Result<Option<&'a str>, &'static str> {
+    let Some(env) = config.get("env") else {
+        return Ok(None);
+    };
+    let env = env.as_object().ok_or("invalid environment settings")?;
+    let mut entries = env.iter().filter(|(key, _)| {
+        if cfg!(windows) {
+            key.eq_ignore_ascii_case(name)
+        } else {
+            key.as_str() == name
+        }
+    });
+    let first = entries.next();
+    if entries.next().is_some() {
+        return Err("ambiguous environment variable names");
+    }
+    first
+        .map(|(_, value)| value.as_str().ok_or("invalid environment setting type"))
+        .transpose()
+}
+
+fn claude_env(
+    config: &Value,
+    name: &str,
+    inherited: &impl Fn(&str) -> Option<String>,
+) -> std::result::Result<Option<String>, &'static str> {
+    let value = match claude_file_env(config, name)? {
+        // An empty file value masks the shell value. Values are not expanded.
+        Some(value) => Some(value.to_owned()),
+        None => inherited(name),
+    };
+    Ok(value.map(|v| v.trim().to_owned()).filter(|v| !v.is_empty()))
+}
+
+fn claude_settings(
+    config: &Value,
+    inherited: &impl Fn(&str) -> Option<String>,
+) -> std::result::Result<ClaudeModel, &'static str> {
+    if !config.is_object()
+        || config.get("model").is_some_and(|v| !v.is_string())
+        || config.get("env").is_some_and(|v| {
+            !v.as_object()
+                .is_some_and(|e| e.values().all(Value::is_string))
+        })
+    {
+        return Err("invalid model or environment settings");
+    }
+    if config
+        .get("apiKeyHelper")
+        .is_some_and(|v| v.as_str().is_none_or(|s| !s.trim().is_empty()))
+    {
+        return Err("command authentication cannot be imported");
+    }
+    if config
+        .get("modelOverrides")
+        .is_some_and(|v| !v.as_object().is_some_and(|m| m.is_empty()))
+    {
+        return Err("provider-specific model overrides cannot be imported");
+    }
+    for name in [
+        "CLAUDE_CODE_USE_BEDROCK",
+        "CLAUDE_CODE_USE_VERTEX",
+        "CLAUDE_CODE_USE_FOUNDRY",
+        "CLAUDE_CODE_USE_BEDROCK_MANTLE",
+    ] {
+        if claude_env(config, name, inherited)?.is_some_and(|v| {
+            !matches!(
+                v.to_ascii_lowercase().as_str(),
+                "0" | "false" | "no" | "off"
+            )
+        }) {
+            return Err("cloud-provider authentication is not supported by this importer");
+        }
+    }
+    if claude_env(config, "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST", inherited)?.is_some() {
+        return Err("host-managed provider settings cannot be imported");
+    }
+    for name in ["ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"] {
+        if claude_env(config, name, inherited)?.is_some() {
+            return Err("bearer or account authentication is not an x-api-key configuration");
+        }
+    }
+    for name in [
+        "ANTHROPIC_CUSTOM_HEADERS",
+        "ANTHROPIC_BETAS",
+        "CLAUDE_CODE_CLIENT_CERT",
+        "CLAUDE_CODE_CLIENT_KEY",
+        "CLAUDE_CODE_CLIENT_KEY_PASSPHRASE",
+    ] {
+        if claude_env(config, name, inherited)?.is_some() {
+            return Err("extra request headers or client certificates cannot be imported");
+        }
+    }
+    if config
+        .get("env")
+        .and_then(Value::as_object)
+        .is_some_and(|env| {
+            env.keys().any(|name| {
+                matches!(
+                    name.to_ascii_uppercase().as_str(),
+                    "HTTP_PROXY"
+                        | "HTTPS_PROXY"
+                        | "ALL_PROXY"
+                        | "NO_PROXY"
+                        | "NODE_EXTRA_CA_CERTS"
+                        | "NODE_TLS_REJECT_UNAUTHORIZED"
+                        | "SSL_CERT_FILE"
+                        | "SSL_CERT_DIR"
+                )
+            })
+        })
+    {
+        return Err("settings-file network overrides cannot be imported");
+    }
+    let mut model = claude_env(config, "ANTHROPIC_MODEL", inherited)?
+        .or_else(|| string(config, "model"))
+        .ok_or("an explicit provider model ID is required")?;
+    let alias = match model.to_ascii_lowercase().as_str() {
+        "sonnet" => Some("ANTHROPIC_DEFAULT_SONNET_MODEL"),
+        "opus" => Some("ANTHROPIC_DEFAULT_OPUS_MODEL"),
+        "haiku" => Some("ANTHROPIC_DEFAULT_HAIKU_MODEL"),
+        "fable" => Some("ANTHROPIC_DEFAULT_FABLE_MODEL"),
+        _ => None,
+    };
+    if let Some(name) = alias {
+        model = claude_env(config, name, inherited)?
+            .ok_or("model alias needs an explicit provider model ID mapping")?;
+    }
+    if matches!(
+        model.to_ascii_lowercase().as_str(),
+        "default" | "inherit" | "best" | "opusplan" | "sonnet" | "opus" | "haiku" | "fable"
+    ) || model.contains(['[', ']'])
+    {
+        return Err("dynamic model aliases and context modifiers cannot be imported");
+    }
+    let root = claude_env(config, "ANTHROPIC_BASE_URL", inherited)?
+        .unwrap_or_else(|| "https://api.anthropic.com".into());
+    let root = crate::config::validate_url(&root)
+        .ok()
+        .filter(|_| root.contains("://"))
+        .ok_or("invalid or unsupported service URL")?;
+    // Claude's API root is a prefix for /v1/messages, including any existing /v1.
+    // The exact endpoint prevents the shared URL normalizer from dropping it.
+    let endpoint = format!("{}/v1/messages", root.as_str().trim_end_matches('/'));
+    let key = if let Some(value) = claude_file_env(config, "ANTHROPIC_API_KEY")? {
+        (!value.trim().is_empty()).then(|| Credential::Literal(value.trim().to_owned()))
+    } else {
+        inherited("ANTHROPIC_API_KEY")
+            .filter(|v| !v.trim().is_empty())
+            .map(|_| Credential::Environment("ANTHROPIC_API_KEY".into()))
+    };
+    Ok((model, endpoint, key))
+}
+
+fn read_claude(root: &Path, inherited: &impl Fn(&str) -> Option<String>, found: &mut Discovery) {
+    let path = root.join("settings.json");
+    let Some(config) = json(&path) else {
+        if path.exists() {
+            found
+                .notes
+                .push("Claude Code: settings could not be read or parsed; skipped.".into());
+        }
+        return;
+    };
+    match claude_settings(&config, inherited) {
+        Ok((model, endpoint, key)) => candidate(
+            "Claude Code/user".into(),
+            model,
+            endpoint,
+            "anthropic",
+            key,
+            true,
+            found,
+        ),
+        Err(reason) => found.notes.push(format!("Claude Code: {reason}; skipped.")),
     }
 }
 
@@ -444,6 +637,74 @@ mod tests {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, value).unwrap();
     }
+
+    #[test]
+    fn claude_user_settings_resolve_model_root_and_credential() {
+        let shell = |name: &str| match name {
+            "ANTHROPIC_MODEL" => Some("shell-model".into()),
+            "ANTHROPIC_BASE_URL" => Some("https://shell.example".into()),
+            "ANTHROPIC_API_KEY" => Some("inherited-secret".into()),
+            _ => None,
+        };
+        let config = serde_json::json!({
+            "model": "top-level-model",
+            "env": {
+                "ANTHROPIC_MODEL": "sonnet",
+                "ANTHROPIC_DEFAULT_SONNET_MODEL": "pinned-sonnet",
+                "ANTHROPIC_BASE_URL": "https://gateway.example/team/v1/",
+                "ANTHROPIC_API_KEY": "${PLAIN_TEXT}"
+            }
+        });
+        let (model, endpoint, key) = claude_settings(&config, &shell).unwrap();
+        assert_eq!(model, "pinned-sonnet");
+        assert_eq!(endpoint, "https://gateway.example/team/v1/v1/messages");
+        assert!(matches!(key, Some(Credential::Literal(key)) if key == "${PLAIN_TEXT}"));
+
+        let config = serde_json::json!({"model": "top-level-model"});
+        let (model, endpoint, key) = claude_settings(&config, &shell).unwrap();
+        assert_eq!(model, "shell-model");
+        assert_eq!(endpoint, "https://shell.example/v1/messages");
+        assert!(matches!(key, Some(Credential::Environment(name)) if name == "ANTHROPIC_API_KEY"));
+
+        let config = serde_json::json!({
+            "model": "top-level-model",
+            "env": {"ANTHROPIC_MODEL": "", "ANTHROPIC_BASE_URL": "", "ANTHROPIC_API_KEY": ""}
+        });
+        let (model, endpoint, key) = claude_settings(&config, &shell).unwrap();
+        assert_eq!(model, "top-level-model");
+        assert_eq!(endpoint, "https://api.anthropic.com/v1/messages");
+        assert!(key.is_none());
+    }
+
+    #[test]
+    fn claude_user_settings_skip_unsupported_or_ambiguous_sources_safely() {
+        let fixtures = [
+            serde_json::json!({"model": "sonnet"}),
+            serde_json::json!({"model": "best"}),
+            serde_json::json!({"model": "claude-example[1m]"}),
+            serde_json::json!({"model": "concrete", "apiKeyHelper": "PRIVATE_FIXTURE"}),
+            serde_json::json!({"model": "concrete", "modelOverrides": {"concrete": "PRIVATE_FIXTURE"}}),
+            serde_json::json!({"model": "concrete", "env": {"ANTHROPIC_AUTH_TOKEN": "PRIVATE_FIXTURE"}}),
+            serde_json::json!({"model": "concrete", "env": {"CLAUDE_CODE_OAUTH_TOKEN": "PRIVATE_FIXTURE"}}),
+            serde_json::json!({"model": "concrete", "env": {"CLAUDE_CODE_USE_BEDROCK": "1"}}),
+            serde_json::json!({"model": "concrete", "env": {"CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST": "1"}}),
+            serde_json::json!({"model": "concrete", "env": {"ANTHROPIC_CUSTOM_HEADERS": "PRIVATE_FIXTURE"}}),
+            serde_json::json!({"model": "concrete", "env": {"HTTPS_PROXY": "PRIVATE_FIXTURE"}}),
+            serde_json::json!({"model": "concrete", "env": {"ANTHROPIC_BASE_URL": "https://user:PRIVATE_FIXTURE@gateway.example"}}),
+            serde_json::json!({"model": "concrete", "env": {"ANTHROPIC_BASE_URL": "https:"}}),
+            serde_json::json!({"model": "concrete", "env": {"ANTHROPIC_API_KEY": false}}),
+        ];
+        let root = tempfile::tempdir().unwrap();
+        for config in fixtures {
+            write(root.path(), "settings.json", &config.to_string());
+            let mut found = Discovery::default();
+            read_claude(root.path(), &|_| None, &mut found);
+            assert!(found.candidates.is_empty());
+            assert_eq!(found.notes.len(), 1);
+            assert!(!found.notes[0].contains("PRIVATE_FIXTURE"));
+        }
+    }
+
     #[test]
     fn codex_profiles_and_api_key_import_without_subscription_tokens() {
         let home = tempfile::tempdir().unwrap();
@@ -457,7 +718,7 @@ mod tests {
             ".codex/auth.json",
             r#"{"auth_mode":"chatgpt","tokens":{"access_token":"never-copy-this"}}"#,
         );
-        let found = discover_at(home.path(), None);
+        let found = discover_at(home.path(), None, None);
         assert_eq!(found.candidates.len(), 1);
         assert_eq!(found.candidates[0].model, "fast-model");
         assert!(found.candidates[0].api_key.is_none());
@@ -469,7 +730,7 @@ mod tests {
             r#"{"OPENAI_API_KEY":"dummy-api-key"}"#,
         );
         assert_eq!(
-            discover_at(home.path(), None).candidates[0]
+            discover_at(home.path(), None, None).candidates[0]
                 .api_key
                 .as_deref(),
             Some("dummy-api-key")
@@ -483,7 +744,7 @@ mod tests {
             ".workbuddy/models.json",
             r#"[{"id":"model-a","url":"https://example.com/plan/v3/chat/completions","apiKey":"dummy-key"},{"id":"model-b","url":"https://example.com/custom/infer/","useCustomProtocol":true}]"#,
         );
-        let found = discover_at(home.path(), None);
+        let found = discover_at(home.path(), None, None);
         assert_eq!(found.candidates[0].base_url, "https://example.com/plan/v3");
         assert_eq!(found.candidates[0].api_key.as_deref(), Some("dummy-key"));
         assert_eq!(
@@ -509,7 +770,7 @@ mod tests {
             ".dsh/.credentials.yaml",
             "refs:\n  ZISTRAL_TEST_NONEXISTENT_KEY: dummy-provider-key\nrecords:\n  login:\n    kind: account\n    payload:\n      token: never-copy-login\n",
         );
-        let found = discover_at(home.path(), None);
+        let found = discover_at(home.path(), None, None);
         assert_eq!(found.candidates.len(), 1);
         assert_eq!(found.candidates[0].model, "new-model");
         assert_eq!(found.candidates[0].api, "anthropic");
@@ -531,7 +792,7 @@ mod tests {
             ".workbuddy/models.json",
             r#"[{"id":"ok","url":"http://localhost:11434/v1"}]"#,
         );
-        let found = discover_at(home.path(), None);
+        let found = discover_at(home.path(), None, None);
         assert_eq!(found.candidates.len(), 1);
         assert!(!found.notes.join(" ").contains("not-in-errors"));
         assert_eq!(display("a\u{1b}\nkey"), "akey");

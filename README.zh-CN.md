@@ -60,6 +60,8 @@ zi config --manual   # 跳过检测，手动配置或修改现有设置
 - WorkBuddy：`~/.workbuddy/models.json`，兼容 `~/.codebuddy/models.json`。完整请求地址和自定义路径会正确处理。
 - dsh：`~/.dsh/profiles/*/cordis.yml` 与 `cordis.patch.yml`，合并模型 provider 配置，解析对应环境变量或 `.dsh/.credentials.yaml` 中的 API Key 引用。
 
+尚未发布的 `main` 还支持导入 [Claude Code 个人 API 配置](docs/claude-code-import.md)，适用于 Anthropic Messages 服务。
+
 Codex 的 ChatGPT 账号登录与订阅凭据不会被当作 API Key 导入；没有普通 API Key 时需要补填。
 也不会导入 dsh 的浏览器会话或账号访问令牌，不执行任何来源的认证命令或插件。
 需要额外认证请求头、查询参数、命令认证或不支持协议的配置会说明原因并跳过。

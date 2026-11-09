@@ -10,7 +10,7 @@
 zi config --name work
 ```
 
-选择检测到的 Codex、WorkBuddy/CodeBuddy 或 dsh 配置，缺少 Key 时按隐藏提示填写。
+选择检测到的 Codex、WorkBuddy/CodeBuddy、dsh 或 [Claude Code](claude-code-import.md) 配置，缺少 Key 时按隐藏提示填写。
 也可用 `zi config --name work --manual` 手动填写服务地址、模型 ID、协议和 Key。
 配置向导需要交互终端，不接收管道输入；保存配置本身不发送模型请求，也不修改来源智能体的文件。
 

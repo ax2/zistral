@@ -130,6 +130,9 @@ zi config --list
 | WorkBuddy | `~/.workbuddy/models.json`, with `~/.codebuddy/models.json` as an additional source; complete `/chat/completions` URLs are normalized |
 | dsh | `~/.dsh/profiles/*/cordis.yml` and `cordis.patch.yml`; model-provider overrides are merged, with keys resolved from the named environment variable or `.dsh/.credentials.yaml` refs |
 
+Unreleased `main` also detects [Claude Code personal API settings](docs/claude-code-import.md)
+for Anthropic Messages. The released packages support the sources in the table above.
+
 Codex ChatGPT account/subscription tokens are **not API keys** and are not
 imported. A provider using command authentication, extra headers/query parameters,
 or an unsupported protocol is skipped with an explanation. The importer never

@@ -30,11 +30,12 @@ rules resume; importing while an override exists does not permanently provision 
 
 ## Recognized sources
 
-| Source | Existing recognized environment form |
+| Source | Recognized environment form |
 | --- | --- |
 | Codex | Provider `env_key`; environment syntax in `experimental_bearer_token`; effective `OPENAI_API_KEY` fallback for providers using OpenAI auth |
 | WorkBuddy/CodeBuddy | `apiKeyEnv`; `$NAME` or `${NAME}` in `apiKey` |
 | dsh | A usable provider `apiKeyEnv`; environment syntax in `apiKey` or a supported plain credential-reference value |
+| [Claude Code](claude-code-import.md) | Shell `ANTHROPIC_API_KEY`, when the personal settings file does not set that field |
 
 This preserves the **selected credential source**, not an entire upstream fallback
 chain. Existing lookup order is unchanged. If an environment reference is absent
@@ -84,7 +85,7 @@ field, key vault, command, dependency, background watcher, or agent tool is adde
 
 ## Verification
 
-Real-terminal tests cover seven reference forms, hidden-key prompts for three
+Real-terminal tests cover eight reference forms, hidden-key prompts for four
 missing-source cases, and literal-fallback precedence. Imported named profiles
 retain only the variable name; root/unrelated profiles and source files stay
 unchanged. Two controlled requests per form use initial and rotated key values;

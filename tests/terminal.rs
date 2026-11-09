@@ -85,9 +85,23 @@ fn terminal_outcome(
     ] {
         command.env_remove(key);
     }
+    for (key, _) in std::env::vars_os() {
+        if key
+            .to_string_lossy()
+            .to_ascii_uppercase()
+            .starts_with("CLAUDE_")
+            || key
+                .to_string_lossy()
+                .to_ascii_uppercase()
+                .starts_with("ANTHROPIC_")
+        {
+            command.env_remove(key);
+        }
+    }
     command.env("HOME", home);
     command.env("USERPROFILE", home);
     command.env("CODEX_HOME", home.join(".codex"));
+    command.env("CLAUDE_CONFIG_DIR", home.join(".claude"));
     command.env("APPDATA", home.join("config"));
     command.env("XDG_CONFIG_HOME", home.join("config"));
     command.env("NO_PROXY", "*");

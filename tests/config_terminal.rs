@@ -76,10 +76,24 @@ fn configure_with_hook(
     if let Some(name) = name {
         cmd.args(["--name", name]);
     }
+    for (key, _) in std::env::vars_os() {
+        if key
+            .to_string_lossy()
+            .to_ascii_uppercase()
+            .starts_with("CLAUDE_")
+            || key
+                .to_string_lossy()
+                .to_ascii_uppercase()
+                .starts_with("ANTHROPIC_")
+        {
+            cmd.env_remove(key);
+        }
+    }
     if let Some(home) = home {
         cmd.env("HOME", home);
         cmd.env("USERPROFILE", home);
         cmd.env("CODEX_HOME", home.join(".codex"));
+        cmd.env("CLAUDE_CONFIG_DIR", home.join(".claude"));
     } else {
         cmd.arg("--manual");
     }
@@ -203,6 +217,54 @@ fn detected_workbuddy_import_skips_key_prompt_and_preserves_source() {
     assert_eq!(saved["base_url"].as_str(), Some("https://example.com/v1"));
     assert_eq!(
         std::fs::read_to_string(home.path().join(".workbuddy/models.json")).unwrap(),
+        contents
+    );
+}
+
+#[test]
+fn detected_claude_override_imports_literal_key_and_exact_endpoint() {
+    let home = tempfile::tempdir().unwrap();
+    source(
+        home.path(),
+        ".claude/settings.json",
+        r#"{"model":"wrong-root"}"#,
+    );
+    let contents = r#"{"model":"explicit-claude-model","env":{"ANTHROPIC_BASE_URL":"https://gateway.example/team/v1","ANTHROPIC_API_KEY":"claude-literal-fixture"}}"#;
+    source(home.path(), "custom/settings.json", contents);
+    let path = home.path().join("zi/config.toml");
+    let custom = home.path().join("custom");
+    let transcript = configure_outcome_env(
+        &path,
+        &[("Configuration source", "1")],
+        Some(home.path()),
+        None,
+        "Saved ",
+        true,
+        &[
+            ("CLAUDE_CONFIG_DIR", custom.to_str().unwrap()),
+            ("ANTHROPIC_API_KEY", "inherited-decoy-fixture"),
+        ],
+    );
+    assert!(transcript.contains("Claude Code"));
+    for hidden in [
+        "wrong-root",
+        "claude-literal-fixture",
+        "inherited-decoy-fixture",
+        "API Key [",
+    ] {
+        assert!(!transcript.contains(hidden));
+    }
+    let saved: toml::Value = toml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    assert_eq!(saved["api"].as_str(), Some("anthropic"));
+    assert_eq!(saved["model"].as_str(), Some("explicit-claude-model"));
+    assert_eq!(
+        saved["endpoint"].as_str(),
+        Some("https://gateway.example/team/v1/v1/messages")
+    );
+    assert_eq!(saved["api_key"].as_str(), Some("claude-literal-fixture"));
+    assert!(saved.get("api_key_env").is_none());
+    assert_eq!(
+        std::fs::read_to_string(custom.join("settings.json")).unwrap(),
         contents
     );
 }
@@ -428,7 +490,18 @@ fn environment_import_fixture(
         3 => ("chat",vec![(".workbuddy/models.json",serde_json::json!([{"id":"env-model","url":format!("{url}/chat/completions"),"apiKeyEnv":name}]).to_string())]),
         4 => ("chat",vec![(".codebuddy/models.json",serde_json::json!({"models":[{"id":"env-model","url":url,"apiKey":format!("${{{name}}}")}]}).to_string())]),
         5 => ("anthropic",vec![(".dsh/profiles/desktop/cordis.yml",format!("- id: llm\n  config:\n    providers:\n      custom:\n        baseURL: {url}\n        api: anthropic-messages\n        apiKeyEnv: {name}\n        models: [env-model]\n"))]),
-        _ => ("anthropic",vec![(".dsh/profiles/desktop/cordis.yml",format!("- id: llm\n  config:\n    providers:\n      custom:\n        baseURL: {url}\n        api: anthropic-messages\n        apiKeyEnv: ZISTRAL_DSH_ALIAS_993\n        models: [env-model]\n")),(".dsh/.credentials.yaml",format!("refs:\n  ZISTRAL_DSH_ALIAS_993: '${{{name}}}'\n"))]),
+        6 => ("anthropic",vec![(".dsh/profiles/desktop/cordis.yml",format!("- id: llm\n  config:\n    providers:\n      custom:\n        baseURL: {url}\n        api: anthropic-messages\n        apiKeyEnv: ZISTRAL_DSH_ALIAS_993\n        models: [env-model]\n")),(".dsh/.credentials.yaml",format!("refs:\n  ZISTRAL_DSH_ALIAS_993: '${{{name}}}'\n"))]),
+        7 => ("anthropic", vec![
+            (".claude/settings.json", serde_json::json!({
+                "model": "sonnet",
+                "env": {
+                    "ANTHROPIC_BASE_URL": url.strip_suffix("/v1").unwrap(),
+                    "ANTHROPIC_DEFAULT_SONNET_MODEL": "env-model"
+                }
+            }).to_string()),
+            (".claude/.credentials.json", r#"{"claudeAiOauth":{"accessToken":"NEVER_IMPORT_SESSION_993"}}"#.into()),
+        ]),
+        _ => unreachable!("unknown fixture"),
     };
     let originals = files
         .into_iter()
@@ -480,15 +553,15 @@ fn imported_environment_key_is_a_reference_not_a_plaintext_snapshot() {
         io::{BufRead, BufReader},
         net::TcpListener,
     };
-    for case in 0..7 {
+    for case in 0..8 {
         let home = tempfile::tempdir().unwrap();
         let l = TcpListener::bind("127.0.0.1:0").unwrap();
         l.set_nonblocking(true).unwrap();
         let url = format!("http://{}/v1", l.local_addr().unwrap());
-        let name = if case == 2 {
-            "OPENAI_API_KEY"
-        } else {
-            "ZISTRAL_IMPORTED_REF_993"
+        let name = match case {
+            2 => "OPENAI_API_KEY",
+            7 => "ANTHROPIC_API_KEY",
+            _ => "ZISTRAL_IMPORTED_REF_993",
         };
         let (api, originals) = environment_import_fixture(home.path(), case, &url, name);
         let path = home.path().join("zi/config.toml");
@@ -525,7 +598,11 @@ fn imported_environment_key_is_a_reference_not_a_plaintext_snapshot() {
         );
         assert!(p.get("api_key").is_none());
         assert_eq!(p["base_url"].as_str(), Some(url.as_str()));
-        assert!(p.get("endpoint").is_none());
+        let endpoint = (case == 7).then(|| format!("{url}/messages"));
+        assert_eq!(
+            p.get("endpoint").and_then(toml::Value::as_str),
+            endpoint.as_deref()
+        );
         assert_eq!(p["api"].as_str(), Some(api));
         assert_eq!(file["active_profile"].as_str(), Some("work"));
         assert_eq!(file["api_key"].as_str(), Some("ROOT_EXISTING_993"));
@@ -551,6 +628,11 @@ fn imported_environment_key_is_a_reference_not_a_plaintext_snapshot() {
                 s.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
                 let mut reader = BufReader::new(s.try_clone().unwrap());
                 let mut header = String::new();
+                if case == 7 {
+                    let mut request = String::new();
+                    reader.read_line(&mut request).unwrap();
+                    assert_eq!(request.trim_end(), "POST /v1/messages HTTP/1.1");
+                }
                 let mut size = 0;
                 loop {
                     let mut line = String::new();
@@ -636,7 +718,7 @@ fn imported_environment_key_is_a_reference_not_a_plaintext_snapshot() {
 
 #[test]
 fn missing_import_environment_prompts_for_literal_key_without_claiming_a_reference() {
-    for case in [0, 3, 5] {
+    for case in [0, 3, 5, 7] {
         let home = tempfile::tempdir().unwrap();
         let (_, originals) = environment_import_fixture(
             home.path(),
@@ -655,9 +737,14 @@ fn missing_import_environment_prompts_for_literal_key_without_claiming_a_referen
             None,
             "Saved ",
             true,
-            &[("ZISTRAL_MISSING_IMPORTED_REF_993", "")],
+            &[
+                ("ZISTRAL_MISSING_IMPORTED_REF_993", ""),
+                ("ANTHROPIC_API_KEY", ""),
+            ],
         );
         assert!(!output.contains("SUPPLIED_FALLBACK_993"));
+        assert!(!output.contains("NEVER_IMPORT_SESSION_993"));
+        assert!(!output.contains("Service URL ["));
         let saved: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(saved["api_key"].as_str(), Some("SUPPLIED_FALLBACK_993"));
         assert!(saved.get("api_key_env").is_none());

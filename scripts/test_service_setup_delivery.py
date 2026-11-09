@@ -139,7 +139,7 @@ def verify(binary):
             root = Path(temporary)
             config = root / 'model 配置.toml'
             env = {key: value for key, value in os.environ.items()
-                   if not key.upper().startswith('ZI_') and key.upper() not in {
+                   if not key.upper().startswith(('ZI_', 'CLAUDE_', 'ANTHROPIC_')) and key.upper() not in {
                        'OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY'}}
             env.update(HOME=str(root), USERPROFILE=str(root), APPDATA=str(root / 'config'),
                        XDG_CONFIG_HOME=str(root / 'config'), NO_PROXY='*', DELIVERY_MODEL_KEY=KEY)
@@ -186,14 +186,26 @@ api_key_env='DELIVERY_MODEL_KEY'
                 text = json.dumps([{'id': model, 'url': url, 'apiKeyEnv': 'DELIVERY_MODEL_KEY'}])
             source.parent.mkdir(parents=True)
             source.write_text(text, encoding='utf-8')
-            # An explicit home override keeps Codex discovery inside this fixture.
+            # Keep home overrides inside the fixture.
             env['CODEX_HOME'] = str(root / '.codex')
+            claude = root / '.claude/settings.json'
+            env['CLAUDE_CONFIG_DIR'] = str(claude.parent)
+            if api == 'anthropic':
+                claude.parent.mkdir()
+                claude_bytes = json.dumps({'model': 'delivery/claude', 'env': {
+                    'ANTHROPIC_BASE_URL': url.removesuffix('/v1'),
+                }}).encode()
+                claude.write_bytes(claude_bytes)
+                env['ANTHROPIC_API_KEY'] = KEY
             coordination = config.with_name(config.name + '.lock')
             assert not coordination.exists()
             before_discovery = config.read_bytes()
             before_source = source.read_bytes()
             result = run(['config', '--list'], INPUT)
             assert model.encode() in result.stdout and b'Key environment' in result.stdout
+            if api == 'anthropic':
+                assert b'Claude Code/user: delivery/claude [anthropic; Key environment]' in result.stdout
+                assert claude.read_bytes() == claude_bytes
             assert source.read_bytes() == before_source and config.read_bytes() == before_discovery
             assert read() == baseline and not server.requests and not coordination.exists()
             checks.append(label + ': source-agent discovery recognizes environment credentials without echo, config writes or network')
