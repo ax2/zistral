@@ -308,20 +308,18 @@ pub(crate) fn string_key(input: &str, pointer: &str, if_present: bool) -> Result
 
 /// Borrow exact integer digits directly from the validated record, without allocating a key.
 pub(crate) fn integer_key<'a>(input: &'a str, pointer: &str) -> Result<crate::integer::Key<'a>> {
-    crate::integer::Key::parse(key_value(input, pointer)?.get())
+    integer_value(input, pointer, false)?.context("JSON pointer does not exist in the input")
 }
 
 /// Optional integer filtering still rejects an existing noninteger value.
-pub(crate) fn integer_equals(
-    input: &str,
+pub(crate) fn integer_value<'a>(
+    input: &'a str,
     pointer: &str,
-    expected: crate::integer::Key<'_>,
     if_present: bool,
-) -> Result<bool> {
-    let Some(raw) = validated_value(input, pointer, if_present)? else {
-        return Ok(false);
-    };
-    Ok(crate::integer::Key::parse(raw.get())? == expected)
+) -> Result<Option<crate::integer::Key<'a>>> {
+    validated_value(input, pointer, if_present)?
+        .map(|raw| crate::integer::Key::parse(raw.get()))
+        .transpose()
 }
 
 /// Replace exactly the borrowed value span, never an equal value elsewhere in the record.

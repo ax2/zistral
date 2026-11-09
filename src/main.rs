@@ -225,6 +225,12 @@ enum Commands {
         /// Exact string for jsonl-where, or JSON integer literal for jsonl-where-int (max4096 bytes)
         #[arg(long, requires = "operation", conflicts_with_all = ["steps", "recipe"])]
         equals: Option<String>,
+        /// Inclusive JSON integer lower bound for jsonl-where-int
+        #[arg(long, requires = "operation", conflicts_with_all = ["steps", "recipe", "equals"])]
+        at_least: Option<String>,
+        /// Inclusive JSON integer upper bound for jsonl-where-int
+        #[arg(long, requires = "operation", conflicts_with_all = ["steps", "recipe", "equals"])]
+        at_most: Option<String>,
         /// Number of first/last lines; required for lines-head/lines-tail (1-100000)
         #[arg(short = 'n', long, requires = "operation", conflicts_with_all = ["steps", "recipe"])]
         lines: Option<usize>,
@@ -238,7 +244,7 @@ enum Commands {
         #[arg(long)]
         show_plan: bool,
         /// List embedded native recipes offline, without reading stdin or model settings
-        #[arg(long, conflicts_with_all = ["operation", "steps", "recipe", "show_plan", "reverse", "if_present", "pointer", "fields", "field_defaults", "contains", "context", "equals", "lines"])]
+        #[arg(long, conflicts_with_all = ["operation", "steps", "recipe", "show_plan", "reverse", "if_present", "pointer", "fields", "field_defaults", "contains", "context", "equals", "at_least", "at_most", "lines"])]
         list_recipes: bool,
     },
     /// List, inspect, render, export, import or initialize reusable task presets (offline)
@@ -437,6 +443,8 @@ fn run(mut cli: Cli) -> Result<()> {
         contains,
         context,
         equals,
+        at_least,
+        at_most,
         lines,
         steps,
         recipe,
@@ -473,6 +481,8 @@ fn run(mut cli: Cli) -> Result<()> {
                     contains: contains.clone(),
                     context: *context,
                     equals: equals.clone(),
+                    at_least: at_least.clone(),
+                    at_most: at_most.clone(),
                     lines: *lines,
                 })
             })

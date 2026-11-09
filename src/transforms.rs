@@ -128,6 +128,18 @@ pub struct Step {
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_string"
+    )]
+    pub at_least: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_string"
+    )]
+    pub at_most: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
         deserialize_with = "optional_lines"
     )]
     pub lines: Option<usize>,
@@ -168,6 +180,38 @@ fn is_false(value: &bool) -> bool {
 }
 
 impl Step {
+    fn integer_bounds(
+        &self,
+    ) -> Result<(
+        Option<crate::integer::Key<'_>>,
+        Option<crate::integer::Key<'_>>,
+    )> {
+        fn parse(value: &str) -> Result<crate::integer::Key<'_>> {
+            if value.len() > 4096 {
+                bail!("integer filter values must contain at most 4096 UTF-8 bytes");
+            }
+            crate::integer::Key::parse(value)
+                .context("integer filter values must be JSON integer literals")
+        }
+
+        if let Some(value) = &self.equals {
+            if self.at_least.is_some() || self.at_most.is_some() {
+                bail!("use equals or integer bounds, not both");
+            }
+            let exact = parse(value)?;
+            return Ok((Some(exact), Some(exact)));
+        }
+        let lower = self.at_least.as_deref().map(parse).transpose()?;
+        let upper = self.at_most.as_deref().map(parse).transpose()?;
+        match (lower, upper) {
+            (None, None) => bail!("jsonl-where-int requires equals, at_least or at_most"),
+            (Some(lower), Some(upper)) if lower > upper => {
+                bail!("at_least must be less than or equal to at_most");
+            }
+            _ => Ok((lower, upper)),
+        }
+    }
+
     pub fn validate(&self) -> Result<()> {
         if self.if_present.is_some()
             && !matches!(
@@ -189,7 +233,7 @@ impl Step {
             (Some(_), Operation::JsonlWhere | Operation::JsonlWhereInt) => {
                 bail!("equals must contain at most 4096 UTF-8 bytes")
             }
-            (None, Operation::JsonlWhere | Operation::JsonlWhereInt) => bail!(
+            (None, Operation::JsonlWhere) => bail!(
                 "{} requires explicit equals text; use --equals TEXT or recipe equals",
                 self.operation
             ),
@@ -197,8 +241,9 @@ impl Step {
             (None, _) => (),
         }
         if self.operation == Operation::JsonlWhereInt {
-            crate::integer::Key::parse(self.equals.as_deref().expect("validated equals"))
-                .context("jsonl-where-int equals must be a JSON integer literal")?;
+            self.integer_bounds()?;
+        } else if self.at_least.is_some() || self.at_most.is_some() {
+            bail!("at_least and at_most are only valid for jsonl-where-int");
         }
         if let Some(context) = self.context {
             if self.operation != Operation::LinesInclude {
@@ -455,10 +500,9 @@ fn jsonl_to_array(input: &str, out: &mut Buffer) -> Result<()> {
 
 fn jsonl_where(input: &str, step: &Step, out: &mut Buffer) -> Result<()> {
     let pointer = step.pointer.as_deref().expect("validated pointer");
-    let equals = step.equals.as_deref().expect("validated equals");
     let if_present = step.if_present.unwrap_or(false);
     let integer = if step.operation == Operation::JsonlWhereInt {
-        Some(crate::integer::Key::parse(equals)?)
+        Some(step.integer_bounds()?)
     } else {
         None
     };
@@ -466,9 +510,14 @@ fn jsonl_where(input: &str, step: &Step, out: &mut Buffer) -> Result<()> {
         if index == MAX_ITEMS {
             bail!("JSONL filtering accepts at most 100000 records");
         }
-        let matched = if let Some(expected) = integer {
-            crate::selection::integer_equals(line, pointer, expected, if_present)
+        let matched = if let Some((lower, upper)) = integer {
+            crate::selection::integer_value(line, pointer, if_present).map(|value| {
+                value.is_some_and(|key| {
+                    lower.is_none_or(|min| key >= min) && upper.is_none_or(|max| key <= max)
+                })
+            })
         } else {
+            let equals = step.equals.as_deref().expect("validated equals");
             crate::selection::string_equals(line, pointer, equals, if_present)
         }
         .with_context(|| format!("cannot filter JSONL record {}", index + 1))?;
@@ -706,6 +755,8 @@ fn run(input: &str, operation: Operation, reverse: bool, limit: usize) -> Result
         input,
         &Step {
             context: None,
+            at_least: None,
+            at_most: None,
             if_present: None,
             operation,
             reverse,
@@ -922,7 +973,7 @@ pub(crate) fn parse_arguments(arguments: &str) -> Result<ToolArguments> {
     }
     serde_json::from_str(arguments).map_err(|_| {
         anyhow::anyhow!(
-            "transform_input requires either operation with optional reverse/pointer/fields/contains/context/lines/equals/if_present, or 1-16 steps of the same shape; do not combine them"
+            "transform_input requires either operation with optional reverse/pointer/fields/contains/context/lines/equals/at_least/at_most/if_present, or 1-16 steps of the same shape; do not combine them"
         )
     })
 }
@@ -983,6 +1034,8 @@ mod tests {
         };
         let step = Step {
             context: None,
+            at_least: None,
+            at_most: None,
             if_present: None,
             operation: Operation::JsonlProject,
             reverse: false,
@@ -1077,6 +1130,8 @@ mod tests {
     fn csv_export_enforces_record_depth_output_and_serialized_envelope_bounds() {
         let step = Step {
             context: None,
+            at_least: None,
+            at_most: None,
             if_present: None,
             operation: Operation::JsonlToCsv,
             reverse: false,
@@ -1212,6 +1267,8 @@ mod tests {
     fn csv_limits_keep_record_counts_and_serialized_tool_envelope_bounded() {
         let step = Step {
             context: None,
+            at_least: None,
+            at_most: None,
             if_present: None,
             operation: Operation::CsvToJsonl,
             reverse: false,
@@ -1248,6 +1305,8 @@ mod tests {
         );
         let step = Step {
             context: None,
+            at_least: None,
+            at_most: None,
             if_present: None,
             operation: Operation::JsonlSelect,
             reverse: false,
@@ -1534,6 +1593,8 @@ mod tests {
     fn pipeline_allows_bounded_expansion_then_reduction_and_retains_json_tokens() {
         let step = |operation, reverse| Step {
             context: None,
+            at_least: None,
+            at_most: None,
             if_present: None,
             operation,
             reverse,
@@ -1735,6 +1796,8 @@ mod tests {
     fn line_filter_limits_apply_before_discarding_and_to_serialized_tool_output() {
         let mut step = Step {
             context: None,
+            at_least: None,
+            at_most: None,
             if_present: None,
             operation: Operation::LinesInclude,
             reverse: false,
@@ -2017,6 +2080,8 @@ mod jsonl_key_tests {
     fn step(operation: Operation, pointer: &str, reverse: bool) -> Step {
         Step {
             context: None,
+            at_least: None,
+            at_most: None,
             if_present: None,
             operation,
             pointer: Some(pointer.into()),
@@ -2140,6 +2205,27 @@ mod jsonl_key_tests {
             assert!(transform(r#"{"a":["ok","PRIVATE"]}"#, &s, MAX_INPUT, CLI_OUTPUT).is_err());
         }
     }
+    #[test]
+    fn integer_filter_tool_bounds_are_inclusive_and_validate_the_whole_input() {
+        let args = r#"{"steps":[{"operation":"jsonl-where-int","pointer":"","at_least":"-9007199254740993","at_most":"0"}]}"#;
+        let result: serde_json::Value = serde_json::from_str(
+            &execute(args, "-9007199254740994\n-9007199254740993\n-0\n0\n1\n").unwrap(),
+        )
+        .unwrap();
+        assert_eq!(result["output"], "-9007199254740993\n-0\n0\n");
+        for invalid in [
+            r#"{"operation":"jsonl-where-int","pointer":"","at_least":"3","at_most":"2"}"#,
+            r#"{"operation":"jsonl-where-int","pointer":"","at_least":"0","equals":"0"}"#,
+            r#"{"operation":"jsonl-where-int","pointer":"","at_least":null}"#,
+            r#"{"operation":"jsonl-where-int","pointer":"","at_most":5}"#,
+            r#"{"operation":"jsonl-where-int","pointer":"","at_most":"1e0"}"#,
+            r#"{"operation":"jsonl-where","pointer":"","equals":"x","at_least":"0"}"#,
+        ] {
+            assert!(execute(invalid, "").is_err());
+        }
+        assert!(execute(args, "0\n1.0\n").is_err());
+    }
+
     #[test]
     fn optional_counting_counts_discarded_records_toward_limits() {
         let mut count = step(Operation::JsonlCountBy, "/code", false);
@@ -2265,6 +2351,8 @@ mod integer_ranking_tests {
     fn step(pointer: &str, reverse: bool) -> Step {
         Step {
             context: None,
+            at_least: None,
+            at_most: None,
             if_present: None,
             operation: Operation::JsonlSortInt,
             pointer: Some(pointer.into()),

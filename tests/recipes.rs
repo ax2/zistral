@@ -1788,6 +1788,91 @@ fn builtin_top_counts_rank_integers_stably_and_export_an_editable_offline_plan()
 }
 
 #[test]
+fn integer_ranges_compose_with_optional_paths_and_preserve_prior_output() {
+    let root = tempfile::tempdir().unwrap();
+    let dir = root.path();
+    let input = b"{\"status\":499}\n{\"status\":500}\n{}\n{\"status\":599}\n{\"status\":600}\n";
+    let expected = b"{\"status\":500}\n{\"status\":599}\n";
+    let args = [
+        "data",
+        "jsonl-where-int",
+        "--pointer",
+        "/status",
+        "--at-least",
+        "500",
+        "--at-most",
+        "599",
+        "--if-present",
+    ];
+    let out = invoke(dir, &args, input);
+    assert!(out.status.success() && out.stderr.is_empty());
+    assert_eq!(out.stdout, expected);
+
+    let plan = invoke(dir, &[&args[..], &["--show-plan"]].concat(), b"not JSON");
+    assert!(plan.status.success() && plan.stderr.is_empty());
+    let recipe: toml::Value = toml::from_str(std::str::from_utf8(&plan.stdout).unwrap()).unwrap();
+    assert_eq!(recipe["steps"][0]["at_least"].as_str(), Some("500"));
+    assert_eq!(recipe["steps"][0]["at_most"].as_str(), Some("599"));
+    std::fs::write(dir.join("range.toml"), &plan.stdout).unwrap();
+    let replay = invoke(dir, &["data", "--recipe", "range.toml"], input);
+    assert!(replay.status.success() && replay.stderr.is_empty());
+    assert_eq!(replay.stdout, expected);
+
+    for (bound, value, selected) in [
+        (
+            "--at-least",
+            "9007199254740993",
+            b"9007199254740993\n".as_slice(),
+        ),
+        (
+            "--at-most",
+            "9007199254740992",
+            b"9007199254740992\n".as_slice(),
+        ),
+    ] {
+        let out = invoke(
+            dir,
+            &["data", "jsonl-where-int", "--pointer", "", bound, value],
+            b"9007199254740992\n9007199254740993\n",
+        );
+        assert!(out.status.success() && out.stderr.is_empty());
+        assert_eq!(out.stdout, selected);
+    }
+    std::fs::write(dir.join("prior.jsonl"), b"prior").unwrap();
+    let invalid = invoke(
+        dir,
+        &[
+            "data",
+            "jsonl-where-int",
+            "--pointer",
+            "/status",
+            "--at-least",
+            "600",
+            "--at-most",
+            "599",
+            "-i",
+            "DO_NOT_READ",
+            "-o",
+            "prior.jsonl",
+            "--force",
+        ],
+        b"",
+    );
+    assert!(!invalid.status.success() && invalid.stdout.is_empty());
+    assert!(!String::from_utf8_lossy(&invalid.stderr).contains("DO_NOT_READ"));
+    let mut malformed = input.to_vec();
+    malformed.extend_from_slice(b"{\"status\":\"PRIVATE_NUMBER\"}\n");
+    let out = invoke(
+        dir,
+        &[&args[..], &["-o", "prior.jsonl", "--force"]].concat(),
+        &malformed,
+    );
+    assert!(!out.status.success() && out.stdout.is_empty());
+    assert!(!String::from_utf8_lossy(&out.stderr).contains("PRIVATE_NUMBER"));
+    assert_eq!(std::fs::read(dir.join("prior.jsonl")).unwrap(), b"prior");
+}
+
+#[test]
 fn optional_counting_skips_only_absent_keys_and_preserves_source_positions() {
     let root = tempfile::tempdir().unwrap();
     let dir = root.path();

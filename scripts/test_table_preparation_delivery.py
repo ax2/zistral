@@ -100,7 +100,14 @@ operation="jsonl-to-tsv"
             context_recipe.write_bytes(context.stdout)
             excerpt = run(['data', '--recipe', context_recipe], b'heading\r\nERROR\r\n at A\r\nother')
             assert excerpt.stdout == b'heading\nERROR\n at A\n' and not excerpt.stderr
-            checks.append('plan export: table replay, explicit missing-path handling and line context in log recipes')
+            http_range = run(['data', 'jsonl-where-int', '--pointer', '/status',
+                              '--at-least', '500', '--at-most', '599', '--show-plan'])
+            range_recipe = root/'HTTP status-测试.toml'
+            range_recipe.write_bytes(http_range.stdout)
+            range_result = run(['data', '--recipe', range_recipe],
+                               b'{"status":499}\n{"status":500}\n{"status":599}\n{"status":600}\n')
+            assert range_result.stdout == b'{"status":500}\n{"status":599}\n' and not range_result.stderr
+            checks.append('plan export: table replay, missing paths, line context and integer ranges in log recipes')
             projected = run(['data', 'jsonl-project', '--field', 'tag=/tag',
                              '--field-default', 'tag=""'], b'{"tag":null}\n{}\n')
             assert projected.stdout == b'{"tag":null}\n{"tag":""}\n' and not projected.stderr

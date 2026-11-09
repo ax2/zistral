@@ -11,7 +11,7 @@ zi data jsonl-where-int --pointer /count --equals 2 --show-plan -o exactly-two.t
 zi data --recipe exactly-two.toml -i another-counts.jsonl
 ```
 
-Use one explicit RFC 6901 pointer and a required `equals` JSON integer literal,
+Use an explicit RFC 6901 pointer. Each comparison value is JSON integer literal text,
 at most 4096 UTF-8 bytes. It has an optional minus followed by digits, with no
 leading zeros except `0`/`-0`. Empty text, `+2`, `02`, quoted strings, decimal or
 exponent forms fail during definition validation before input/output access.
@@ -20,6 +20,18 @@ integer records. Whole matching records retain original number/string tokens,
 key order and unrelated duplicate keys; output order stays unchanged, with LF
 endings. `0` and `-0` match each other without rewriting either source spelling.
 There is no machine-integer precision bound, floating-point conversion or coercion.
+
+The development build also accepts inclusive bounds. Either bound may be used alone.
+With both bounds, the lower bound must be less than or equal to the upper bound.
+Use bounds separately from `--equals`.
+
+```sh
+zi data jsonl-where-int --pointer /status --at-least 500 --at-most 599 -i events.jsonl
+zi data jsonl-where-int --pointer /latency_ms --at-least 250 -i events.jsonl
+```
+
+Export with `--show-plan` to reuse `at_least` and `at_most` in TOML. Both fields use
+quoted JSON integer literal text, just like `equals`.
 
 Every selected value must be an integer literal. A string `"2"`, `2.0`, `2e0`,
 boolean, null or container is an error rather than a nonmatching record. Missing or
@@ -60,4 +72,4 @@ This operation is shared by offline commands, version-1 recipes and the existing
 `transform_input` tool, without adding a tool name, query language, runtime package,
 permission or task memory. It starts from original input in each tool invocation;
 only ordered steps within that invocation consume a previous intermediate. It
-does not offer inequalities, ranges, expressions or implicit type conversion.
+supports equality and inclusive integer bounds using the same exact comparison.
