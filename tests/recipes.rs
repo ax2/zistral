@@ -2017,7 +2017,7 @@ fn builtin_top_error_codes_filters_ranks_and_exports_an_editable_plan() {
     let builtin = ["data", "--recipe", "builtin:top-error-codes"];
     let error = |code: &str| format!("{{\"level\":\"ERROR\",\"error\":{{\"code\":\"{code}\"}}}}\n");
     let mut logs = String::from(
-        "{\"level\":\"INFO\"}\n{\"level\":\"error\",\"error\":{\"code\":\"lowercase\"}}\n",
+        "{\"level\":\"INFO\"}\n{\"level\":null}\n{\"level\":\"error\",\"error\":{\"code\":\"lowercase\"}}\n",
     );
     logs.push_str(&error("FIRST"));
     logs.push_str(&error("SECOND"));
@@ -2066,6 +2066,7 @@ fn builtin_top_error_codes_filters_ranks_and_exports_an_editable_plan() {
         r#"{"level":"ERROR","error":{"code":2}}"#,
         r#"{"level":"ERROR"}"#,
         r#"{"level":"WARN","message":PRIVATE_BROKEN_JSON}"#,
+        r#"{"level":"WARN","message":"\uD800"}"#,
     ] {
         let input = format!("{logs}{invalid}\n");
         let out = invoke(

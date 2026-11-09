@@ -204,7 +204,7 @@ enum Commands {
         /// Reverse key order; valid with sort, jsonl-sort and jsonl-sort-int (JSONL ties stay stable)
         #[arg(long, requires = "operation", conflicts_with_all = ["steps", "recipe"])]
         reverse: bool,
-        /// When a pointer is absent, preserve it during redaction or skip it during JSONL equality filtering/counting
+        /// When a pointer is absent, preserve the record during redaction or skip it during JSONL filtering/counting
         #[arg(long, requires = "operation", conflicts_with_all = ["steps", "recipe"])]
         if_present: bool,
         /// RFC 6901 pointer for JSON selection/redaction/filtering/key operations; empty selects root

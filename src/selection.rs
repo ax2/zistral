@@ -235,13 +235,8 @@ pub(crate) fn string_equals(
     expected: &str,
     if_present: bool,
 ) -> Result<bool> {
-    let raw = if if_present {
-        let Some(raw) = validated_value(input, pointer, true)? else {
-            return Ok(false);
-        };
-        raw
-    } else {
-        find(input, pointer)?
+    let Some(raw) = validated_value(input, pointer, if_present)? else {
+        return Ok(false);
     };
     if !raw.get().starts_with('"') {
         return Ok(false);
@@ -519,6 +514,12 @@ mod string_match_tests {
             (r#"{"x":"\uD800"}"#, "/x"),
         ] {
             assert!(string_equals(json, pointer, "ERROR", false).is_err());
+        }
+        for if_present in [false, true] {
+            for level in ["INFO", "ERROR"] {
+                let invalid = format!(r#"{{"x":"{level}","other":"\uD800"}}"#);
+                assert!(string_equals(&invalid, "/x", "ERROR", if_present).is_err());
+            }
         }
     }
 }

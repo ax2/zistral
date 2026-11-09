@@ -224,7 +224,7 @@ impl Step {
             )
         {
             bail!(
-                "if_present is only valid for JSON redaction, JSONL equality filtering or jsonl-count-by"
+                "if_present is only valid for JSON redaction, JSONL field filtering or jsonl-count-by"
             );
         }
         match (&self.equals, self.operation) {
