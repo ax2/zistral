@@ -58,7 +58,7 @@ def stream_answer(api, text):
 
 
 @contextmanager
-def service(api, model):
+def service(api, model, root_path='/v1'):
     class Handler(http.server.BaseHTTPRequestHandler):
         def log_message(self, *args):
             pass
@@ -82,11 +82,11 @@ def service(api, model):
                     assert self.headers.get('authorization') == 'Bearer ' + KEY
                     assert self.headers.get('x-api-key') is None
                 if method == 'GET':
-                    assert self.path == '/v1/models' + ('?limit=1000' if api == 'anthropic' else '')
+                    assert self.path == root_path + '/models' + ('?limit=1000' if api == 'anthropic' else '')
                     assert self.headers.get('content-length') is None
                     body = None
                 else:
-                    assert self.path == '/v1/' + {'chat': 'chat/completions',
+                    assert self.path == root_path + '/' + {'chat': 'chat/completions',
                            'responses': 'responses', 'anthropic': 'messages'}[api]
                     size = int(self.headers['Content-Length'])
                     assert 0 < size < 131072
@@ -111,7 +111,7 @@ def service(api, model):
     worker = threading.Thread(target=server.serve_forever, kwargs={'poll_interval': .01}, daemon=True)
     worker.start()
     try:
-        yield server, f'http://127.0.0.1:{server.server_port}/v1'
+        yield server, f'http://127.0.0.1:{server.server_port}{root_path}'
         assert not server.errors, 'controlled service assertion failed: ' + ','.join(server.errors)
         assert len(server.requests) == len(server.plan), 'missing service requests'
     finally:
@@ -135,7 +135,7 @@ def verify(binary):
     for api, preference, wire in variants:
         label = api + ('/legacy' if preference else '')
         model = 'delivery/' + label
-        with tempfile.TemporaryDirectory(prefix='zi service-测试 ') as temporary, service(api, model) as (server, url):
+        with tempfile.TemporaryDirectory(prefix='zi service-测试 ') as temporary, service(api, model, '/gateway%20space/v1') as (server, url):
             root = Path(temporary)
             config = root / 'model 配置.toml'
             env = {key: value for key, value in os.environ.items()
@@ -148,7 +148,7 @@ base_url='http://127.0.0.1:1/v1'
 api_key='ROOT_KEY_993'
 [profiles.work]
 model='{model}'
-base_url='{url}'
+base_url='{url}/./ '
 api='{api}'
 api_key='SAVED_KEY_993'
 api_key_env='DELIVERY_MODEL_KEY'
@@ -309,6 +309,9 @@ api_key_env='DELIVERY_MODEL_KEY'
             before = len(server.requests)
             preview = json.loads(run(['--preview', '--no-stream', task], INPUT, allow_input=True).stdout)
             assert preview['network_requests'] == 0 and len(server.requests) == before
+            assert preview['request']['url'] == url + '/' + {
+                'chat': 'chat/completions', 'responses': 'responses', 'anthropic': 'messages',
+            }[api]
             first = preview['request']['body']
             check_budget(first, wire, 128)
             assert 'PRIVATE_INPUT_993' in json.dumps(first)

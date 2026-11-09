@@ -1203,7 +1203,8 @@ impl Settings {
             api_key_source,
             output_budget,
             model,
-            base_url: base_url.trim_end_matches('/').into(),
+            // Build request paths from the same parsed URL used for validation.
+            base_url: url.as_str().trim_end_matches('/').into(),
             api,
             api_key,
             endpoint,

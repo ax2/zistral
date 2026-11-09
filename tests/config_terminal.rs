@@ -557,7 +557,8 @@ fn imported_environment_key_is_a_reference_not_a_plaintext_snapshot() {
         let home = tempfile::tempdir().unwrap();
         let l = TcpListener::bind("127.0.0.1:0").unwrap();
         l.set_nonblocking(true).unwrap();
-        let url = format!("http://{}/v1", l.local_addr().unwrap());
+        let path = if case == 7 { "/proxy/v1/v1" } else { "/v1" };
+        let url = format!("http://{}{path}", l.local_addr().unwrap());
         let name = match case {
             2 => "OPENAI_API_KEY",
             7 => "ANTHROPIC_API_KEY",
@@ -631,7 +632,7 @@ fn imported_environment_key_is_a_reference_not_a_plaintext_snapshot() {
                 if case == 7 {
                     let mut request = String::new();
                     reader.read_line(&mut request).unwrap();
-                    assert_eq!(request.trim_end(), "POST /v1/messages HTTP/1.1");
+                    assert_eq!(request.trim_end(), "POST /proxy/v1/v1/messages HTTP/1.1");
                 }
                 let mut size = 0;
                 loop {

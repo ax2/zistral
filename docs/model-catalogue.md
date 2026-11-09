@@ -35,10 +35,11 @@ must be valid. Other commands continue to validate model generation settings.
 | `chat`, `responses` | `BASE_URL/models` | Existing Bearer key |
 | `anthropic` | `BASE_URL/models` when root ends in `/v1`; otherwise `BASE_URL/v1/models` | Existing `x-api-key` and `anthropic-version: 2023-06-01` |
 
-Trailing slashes are removed; reverse-proxy path prefixes are retained. Use the
-service API root as `base_url`, not a generation URL. The Anthropic version/auth
-match existing zi generation requests; this does not migrate them to a newer API
-version. Local/custom services may have no key. A service can support generation
+zi uses the validated URL to build request paths. It removes trailing slashes
+and preserves reverse-proxy path prefixes and encoded path segments. Use the
+service API root as `base_url`. Reads and requests leave the saved URL unchanged.
+The catalogue uses the same Anthropic version and authentication as generation.
+Local/custom services may have no key. A service can support generation
 without exposing a compatible models endpoint; HTTP 404 does not invalidate a
 saved profile. Use `zi models` to inspect local profiles instead.
 

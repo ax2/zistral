@@ -156,6 +156,11 @@ fn all_protocols_use_model_catalogue_get_auth_and_no_task_body() {
         ("responses", "/v1/", "/v1/models"),
         ("anthropic", "", "/v1/models?limit=1000"),
         ("anthropic", "/proxy/v1", "/proxy/v1/models?limit=1000"),
+        (
+            "anthropic",
+            "/gateway%20space/v1/.// ",
+            "/gateway%20space/v1/models?limit=1000",
+        ),
     ] {
         let root = tempfile::tempdir().unwrap();
         let (l, url) = listener();
