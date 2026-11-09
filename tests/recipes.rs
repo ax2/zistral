@@ -1161,6 +1161,93 @@ fn preview_validates_definition_without_claiming_data_execution_will_succeed() {
 }
 
 #[test]
+fn line_context_keeps_neighboring_lines_and_roundtrips_as_a_recipe() {
+    let root = tempfile::tempdir().unwrap();
+    let dir = root.path();
+    let source = b"discard\r\n before\r\nERROR 1\r\n\r\nERROR 2\r\n at A\r\ndiscard\r\n before again\r\nERROR 3";
+    let expected = b" before\nERROR 1\n\nERROR 2\n at A\n before again\nERROR 3\n";
+    let args = [
+        "data",
+        "lines-include",
+        "--contains",
+        "ERROR",
+        "--context",
+        "1",
+    ];
+    let out = invoke(dir, &args, source);
+    assert!(out.status.success() && out.stderr.is_empty());
+    assert_eq!(out.stdout, expected);
+
+    let plan = invoke(
+        dir,
+        &[&args[..], &["--show-plan"]].concat(),
+        b"not log input",
+    );
+    assert!(plan.status.success() && plan.stderr.is_empty());
+    assert!(
+        std::str::from_utf8(&plan.stdout)
+            .unwrap()
+            .contains("context = 1")
+    );
+    std::fs::write(dir.join("replay.toml"), &plan.stdout).unwrap();
+    let replay = invoke(dir, &["data", "--recipe", "replay.toml"], source);
+    assert!(replay.status.success() && replay.stderr.is_empty());
+    assert_eq!(replay.stdout, expected);
+
+    let plain = invoke(
+        dir,
+        &["data", "lines-include", "--contains", "ERROR"],
+        source,
+    );
+    let zero = invoke(
+        dir,
+        &[
+            "data",
+            "lines-include",
+            "--contains",
+            "ERROR",
+            "--context",
+            "0",
+        ],
+        source,
+    );
+    assert!(plain.status.success() && zero.status.success());
+    assert_eq!(plain.stdout, zero.stdout);
+    let missing = invoke(dir, &args, b"never matches\n");
+    assert!(missing.status.success() && missing.stdout.is_empty());
+
+    std::fs::write(dir.join("keep.txt"), b"prior").unwrap();
+    for args in [
+        [
+            "data",
+            "lines-include",
+            "--contains",
+            "ERROR",
+            "--context",
+            "100001",
+        ],
+        [
+            "data",
+            "lines-exclude",
+            "--contains",
+            "ERROR",
+            "--context",
+            "0",
+        ],
+    ] {
+        let args = [
+            &args[..],
+            &["-i", "DO_NOT_READ", "-o", "keep.txt", "--force"],
+        ]
+        .concat();
+        let out = invoke(dir, &args, b"");
+        assert!(!out.status.success() && out.stdout.is_empty());
+        assert!(!String::from_utf8_lossy(&out.stderr).contains("DO_NOT_READ"));
+        assert_eq!(std::fs::read(dir.join("keep.txt")).unwrap(), b"prior");
+    }
+}
+
+#[test]
 fn line_window_plans_roundtrip_counts_and_preserve_pipeline_order() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();

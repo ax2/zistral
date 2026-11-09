@@ -219,6 +219,9 @@ enum Commands {
         /// Case-sensitive literal substring for lines-include/lines-exclude; no CR/LF
         #[arg(long, requires = "operation", conflicts_with_all = ["steps", "recipe"])]
         contains: Option<String>,
+        /// Lines to retain before and after each lines-include match (0-100000)
+        #[arg(long, requires = "operation", conflicts_with_all = ["steps", "recipe"])]
+        context: Option<usize>,
         /// Exact string for jsonl-where, or JSON integer literal for jsonl-where-int (max4096 bytes)
         #[arg(long, requires = "operation", conflicts_with_all = ["steps", "recipe"])]
         equals: Option<String>,
@@ -235,7 +238,7 @@ enum Commands {
         #[arg(long)]
         show_plan: bool,
         /// List embedded native recipes offline, without reading stdin or model settings
-        #[arg(long, conflicts_with_all = ["operation", "steps", "recipe", "show_plan", "reverse", "if_present", "pointer", "fields", "field_defaults", "contains", "equals", "lines"])]
+        #[arg(long, conflicts_with_all = ["operation", "steps", "recipe", "show_plan", "reverse", "if_present", "pointer", "fields", "field_defaults", "contains", "context", "equals", "lines"])]
         list_recipes: bool,
     },
     /// List, inspect, render, export, import or initialize reusable task presets (offline)
@@ -432,6 +435,7 @@ fn run(mut cli: Cli) -> Result<()> {
         fields,
         field_defaults,
         contains,
+        context,
         equals,
         lines,
         steps,
@@ -467,6 +471,7 @@ fn run(mut cli: Cli) -> Result<()> {
                     pointer: pointer.clone(),
                     fields: projection::parse(fields, field_defaults)?,
                     contains: contains.clone(),
+                    context: *context,
                     equals: equals.clone(),
                     lines: *lines,
                 })

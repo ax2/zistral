@@ -116,6 +116,12 @@ pub struct Step {
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_lines"
+    )]
+    pub context: Option<usize>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
         deserialize_with = "optional_string"
     )]
     pub equals: Option<String>,
@@ -190,6 +196,14 @@ impl Step {
         if self.operation == Operation::JsonlWhereInt {
             crate::integer::Key::parse(self.equals.as_deref().expect("validated equals"))
                 .context("jsonl-where-int equals must be a JSON integer literal")?;
+        }
+        if let Some(context) = self.context {
+            if self.operation != Operation::LinesInclude {
+                bail!("context is only valid for lines-include");
+            }
+            if context > MAX_ITEMS {
+                bail!("context must be an integer from 0 to 100000");
+            }
         }
         match (self.lines, self.operation) {
             (Some(n), Operation::LinesHead | Operation::LinesTail)
@@ -682,6 +696,7 @@ fn run(input: &str, operation: Operation, reverse: bool, limit: usize) -> Result
     transform(
         input,
         &Step {
+            context: None,
             if_present: None,
             operation,
             reverse,
@@ -765,6 +780,22 @@ fn transform(input: &str, step: &Step, input_limit: usize, limit: usize) -> Resu
                 Operation::Dedupe => {
                     let mut seen = HashSet::new();
                     lines.retain(|line| seen.insert(*line));
+                }
+                Operation::LinesInclude if step.context.is_some() => {
+                    let context = step.context.expect("validated context");
+                    let needle = step.contains.as_deref().expect("validated contains text");
+                    let mut emitted_until = 0;
+                    for (index, line) in lines.iter().enumerate() {
+                        if line.contains(needle) {
+                            let start = index.saturating_sub(context).max(emitted_until);
+                            let end = (index + context + 1).min(lines.len());
+                            for line in &lines[start..end] {
+                                writeln!(out, "{line}")?;
+                            }
+                            emitted_until = end;
+                        }
+                    }
+                    return Ok(out.finish());
                 }
                 Operation::LinesInclude | Operation::LinesExclude => {
                     let needle = step.contains.as_deref().expect("validated contains text");
@@ -882,7 +913,7 @@ pub(crate) fn parse_arguments(arguments: &str) -> Result<ToolArguments> {
     }
     serde_json::from_str(arguments).map_err(|_| {
         anyhow::anyhow!(
-            "transform_input requires either operation with optional reverse/pointer/fields/contains/lines/equals/if_present, or 1-16 steps of the same shape; do not combine them"
+            "transform_input requires either operation with optional reverse/pointer/fields/contains/context/lines/equals/if_present, or 1-16 steps of the same shape; do not combine them"
         )
     })
 }
@@ -942,6 +973,7 @@ mod tests {
             default_json: None,
         };
         let step = Step {
+            context: None,
             if_present: None,
             operation: Operation::JsonlProject,
             reverse: false,
@@ -1035,6 +1067,7 @@ mod tests {
     #[test]
     fn csv_export_enforces_record_depth_output_and_serialized_envelope_bounds() {
         let step = Step {
+            context: None,
             if_present: None,
             operation: Operation::JsonlToCsv,
             reverse: false,
@@ -1169,6 +1202,7 @@ mod tests {
     #[test]
     fn csv_limits_keep_record_counts_and_serialized_tool_envelope_bounded() {
         let step = Step {
+            context: None,
             if_present: None,
             operation: Operation::CsvToJsonl,
             reverse: false,
@@ -1204,6 +1238,7 @@ mod tests {
             "123456789012345678901234567890\n1.2300E+400\n-0\n\"\\u4e2d\\n\"\n{\"z\":1,\"a\":2,\"z\":3}\n"
         );
         let step = Step {
+            context: None,
             if_present: None,
             operation: Operation::JsonlSelect,
             reverse: false,
@@ -1489,6 +1524,7 @@ mod tests {
     #[test]
     fn pipeline_allows_bounded_expansion_then_reduction_and_retains_json_tokens() {
         let step = |operation, reverse| Step {
+            context: None,
             if_present: None,
             operation,
             reverse,
@@ -1663,8 +1699,33 @@ mod tests {
     }
 
     #[test]
+    fn line_context_tool_steps_are_explicit_and_keep_only_the_union() {
+        let args = r#"{"steps":[{"operation":"lines-include","contains":"ERR","context":1}]}"#;
+        let out: serde_json::Value =
+            serde_json::from_str(&execute(args, "a\nERR 1\n\nERR 2\n   at A\nfar away").unwrap())
+                .unwrap();
+        assert_eq!(out["output"], "a\nERR 1\n\nERR 2\n   at A\n");
+        for invalid in [
+            r#"{"operation":"lines-include","contains":"x","context":100001}"#,
+            r#"{"operation":"lines-include","contains":"x","context":-1}"#,
+            r#"{"operation":"lines-include","contains":"x","context":null}"#,
+            r#"{"operation":"lines-include","contains":"x","context":"1"}"#,
+            r#"{"operation":"lines-exclude","contains":"x","context":0}"#,
+            r#"{"steps":[{"operation":"lines-include","contains":"x"}],"context":1}"#,
+        ] {
+            assert!(execute(invalid, "x").is_err());
+        }
+        let step =
+            serde_json::from_str(r#"{"operation":"lines-include","contains":"x","context":1}"#)
+                .unwrap();
+        assert!(transform("before\nx\n", &step, MAX_INPUT, 2).is_err());
+        assert!(transform(&"x\n".repeat(MAX_ITEMS + 1), &step, MAX_INPUT, CLI_OUTPUT).is_err());
+    }
+
+    #[test]
     fn line_filter_limits_apply_before_discarding_and_to_serialized_tool_output() {
         let mut step = Step {
+            context: None,
             if_present: None,
             operation: Operation::LinesInclude,
             reverse: false,
@@ -1946,6 +2007,7 @@ mod jsonl_key_tests {
     use super::*;
     fn step(operation: Operation, pointer: &str, reverse: bool) -> Step {
         Step {
+            context: None,
             if_present: None,
             operation,
             pointer: Some(pointer.into()),
@@ -2168,6 +2230,7 @@ mod integer_ranking_tests {
 
     fn step(pointer: &str, reverse: bool) -> Step {
         Step {
+            context: None,
             if_present: None,
             operation: Operation::JsonlSortInt,
             pointer: Some(pointer.into()),

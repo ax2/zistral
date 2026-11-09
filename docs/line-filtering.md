@@ -4,6 +4,7 @@ Select explicit log or text lines locally without model configuration:
 
 ```sh
 zi data lines-include --contains ERROR -i app.log
+zi data lines-include --contains ERROR --context 3 -i app.log
 zi data lines-exclude --contains healthcheck -i app.log
 zi data --step lines-include:ERROR --step lines-exclude:healthcheck --step dedupe -i app.log
 zi data --show-plan --step lines-include:ERROR --step lines-exclude:healthcheck -o errors.toml
@@ -26,8 +27,8 @@ contain colons, quotes, backslashes or tabs. The inline `--step lines-include:TE
 Order, repeated lines and line contents remain. LF and CRLF separate lines; output uses
 LF and terminates every retained line, even when the final source line had no terminator.
 A bare CR is line content, not a line boundary. An initial UTF-8 BOM follows the normal
-input-reader rule and is removed. Blank lines do not contain a nonempty literal, so include
-drops them and exclude keeps them. Empty input or no retained lines returns **success and
+input-reader rule and is removed. Without context, include drops blank lines and exclude
+keeps them. Empty input or no retained lines returns **success and
 zero bytes**, not an error for no match. No report, count or decoration enters stdout.
 
 Example (CRLF/LF differences aside):
@@ -42,6 +43,13 @@ ERROR start
 Include `ERROR`, exclude `healthcheck`, then dedupe yields `ERROR start` once. Without
 the dedupe step, the repeated line stays. This makes the order and meaning of each step
 explicit rather than silently combining selection, sorting and cleanup.
+
+In the development build, `lines-include --context N` also keeps up to N lines before
+and after each match. Overlapping windows keep each source line once. Blank
+neighbors and indentation are preserved. The output contains no separators.
+Use 0 for matching lines only, or any integer up to 100000. The same option is
+`context = N` in a recipe and `"context": N` in a `transform_input` step.
+Use a recipe to combine context with other operations.
 
 ## Saved definitions and model tools
 

@@ -90,7 +90,13 @@ operation="jsonl-to-tsv"
             assert not run(['data', '--recipe', 'builtin:top-error-codes'], logs, success=False).stdout
             result = run(['data', '--recipe', log_recipe], logs)
             assert result.stdout == b'{"value":"TIMEOUT","count":1}\n' and not result.stderr
-            checks.append('plan export: offline table replay and explicit missing-path handling in an exported log recipe')
+            context = run(['data', 'lines-include', '--contains', 'ERROR', '--context', '1', '--show-plan'])
+            assert not context.stderr and b'context = 1' in context.stdout
+            context_recipe = root/'stack context-测试.toml'
+            context_recipe.write_bytes(context.stdout)
+            excerpt = run(['data', '--recipe', context_recipe], b'heading\r\nERROR\r\n at A\r\nother')
+            assert excerpt.stdout == b'heading\nERROR\n at A\n' and not excerpt.stderr
+            checks.append('plan export: table replay, explicit missing-path handling and line context in log recipes')
             projected = run(['data', 'jsonl-project', '--field', 'tag=/tag',
                              '--field-default', 'tag=""'], b'{"tag":null}\n{}\n')
             assert projected.stdout == b'{"tag":null}\n{"tag":""}\n' and not projected.stderr
