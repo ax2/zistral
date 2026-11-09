@@ -743,12 +743,12 @@ fn save_output(
     let bytes = target.save(text, append_newline)?;
     if ui::enabled(cli) || cli.verbose {
         if let Some(path) = &cli.output {
-            eprintln!(
+            ui::write_status(format_args!(
                 "  {} {} ({} bytes)",
                 console::style("Saved").green().bold(),
                 ui::clean(&path.display().to_string()),
                 bytes
-            );
+            ));
         }
     }
     Ok(())
@@ -960,7 +960,7 @@ fn main() {
         {
             return;
         }
-        eprintln!("zi: {}", ui::clean(&format!("{error:#}")));
+        ui::write_status(format_args!("zi: {}", ui::clean(&format!("{error:#}"))));
         std::process::exit(1);
     }
 }

@@ -163,6 +163,59 @@ fn stream_flushes_before_completion_and_no_json_stream_combination() {
 }
 
 #[test]
+fn a_closed_status_pipe_preserves_task_exit_and_saved_output() {
+    for code in [200, 403] {
+        let root = tempfile::tempdir().unwrap();
+        let destination = root.path().join("result.txt");
+        let (listener, url) = listener();
+        let (closed, ready) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let (mut stream, request) = accept(&listener);
+            assert_eq!(request["model"], "fixture");
+            ready.recv_timeout(Duration::from_secs(10)).unwrap();
+            let body = if code == 200 {
+                json!({"choices":[{"finish_reason":"stop","message":{"content":"OK"}}]})
+            } else {
+                json!({"error":{"message":"fixture denied"}})
+            }
+            .to_string();
+            write!(stream, "HTTP/1.1 {code} Fixture\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+        });
+        let mut child = command()
+            .args([
+                "--verbose",
+                "--no-tools",
+                "--timeout",
+                "5",
+                "--base-url",
+                &url,
+                "--model",
+                "fixture",
+                "--output",
+                destination.to_str().unwrap(),
+                "task",
+            ])
+            .spawn()
+            .unwrap();
+        let mut status_pipe = BufReader::new(child.stderr.take().unwrap());
+        let mut first = String::new();
+        status_pipe.read_line(&mut first).unwrap();
+        assert!(first.starts_with("zi: turn "), "{first}");
+        drop(status_pipe);
+        closed.send(()).unwrap();
+        let output = child.wait_with_output().unwrap();
+        worker.join().unwrap();
+        assert_eq!(output.status.code(), Some(i32::from(code != 200)));
+        assert!(output.stdout.is_empty());
+        if code == 200 {
+            assert_eq!(std::fs::read(&destination).unwrap(), b"OK\n");
+        } else {
+            assert!(!destination.exists());
+        }
+    }
+}
+
+#[test]
 fn chat_stream_reassembles_fragmented_tool_arguments() {
     let (l, url) = listener();
     let server = std::thread::spawn(move || {

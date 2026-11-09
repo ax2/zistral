@@ -164,9 +164,9 @@ pub fn use_profile(cli: &Cli, name: &str) -> Result<()> {
         Some(name.into())
     };
     save_config(&path, &document, original.as_deref())?;
-    eprintln!(
+    crate::ui::write_status(format_args!(
         "Active profile: {name}. ZI_PROFILE / --profile and other overrides still take precedence."
-    );
+    ));
     Ok(())
 }
 
@@ -196,10 +196,10 @@ pub fn rename_profile(cli: &Cli, old: &str, new: &str) -> Result<()> {
         document.active_profile = Some(new.into());
     }
     save_config(&path, &document, original.as_deref())?;
-    eprintln!(
+    crate::ui::write_status(format_args!(
         "Renamed profile {old} to {new}. Saved default selection {}. External references are unchanged.",
         if active { "updated" } else { "unchanged" }
-    );
+    ));
     Ok(())
 }
 
@@ -218,9 +218,9 @@ pub fn remove_profile(cli: &Cli, name: &str) -> Result<()> {
         .remove(name)
         .context("unknown saved profile; run zi models")?;
     save_config(&path, &document, original.as_deref())?;
-    eprintln!(
+    crate::ui::write_status(format_args!(
         "Removed profile {name}. Other profiles and the saved default selection are unchanged."
-    );
+    ));
     Ok(())
 }
 
@@ -1035,9 +1035,9 @@ pub fn set_key_settings(
             .insert(name.clone(), Profile::from(&updated));
     }
     save_config(&path, &document, original.as_deref())?;
-    eprintln!(
+    crate::ui::write_status(format_args!(
         "Saved API key settings for profile {name}. Environment overrides still apply; use zi doctor to inspect the effective source."
-    );
+    ));
     Ok(())
 }
 
@@ -1085,7 +1085,9 @@ pub fn set_output_budget(
             .insert(name.clone(), Profile::from(&updated));
     }
     save_config(&path, &document, original.as_deref())?;
-    eprintln!("Saved request budget for profile {name}. Default profile selection unchanged.");
+    crate::ui::write_status(format_args!(
+        "Saved request budget for profile {name}. Default profile selection unchanged."
+    ));
     Ok(())
 }
 

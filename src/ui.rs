@@ -6,6 +6,11 @@ use std::cell::Cell;
 use std::io::{self, IsTerminal, Write};
 use std::time::{Duration, Instant};
 
+// Informational output must not change the result of a command when stderr closes.
+pub(crate) fn write_status(message: std::fmt::Arguments<'_>) {
+    let _ = writeln!(io::stderr().lock(), "{message}");
+}
+
 pub fn enabled(cli: &Cli) -> bool {
     !cli.plain
         && !cli.preview
@@ -246,7 +251,7 @@ impl Activity {
             self.bar
                 .set_message(format!("Thinking · turn {step}/{max}"));
         } else if self.verbose {
-            eprintln!("zi: turn {step}/{max}");
+            write_status(format_args!("zi: turn {step}/{max}"));
         }
     }
 
@@ -265,7 +270,7 @@ impl Activity {
             self.bar
                 .set_message(format!("Waiting to retry · {:.2}s", delay.as_secs_f64()));
         } else if self.rich || self.verbose {
-            eprintln!("zi: {message}");
+            write_status(format_args!("zi: {message}"));
         }
     }
 
@@ -324,7 +329,7 @@ impl Activity {
         } else if self.rich {
             self.bar.println(format!("  {} {label}", style("↳").cyan()));
         } else if self.verbose {
-            eprintln!("zi: tool {}", clean(name));
+            write_status(format_args!("zi: tool {}", clean(name)));
         }
     }
 
@@ -337,7 +342,7 @@ impl Activity {
             self.bar
                 .println(format!("    {}", console::style(safe).dim()));
         } else if self.verbose {
-            eprintln!("zi: {safe}");
+            write_status(format_args!("zi: {safe}"));
         }
     }
 

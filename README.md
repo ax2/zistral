@@ -607,6 +607,8 @@ tools. The model chooses the tool/arguments and formats the final answer;
 * Only the final result goes to stdout; a missing final newline is appended.
   An explicit `--output FILE` saves it instead and leaves stdout empty.
 * Errors and `--verbose` tool progress go to stderr. No spinner or banner.
+  In the development build, closing a task status pipe preserves the task exit
+  code and any completed file output.
 * Exit `0`: success (including a downstream closed pipe). Exit `1`: runtime
   failure. Exit `2`: invalid command-line syntax.
 * `--json` validates the entire answer before emitting compact JSON; invalid
