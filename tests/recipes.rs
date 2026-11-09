@@ -1323,6 +1323,7 @@ fn embedded_catalog_and_preview_finish_without_stdin_eof_or_model_configuration(
                     "builtin:severity-counts",
                     "builtin:unique-severity-counts",
                     "builtin:top-severity-counts",
+                    "builtin:top-error-codes",
                     "builtin:recent-unique-events"
                 ]
             );
@@ -1697,6 +1698,85 @@ fn builtin_top_counts_rank_integers_stably_and_export_an_editable_offline_plan()
     );
     assert!(out.status.success());
     assert_eq!(out.stdout, original.as_bytes());
+}
+
+#[test]
+fn builtin_top_error_codes_filters_ranks_and_exports_an_editable_plan() {
+    let root = tempfile::tempdir().unwrap();
+    let dir = root.path();
+    let builtin = ["data", "--recipe", "builtin:top-error-codes"];
+    let error = |code: &str| format!("{{\"level\":\"ERROR\",\"error\":{{\"code\":\"{code}\"}}}}\n");
+    let mut logs = String::from(
+        "{\"level\":\"INFO\"}\n{\"level\":\"error\",\"error\":{\"code\":\"lowercase\"}}\n",
+    );
+    logs.push_str(&error("FIRST"));
+    logs.push_str(&error("SECOND"));
+    logs.push_str(&error("TOP").repeat(12));
+    for n in 0..22 {
+        logs.push_str(&error(&format!("CODE{n:02}")));
+    }
+    logs.push_str(&error("FIRST"));
+    logs.push_str(&error("SECOND"));
+    let out = invoke(dir, &builtin, logs.as_bytes());
+    assert!(out.status.success() && out.stderr.is_empty());
+    let rows: Vec<serde_json::Value> = std::str::from_utf8(&out.stdout)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(rows.len(), 20);
+    assert_eq!(rows[0], serde_json::json!({"value":"TOP","count":12}));
+    assert_eq!(rows[1], serde_json::json!({"value":"FIRST","count":2}));
+    assert_eq!(rows[2], serde_json::json!({"value":"SECOND","count":2}));
+    assert_eq!(rows[19], serde_json::json!({"value":"CODE16","count":1}));
+
+    let empty = invoke(dir, &builtin, br#"{"level":"WARN"}"#);
+    assert!(empty.status.success() && empty.stdout.is_empty() && empty.stderr.is_empty());
+    let plan = invoke(
+        dir,
+        &["data", "--show-plan", "--recipe", "builtin:top-error-codes"],
+        b"not log data",
+    );
+    assert!(plan.status.success() && plan.stderr.is_empty());
+    let plan = String::from_utf8(plan.stdout).unwrap();
+    assert!(plan.contains("pointer = \"/error/code\""));
+    assert!(plan.contains("lines = 20"));
+    let replay = dir.join("replay.toml");
+    std::fs::write(&replay, &plan).unwrap();
+    let same = invoke(dir, &["data", "--recipe", "replay.toml"], logs.as_bytes());
+    assert!(same.status.success() && same.stderr.is_empty());
+    assert_eq!(same.stdout, out.stdout);
+    std::fs::write(&replay, plan.replace("lines = 20", "lines = 1")).unwrap();
+    let edited = invoke(dir, &["data", "--recipe", "replay.toml"], logs.as_bytes());
+    assert!(edited.status.success() && edited.stderr.is_empty());
+    assert_eq!(edited.stdout, b"{\"value\":\"TOP\",\"count\":12}\n");
+
+    std::fs::write(dir.join("result.jsonl"), b"original\n").unwrap();
+    for invalid in [
+        r#"{"level":"ERROR","error":{"code":2}}"#,
+        r#"{"level":"ERROR"}"#,
+        r#"{"level":"WARN","message":PRIVATE_BROKEN_JSON}"#,
+    ] {
+        let input = format!("{logs}{invalid}\n");
+        let out = invoke(
+            dir,
+            &[
+                "data",
+                "--recipe",
+                "builtin:top-error-codes",
+                "-o",
+                "result.jsonl",
+                "--force",
+            ],
+            input.as_bytes(),
+        );
+        assert!(!out.status.success() && out.stdout.is_empty());
+        assert!(!String::from_utf8_lossy(&out.stderr).contains("PRIVATE_BROKEN_JSON"));
+        assert_eq!(
+            std::fs::read(dir.join("result.jsonl")).unwrap(),
+            b"original\n"
+        );
+    }
 }
 
 #[test]

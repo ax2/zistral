@@ -19,6 +19,7 @@ zi data --recipe recent.toml -i events.jsonl
 | `builtin:severity-counts` | Count raw records by decoded string `/level`, convert counts to CSV. |
 | `builtin:unique-severity-counts` | Keep first string `/id`, then count retained string `/level` as CSV. |
 | `builtin:top-severity-counts` | Count string `/level`, stably rank integer counts descending, take 20 groups as CSV. |
+| `builtin:top-error-codes` (development) | Keep exact `ERROR` levels, rank string `/error/code` counts, emit 20 groups as JSONL. |
 | `builtin:recent-unique-events` | Keep first string `/id`, stably sort string `/time` descending, take first 20 records as JSONL. |
 
 去重保留首条，不会自动选取同一 ID 的最新记录。时间只做字符串排序，不解析日期；应先统一
@@ -38,6 +39,19 @@ a literal filename such as `builtin:cleanup` via `./builtin:cleanup`. Other path
 including non-UTF-8 names on filesystems that permit them, retain normal explicit-file
 behavior. Embedded and
 file recipes share the same parser, validation and execution pipeline.
+
+## 排查 JSONL 日志中的高频错误
+
+```sh
+cat events.jsonl | zi data --recipe builtin:top-error-codes
+zi data --show-plan --recipe builtin:top-error-codes -o error-report.toml
+zi data --recipe error-report.toml -i events.jsonl
+```
+
+这个开发中的配方精确匹配字符串 `/level = "ERROR"`，然后统计命中记录中的字符串
+`/error/code`。输出是 `{"value":"TIMEOUT","count":12}` 这样的 JSONL，按次数从高到低保留
+前 20 组，同频保留首次出现的顺序。所有记录的 `/level` 都需要有效，只有命中记录需要
+`/error/code`。没有匹配时输出为空。导出后可更改级别、字段路径或条数，再运行自己的配方。
 
 ## Compose your own definition / 编写配方
 
