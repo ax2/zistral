@@ -116,6 +116,19 @@ def delivery(binary, scripts):
     return result
 
 
+def check_upgrade_configuration(binary, config, sentinel, expected_budget):
+    assert config.read_bytes() == sentinel and config.stat().st_mode & 0o777 == 0o600, 'saved model configuration changed'
+    assert 'stable-work-model' in invoke([binary, '--config', config, 'models']).stdout.decode()
+    if expected_budget is not None:
+        report = json.loads(invoke([binary, '--config', config, 'doctor', '--json']).stdout)
+        details = report['configuration']['details']
+        budget = details['output_budget']
+        assert report['ok'] and report['probe']['status'] == 'not_requested'
+        assert details['profile'] == 'work' and details['model'] == 'stable-work-model'
+        assert budget['tokens_per_turn'] == expected_budget and budget['field'] == 'max_output_tokens'
+        assert budget['tokens_source'] == 'profile', 'installed executable did not use the saved profile budget'
+
+
 def verify(binary, dist, target, baseline_assets=None):
     if sys.flags.optimize:
         raise RuntimeError('Run installer verification without -O; safety checks require assertions')
@@ -134,6 +147,9 @@ def verify(binary, dist, target, baseline_assets=None):
     baseline = verified_baseline(baseline_assets, target) if baseline_assets is not None else None
     owned_digests = {expected_digest, *([baseline['binary_sha256']] if baseline else [])}
     sentinel = b"# Stable-compatible upgrade fixture; formatting must survive.\nmodel='installer-sentinel'\nbase_url='http://127.0.0.1:1/v1'\napi_key='SYNTHETIC_INSTALL_SENTINEL_993'\nactive_profile='work'\n[profiles.work]\nmodel='stable-work-model'\nbase_url='http://127.0.0.1:1/v1'\napi='responses'\napi_key_env='ZISTRAL_UPGRADE_UNSET_993'\napi_key='SYNTHETIC_WORK_SENTINEL_993'\nendpoint='http://127.0.0.1:1/v1/responses'\n[profiles.other]\nmodel='stable-other-model'\napi_key='SYNTHETIC_OTHER_SENTINEL_993'\n"
+    expected_budget = 128 if baseline and baseline['version'] != '0.33.0' else None
+    if expected_budget is not None:
+        sentinel = sentinel.replace(b'[profiles.other]', f'max_output_tokens={expected_budget}\n[profiles.other]'.encode(), 1)
     checks, native_reports, portable_reports = [], [], []
     link_reports = []
     rollback = None
@@ -159,8 +175,7 @@ def verify(binary, dist, target, baseline_assets=None):
                 invoke(['sudo', 'installer', '-pkg', baseline['installer'], '-target', '/'])
             assert installed.is_file() and not installed.is_symlink() and digest(installed) == baseline['binary_sha256'], 'published executable differs from pinned release'
             assert invoke([installed, '--version']).stdout.decode().strip() == 'zi ' + baseline['version']
-            assert 'stable-work-model' in invoke([installed, '--config', config, 'models']).stdout.decode(), 'published version could not read legacy fixture'
-            assert config.read_bytes() == sentinel, 'published installer changed configuration'
+            check_upgrade_configuration(installed, config, sentinel, expected_budget)
             if baseline['version'] == '0.33.0':
                 rollback = verify_legacy_budget_cleanup(binary, installed)
         for _ in range(2):
@@ -173,10 +188,10 @@ def verify(binary, dist, target, baseline_assets=None):
                 assert receipt(target).returncode == 0
             assert installed.is_file() and not installed.is_symlink() and digest(installed) == expected_digest, 'installed executable differs from build'
             assert invoke([installed, '--version']).stdout.decode().strip() == version_text
-            assert 'stable-work-model' in invoke([installed, '--config', config, 'models']).stdout.decode()
+            check_upgrade_configuration(installed, config, sentinel, expected_budget)
             native_reports.append(delivery(installed, scripts))
             link_reports.append(configuration_links(installed))
-            assert config.read_bytes() == sentinel and config.stat().st_mode & 0o777 == 0o600, 'model configuration changed during install/upgrade'
+            assert config.read_bytes() == sentinel and config.stat().st_mode & 0o777 == 0o600, 'delivery checks changed saved configuration'
         checks.append('native install/reinstall: exact build bytes and workflow checks on both installs')
         if baseline:
             checks.append('pinned published release to candidate: exact old/new executable digests and unchanged complete legacy configuration')
@@ -206,6 +221,7 @@ def verify(binary, dist, target, baseline_assets=None):
             'configuration_link_checks': link_reports,
             'output_budget_rollback': rollback,
             'real_provider_requests': 0, 'configuration_preserved': True,
+            'saved_profile_budget_preserved': expected_budget,
             'published_baseline': baseline, 'baseline_installs': int(baseline is not None),
             'package_version_changed': baseline is not None and baseline['version'] != version,
             'scope': 'Published-release to candidate replacement when requested; same-version reinstall. No GitHub Release published.'}

@@ -1,25 +1,25 @@
 {
-  "version": "0.33.0",
-  "tag": "v0.33.0",
-  "source_commit": "7bd90454b402a67a29d8ef4ae8eefa462d44437b",
+  "version": "0.34.0",
+  "tag": "v0.34.0",
+  "source_commit": "aa847a948adb4e4213c4bf99400c0cfd08d2ed47",
   "targets": {
     "x86_64-pc-windows-msvc": {
-      "installer": "zistral-v0.33.0-windows-x64-setup.exe",
-      "bytes": 3986325,
-      "sha256": "936700694bf3603fb450cb618e786a1e92f7afc89c93b687c9cb3e9ac052a255",
-      "binary_sha256": "786992c168aa96ad2eaf66ee39367c0b920f841381fc24c7721f92388de270ce"
+      "installer": "zistral-v0.34.0-windows-x64-setup.exe",
+      "bytes": 4032869,
+      "sha256": "b8c690ed0d2760e90c5363a956134e8711f486237f3e1a35c7f70650f55dc010",
+      "binary_sha256": "9b7cd0a27be6fadf7cc14d5a1f2bc646eea4e0ded41f4bfcb4fd11529054a3fd"
     },
     "x86_64-unknown-linux-gnu": {
-      "installer": "zistral-v0.33.0-linux-amd64.deb",
-      "bytes": 2086264,
-      "sha256": "205adab114054e565ee8cfdcedd794c035daac1e112a58e7ab36c8dca2b00568",
-      "binary_sha256": "5ed88f3ccca3f55bfac3ca22d2305d753f4df04634500994c9c76bc50001998f"
+      "installer": "zistral-v0.34.0-linux-amd64.deb",
+      "bytes": 2137076,
+      "sha256": "11964eb1e75b0a121d0f1eb37886089609cd36b8aa33c54204be563dcf4b1fa9",
+      "binary_sha256": "382fd139d6aaa05b2fba29c3c0cc85fd5cc14f06838738d7ff7e1a63948caa11"
     },
     "aarch64-apple-darwin": {
-      "installer": "zistral-v0.33.0-macos-arm64.pkg",
-      "bytes": 2204967,
-      "sha256": "4d4aa190fa1e9f0597ece7e23221a82e22cb5a86e424f9393e084b291711f856",
-      "binary_sha256": "b2b47afb957d0b3732ef2f7b75eb6c17a6f84ecf572abdc1e46ae843d9513579"
+      "installer": "zistral-v0.34.0-macos-arm64.pkg",
+      "bytes": 2268053,
+      "sha256": "3a710c139615ff2c17fa8fba8f5dc1a9af0e15dd7fa4da4d0b18d48a180f208b",
+      "binary_sha256": "d7ccab089c9e75498b5820c8379625a8e1a51d3883cc6a371676dcfa328f09a9"
     }
   }
 }

@@ -17,17 +17,28 @@ $originalConfig=if(Test-Path -LiteralPath $config){[IO.File]::ReadAllBytes($conf
 $baseline=$null
 $fixtureCreated=$false
 $configDirectory=Split-Path -Parent $config
-$sentinel=[Text.Encoding]::UTF8.GetBytes("# Stable-compatible upgrade fixture; preserve bytes.`nmodel='stable-root-model'`nbase_url='http://127.0.0.1:1/v1'`napi_key='SYNTHETIC_ROOT_SENTINEL_993'`nactive_profile='work'`n[profiles.work]`nmodel='stable-work-model'`nbase_url='http://127.0.0.1:1/v1'`napi='responses'`napi_key_env='ZISTRAL_UPGRADE_UNSET_993'`napi_key='SYNTHETIC_WORK_SENTINEL_993'`nendpoint='http://127.0.0.1:1/v1/responses'`n[profiles.other]`nmodel='stable-other-model'`napi_key='SYNTHETIC_OTHER_SENTINEL_993'`n")
 if($BaselineAssets){
     if(Test-Path -LiteralPath $configDirectory){throw 'Preserve existing model configuration directory; use a clean test account.'}
     $baseline=& python (Join-Path $root 'scripts/upgrade_baseline.py') --assets $BaselineAssets --target x86_64-pc-windows-msvc | ConvertFrom-Json
     if($LASTEXITCODE -ne 0 -or -not $baseline.installer){throw 'Published baseline verification failed; no installation attempted.'}
 }
-function Check-LegacyConfiguration {
+$expectedBudget=if($baseline -and $baseline.version -ne '0.33.0'){128}else{$null}
+$budgetLine=if($null -ne $expectedBudget){"max_output_tokens=$expectedBudget`n"}else{''}
+$sentinel=[Text.Encoding]::UTF8.GetBytes("# Stable-compatible upgrade fixture; preserve bytes.`nmodel='stable-root-model'`nbase_url='http://127.0.0.1:1/v1'`napi_key='SYNTHETIC_ROOT_SENTINEL_993'`nactive_profile='work'`n[profiles.work]`nmodel='stable-work-model'`nbase_url='http://127.0.0.1:1/v1'`napi='responses'`napi_key_env='ZISTRAL_UPGRADE_UNSET_993'`napi_key='SYNTHETIC_WORK_SENTINEL_993'`nendpoint='http://127.0.0.1:1/v1/responses'`n${budgetLine}[profiles.other]`nmodel='stable-other-model'`napi_key='SYNTHETIC_OTHER_SENTINEL_993'`n")
+function Check-UpgradeConfiguration {
     if($baseline){
-        if([Convert]::ToBase64String([IO.File]::ReadAllBytes($config)) -ne [Convert]::ToBase64String($sentinel)){throw 'Complete legacy model configuration changed'}
+        if([Convert]::ToBase64String([IO.File]::ReadAllBytes($config)) -ne [Convert]::ToBase64String($sentinel)){throw 'Saved model configuration changed'}
         $models=& "$Destination\zi.exe" --config $config models
-        if($LASTEXITCODE -ne 0 -or "$models" -notmatch 'stable-work-model'){throw 'Installed executable cannot read legacy configuration'}
+        if($LASTEXITCODE -ne 0 -or "$models" -notmatch 'stable-work-model'){throw 'Installed executable cannot read saved configuration'}
+        if($null -ne $expectedBudget){
+            $report=& "$Destination\zi.exe" --config $config doctor --json | ConvertFrom-Json
+            $details=$report.configuration.details
+            $budget=$details.output_budget
+            if($LASTEXITCODE -ne 0 -or -not $report.ok -or $report.probe.status -ne 'not_requested' -or
+                $details.profile -ne 'work' -or $details.model -ne 'stable-work-model' -or
+                $budget.tokens_per_turn -ne $expectedBudget -or $budget.field -ne 'max_output_tokens' -or
+                $budget.tokens_source -ne 'profile'){throw 'Installed executable cannot use the saved profile budget'}
+        }
     }
 }
 function Read-UserPath {
@@ -50,7 +61,7 @@ function Install-Candidate {
     $count='hello world' | & "$Destination\zi.exe" --count | ConvertFrom-Json
     if($count.words -ne 2){throw 'Installed pipe input failed'}
     if(-not(Test-Path -LiteralPath "$Destination\launch.cmd")){throw 'Start menu launcher missing'}
-    Check-LegacyConfiguration
+    Check-UpgradeConfiguration
     & python (Join-Path $root 'scripts/test_pre_sharing_delivery.py') --binary "$Destination\zi.exe"
     if($LASTEXITCODE -ne 0){throw 'Installed pre-sharing workflow failed'}
     & python (Join-Path $root 'scripts/test_table_preparation_delivery.py') --binary "$Destination\zi.exe"
@@ -75,7 +86,7 @@ try{
         if((Count-TestPath) -ne 1){throw 'Published installer PATH missing or duplicated'}
         if((Get-FileHash -LiteralPath "$Destination\zi.exe").Hash.ToLowerInvariant() -ne $baseline.binary_sha256){throw 'Published executable differs from pinned release'}
         if((& "$Destination\zi.exe" --version) -ne "zi $($baseline.version)"){throw 'Published command version differs'}
-        Check-LegacyConfiguration
+        Check-UpgradeConfiguration
         if($baseline.version -eq '0.33.0'){
             & python (Join-Path $root 'scripts/test_service_setup_delivery.py') --binary $BinaryPath --baseline-binary "$Destination\zi.exe"
             if($LASTEXITCODE -ne 0){throw 'Published executable could not resume a cleaned configuration'}
@@ -116,6 +127,6 @@ if(-not $baseline -and $null -eq $originalConfig){
     }
 }
 if($baseline){
-    [ordered]@{passed=1;published_baseline=$baseline;candidate_version=$version;package_version_changed=($baseline.version -ne $version);configuration_preserved=$true;baseline_installs=1} | ConvertTo-Json -Depth 5 -Compress
+    [ordered]@{passed=1;published_baseline=$baseline;candidate_version=$version;package_version_changed=($baseline.version -ne $version);configuration_preserved=$true;saved_profile_budget_preserved=$expectedBudget;baseline_installs=1} | ConvertTo-Json -Depth 5 -Compress
 }
 Write-Output 'Unicode/space path: install twice, legacy duplicate repair, user-owned entry preservation, executable equality, pipe, uninstall and config checks passed.'
