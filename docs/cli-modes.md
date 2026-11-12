@@ -21,7 +21,7 @@ contract and JSON precision rules remain unchanged.
 
 Project selectors are `--agent`, `-C/--cwd`, `--read-only` and `--no-exec`. They enable or
 constrain project tools for model tasks. They are rejected for every offline or management
-mode: count/select, config-example, data (including --show-plan), config, models, use,
+mode: count/select, config-example, data (including recipe inspection and export), config, models, use,
 doctor (including --probe), and presets. Pass explicit input paths to offline tasks instead
 of `-C`, which is not a general-purpose process-directory switch.
 

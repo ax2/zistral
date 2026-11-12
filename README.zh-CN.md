@@ -274,6 +274,17 @@ zi data --recipe recent.toml -i events.jsonl
 v0.34.0 还内置 `builtin:top-error-codes` 和 `builtin:top-http-5xx-codes`，分别汇总
 应用错误日志和 HTTP 5xx 请求日志，按频次输出 JSONL。见[日志样例与配方导出](docs/data-recipes.md)。
 
+开发版支持给配方传参。可以先查内置配方的参数，再复制定义，运行时传入匹配词和上下文行数。
+
+```sh
+zi data --list-parameters --recipe builtin:log-context
+zi data --export-recipe --recipe builtin:log-context -o team-log.toml
+cat app.log | zi data --recipe team-log.toml --var needle=TIMEOUT --var nearby=2
+zi data --show-plan --recipe team-log.toml --var needle=TIMEOUT --var nearby=2
+```
+
+复制的版本 2 配方保留参数绑定和默认值。解析后的版本 1 计划记录本次运行的具体值。
+更多用法见[配方参数和导出示例](docs/data-recipes.md)。
 
 ```sh
 cat lines.txt | zi data --step trim --step dedupe --step sort:reverse
@@ -282,14 +293,14 @@ zi data --show-plan --recipe docs/examples/cleanup.toml
 zi data --show-plan --step trim --step dedupe --step sort:reverse -o cleanup.toml
 ```
 
-单一操作、按执行顺序重复的 `--step`、显式 `--recipe` 三选一。TOML 配方包含 `version = 1`
+单一操作、按执行顺序重复的 `--step`、显式 `--recipe` 三选一。使用字面值的 TOML 配方包含 `version = 1`
 和 `[[steps]]`，每步声明 `operation`，可选 `reverse` 只用于 sort、jsonl-sort 或 jsonl-sort-int。先检查完整定义再读取输入，
 全部成功后只输出最终结果；后续步骤失败时不向 stdout 输出中间数据，也不替换已有的 `-o` 文件。
 shell `>` 的创建/截断行为仍由 shell 决定。
 
 配方最多 64 KiB UTF-8、1–16 步；原始输入最多 8 MiB，每步中间/最终结果最多 16 MiB，
 行数、根键数、JSONL 记录数和 JSON 嵌套限制继续适用。配方由调用者显式提供，只组合本地原生操作，
-不含命令、include、变量、自动发现、模型访问或项目权限。[格式与示例](docs/data-recipes.md)。
+不含命令、include、自动发现、模型访问或项目权限。[格式与示例](docs/data-recipes.md)。
 
 `--show-plan` 只校验并导出规范化的 version-1 TOML，不读取或等待 stdin，也不执行步骤；显式
 `--input` 会被拒绝。`-o` 保存的是配方定义，沿用默认不覆盖和显式 `--force` 规则。导出结果可直接

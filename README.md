@@ -418,6 +418,19 @@ v0.34.0 adds `builtin:top-error-codes` for application logs
 and `builtin:top-http-5xx-codes` for HTTP request logs. Both emit ranked JSONL.
 See the [log fixtures and export examples](docs/data-recipes.md).
 
+Development builds support parameterized recipes. Discover a built-in recipe's
+parameters, copy its editable definition, then pass the values for each run.
+
+```sh
+zi data --list-parameters --recipe builtin:log-context
+zi data --export-recipe --recipe builtin:log-context -o team-log.toml
+cat app.log | zi data --recipe team-log.toml --var needle=TIMEOUT --var nearby=2
+zi data --show-plan --recipe team-log.toml --var needle=TIMEOUT --var nearby=2
+```
+
+The copied version-2 recipe keeps its bindings and defaults. The resolved
+version-1 plan contains the values for that run. See the
+[parameter and copy examples](docs/data-recipes.md).
 
 ```sh
 cat lines.txt | zi data --step trim --step dedupe --step sort:reverse
@@ -427,14 +440,14 @@ zi data --show-plan --step trim --step dedupe --step sort:reverse -o cleanup.tom
 ```
 
 Use one operation, repeated `--step` in execution order, or an explicit `--recipe` file (or a qualified builtin reference).
-Recipes have `version = 1` and `[[steps]]` entries with `operation` and optional `reverse`
+A literal recipe uses `version = 1` and `[[steps]]` entries with `operation` and optional `reverse`
 (sort, jsonl-sort or jsonl-sort-int only). All definitions are checked before reading input. Only the complete final
 result is emitted; a failed later step emits no intermediate stdout and does not replace
 an existing output file. Shell `>` still opens/truncates its destination independently.
 
 Limits: 1–16 steps, 64 KiB UTF-8 recipe, 8 MiB initial input, 16 MiB per intermediate/final
 result; existing line/key/depth limits still apply. The recipe is caller-supplied local
-data, never a model prompt or project permission. No shell, includes, variables, implicit
+data, never a model prompt or project permission. No shell, includes, implicit
 discovery or model access. [Recipe format and examples](docs/data-recipes.md).
 
 `--show-plan` validates the same plan and exports normalized version-1 TOML without

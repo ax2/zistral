@@ -365,6 +365,109 @@ fn export_preserves_source_bytes_and_rejects_malformed_definitions_before_output
 }
 
 #[test]
+fn recipe_inspection_rejects_impossible_steps_before_publishing() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    fs::write(root.join("existing.out"), "keep\n").unwrap();
+    for (definition, expected) in [
+        (
+            "version=2\n[[steps]]\noperation='trim'\nbind={contains='needle'}\n",
+            "contains is only valid",
+        ),
+        (
+            "version=2\n[[steps]]\noperation='lines-include'\nbind={context='nearby'}\n",
+            "line filtering requires explicit contains",
+        ),
+        (
+            "version=2\n[[steps]]\noperation='jsonl-where-int'\npointer='/n'\nat_least='500'\nbind={equals='match'}\n",
+            "use equals or integer bounds, not both",
+        ),
+        (
+            "version=1\n[[steps]]\noperation='lines-tail'\nlines=0\n",
+            "lines must be an integer",
+        ),
+    ] {
+        fs::write(root.join("bad.toml"), definition).unwrap();
+        for action in ["--list-parameters", "--export-recipe"] {
+            let result = invoke(
+                root,
+                &[
+                    "data",
+                    action,
+                    "--recipe",
+                    "bad.toml",
+                    "-o",
+                    "existing.out",
+                    "--force",
+                ],
+                b"",
+            );
+            assert!(
+                !result.status.success() && result.stdout.is_empty(),
+                "{result:?}"
+            );
+            let error = String::from_utf8(result.stderr).unwrap();
+            assert!(
+                error.contains("invalid recipe step 1") && error.contains(expected),
+                "{error}"
+            );
+            assert_eq!(fs::read(root.join("existing.out")).unwrap(), b"keep\n");
+        }
+    }
+}
+
+#[test]
+fn recipe_inspection_defers_bound_integer_values_until_resolution() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let definition = b"version=2\n[[steps]]\noperation='jsonl-where-int'\npointer='/n'\nat_least='9'\nat_most='0'\nbind={at_least='minimum'}\n";
+    fs::write(root.join("range.toml"), definition).unwrap();
+    let listed = invoke(
+        root,
+        &["data", "--list-parameters", "--recipe", "range.toml"],
+        b"",
+    );
+    assert!(
+        listed.status.success() && listed.stderr.is_empty(),
+        "{listed:?}"
+    );
+    let report: serde_json::Value = serde_json::from_slice(&listed.stdout).unwrap();
+    assert_eq!(report["parameters"]["minimum"]["required"], false);
+    let copied = invoke(
+        root,
+        &["data", "--export-recipe", "--recipe", "range.toml"],
+        b"",
+    );
+    assert!(
+        copied.status.success() && copied.stderr.is_empty(),
+        "{copied:?}"
+    );
+    assert_eq!(copied.stdout, definition);
+
+    let invalid = invoke(
+        root,
+        &["data", "--show-plan", "--recipe", "range.toml"],
+        b"",
+    );
+    assert!(!invalid.status.success() && invalid.stdout.is_empty());
+    assert!(
+        String::from_utf8(invalid.stderr)
+            .unwrap()
+            .contains("at_least must be less than or equal to at_most")
+    );
+    let result = invoke(
+        root,
+        &["data", "--recipe", "range.toml", "--var", "minimum=-2"],
+        b"{\"n\":-3}\n{\"n\":-2}\n{\"n\":0}\n{\"n\":1}\n",
+    );
+    assert!(
+        result.status.success() && result.stderr.is_empty(),
+        "{result:?}"
+    );
+    assert_eq!(result.stdout, b"{\"n\":-2}\n{\"n\":0}\n");
+}
+
+#[test]
 fn json_selection_plan_roundtrips_nested_pointer_and_exact_records() {
     let root = tempfile::tempdir().unwrap();
     let input = r#"{"data":{"a/b":{"~items:reverse":[{"n":1.2300E+400,"n":-0},"\u4e2d",123456789012345678901234567890]}}}"#;

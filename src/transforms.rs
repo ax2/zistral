@@ -89,6 +89,18 @@ impl fmt::Display for Operation {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum BoundField {
+    Pointer,
+    Contains,
+    Equals,
+    AtLeast,
+    AtMost,
+    Context,
+    Lines,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Step {
@@ -182,6 +194,7 @@ fn is_false(value: &bool) -> bool {
 impl Step {
     fn integer_bounds(
         &self,
+        is_bound: impl Fn(BoundField) -> bool,
     ) -> Result<(
         Option<crate::integer::Key<'_>>,
         Option<crate::integer::Key<'_>>,
@@ -194,17 +207,39 @@ impl Step {
                 .context("integer filter values must be JSON integer literals")
         }
 
-        if let Some(value) = &self.equals {
-            if self.at_least.is_some() || self.at_most.is_some() {
+        use BoundField::{AtLeast, AtMost, Equals};
+        if self.equals.is_some() || is_bound(Equals) {
+            if self.at_least.is_some()
+                || self.at_most.is_some()
+                || is_bound(AtLeast)
+                || is_bound(AtMost)
+            {
                 bail!("use equals or integer bounds, not both");
             }
-            let exact = parse(value)?;
-            return Ok((Some(exact), Some(exact)));
+            let exact = self
+                .equals
+                .as_deref()
+                .filter(|_| !is_bound(Equals))
+                .map(parse)
+                .transpose()?;
+            return Ok((exact, exact));
         }
-        let lower = self.at_least.as_deref().map(parse).transpose()?;
-        let upper = self.at_most.as_deref().map(parse).transpose()?;
+        let lower = self
+            .at_least
+            .as_deref()
+            .filter(|_| !is_bound(AtLeast))
+            .map(parse)
+            .transpose()?;
+        let upper = self
+            .at_most
+            .as_deref()
+            .filter(|_| !is_bound(AtMost))
+            .map(parse)
+            .transpose()?;
         match (lower, upper) {
-            (None, None) => bail!("jsonl-where-int requires equals, at_least or at_most"),
+            (None, None) if !is_bound(AtLeast) && !is_bound(AtMost) => {
+                bail!("jsonl-where-int requires equals, at_least or at_most")
+            }
             (Some(lower), Some(upper)) if lower > upper => {
                 bail!("at_least must be less than or equal to at_most");
             }
@@ -213,6 +248,15 @@ impl Step {
     }
 
     pub fn validate(&self) -> Result<()> {
+        self.validate_with_bindings(|_| false)
+    }
+
+    pub(crate) fn validate_with_bindings(
+        &self,
+        is_bound: impl Fn(BoundField) -> bool,
+    ) -> Result<()> {
+        use BoundField::*;
+
         if self.if_present.is_some()
             && !matches!(
                 self.operation,
@@ -227,43 +271,51 @@ impl Step {
                 "if_present is only valid for JSON redaction, JSONL field filtering or jsonl-count-by"
             );
         }
-        match (&self.equals, self.operation) {
-            (Some(value), Operation::JsonlWhere | Operation::JsonlWhereInt)
-                if value.len() <= 4096 => {}
-            (Some(_), Operation::JsonlWhere | Operation::JsonlWhereInt) => {
+        if self.equals.is_some() || is_bound(Equals) {
+            if !matches!(
+                self.operation,
+                Operation::JsonlWhere | Operation::JsonlWhereInt
+            ) {
+                bail!("equals is only valid for jsonl-where or jsonl-where-int");
+            }
+            if !is_bound(Equals) && self.equals.as_ref().is_some_and(|value| value.len() > 4096) {
                 bail!("equals must contain at most 4096 UTF-8 bytes")
             }
-            (None, Operation::JsonlWhere) => bail!(
+        } else if self.operation == Operation::JsonlWhere {
+            bail!(
                 "{} requires explicit equals text; use --equals TEXT or recipe equals",
                 self.operation
-            ),
-            (Some(_), _) => bail!("equals is only valid for jsonl-where or jsonl-where-int"),
-            (None, _) => (),
+            );
         }
         if self.operation == Operation::JsonlWhereInt {
-            self.integer_bounds()?;
-        } else if self.at_least.is_some() || self.at_most.is_some() {
+            self.integer_bounds(&is_bound)?;
+        } else if self.at_least.is_some()
+            || self.at_most.is_some()
+            || is_bound(AtLeast)
+            || is_bound(AtMost)
+        {
             bail!("at_least and at_most are only valid for jsonl-where-int");
         }
-        if let Some(context) = self.context {
+        if self.context.is_some() || is_bound(Context) {
             if self.operation != Operation::LinesInclude {
                 bail!("context is only valid for lines-include");
             }
-            if context > MAX_ITEMS {
+            if !is_bound(Context) && self.context.is_some_and(|context| context > MAX_ITEMS) {
                 bail!("context must be an integer from 0 to 100000");
             }
         }
-        match (self.lines, self.operation) {
-            (Some(n), Operation::LinesHead | Operation::LinesTail)
-                if (1..=MAX_ITEMS).contains(&n) => {}
-            (Some(_), Operation::LinesHead | Operation::LinesTail) => {
+        let line_window = matches!(self.operation, Operation::LinesHead | Operation::LinesTail);
+        if self.lines.is_some() || is_bound(Lines) {
+            if !line_window {
+                bail!("lines is only valid for lines-head or lines-tail");
+            }
+            if !is_bound(Lines) && self.lines.is_some_and(|n| !(1..=MAX_ITEMS).contains(&n)) {
                 bail!("lines must be an integer from 1 to 100000")
             }
-            (None, Operation::LinesHead | Operation::LinesTail) => bail!(
+        } else if line_window {
+            bail!(
                 "line windows require explicit lines; use --lines N or step lines-head:N / lines-tail:N"
-            ),
-            (Some(_), _) => bail!("lines is only valid for lines-head or lines-tail"),
-            (None, _) => (),
+            );
         }
         if self.reverse
             && !matches!(
@@ -273,19 +325,23 @@ impl Step {
         {
             bail!("--reverse is only valid for sort, jsonl-sort or jsonl-sort-int");
         }
-        match (&self.contains, self.operation) {
-            (Some(needle), Operation::LinesInclude | Operation::LinesExclude) => {
+        let line_filter = matches!(
+            self.operation,
+            Operation::LinesInclude | Operation::LinesExclude
+        );
+        if self.contains.is_some() || is_bound(Contains) {
+            if !line_filter {
+                bail!("contains is only valid for lines-include or lines-exclude");
+            }
+            if let Some(needle) = self.contains.as_ref().filter(|_| !is_bound(Contains)) {
                 if needle.is_empty() || needle.len() > 4096 || needle.contains(['\r', '\n']) {
                     bail!("contains requires 1-4096 UTF-8 bytes without CR or LF");
                 }
             }
-            (None, Operation::LinesInclude | Operation::LinesExclude) => {
-                bail!(
-                    "line filtering requires explicit contains text; use --contains TEXT or recipe contains"
-                );
-            }
-            (Some(_), _) => bail!("contains is only valid for lines-include or lines-exclude"),
-            (None, _) => (),
+        } else if line_filter {
+            bail!(
+                "line filtering requires explicit contains text; use --contains TEXT or recipe contains"
+            );
         }
         match (&self.fields, self.operation) {
             (Some(fields), Operation::JsonlProject) => crate::projection::validate(fields)?,
@@ -295,10 +351,9 @@ impl Step {
             (Some(_), _) => bail!("fields are only valid for jsonl-project"),
             (None, _) => (),
         }
-        match (&self.pointer, self.operation) {
-            (
-                Some(pointer),
-                Operation::JsonSelect
+        let needs_pointer = matches!(
+            self.operation,
+            Operation::JsonSelect
                 | Operation::JsonlSelect
                 | Operation::JsonRedact
                 | Operation::JsonlRedact
@@ -307,33 +362,24 @@ impl Step {
                 | Operation::JsonlDedupe
                 | Operation::JsonlSort
                 | Operation::JsonlSortInt
-                | Operation::JsonlCountBy,
-            ) => crate::selection::validate_pointer(pointer),
-            (
-                None,
-                Operation::JsonSelect
-                | Operation::JsonlSelect
-                | Operation::JsonRedact
-                | Operation::JsonlRedact
-                | Operation::JsonlWhere
-                | Operation::JsonlWhereInt
-                | Operation::JsonlDedupe
-                | Operation::JsonlSort
-                | Operation::JsonlSortInt
-                | Operation::JsonlCountBy,
-            ) => {
-                bail!(
-                    "{} requires an explicit pointer; use an empty pointer to select the root",
-                    self.operation
-                )
-            }
-            (Some(_), _) => {
+                | Operation::JsonlCountBy
+        );
+        if self.pointer.is_some() || is_bound(Pointer) {
+            if !needs_pointer {
                 bail!(
                     "pointer is only valid for JSON selection/redaction, jsonl-where, jsonl-where-int, jsonl-dedupe, jsonl-sort, jsonl-sort-int or jsonl-count-by"
                 )
             }
-            (None, _) => Ok(()),
+            if let Some(pointer) = self.pointer.as_ref().filter(|_| !is_bound(Pointer)) {
+                crate::selection::validate_pointer(pointer)?;
+            }
+        } else if needs_pointer {
+            bail!(
+                "{} requires an explicit pointer; use an empty pointer to select the root",
+                self.operation
+            );
         }
+        Ok(())
     }
 }
 
@@ -502,7 +548,7 @@ fn jsonl_where(input: &str, step: &Step, out: &mut Buffer) -> Result<()> {
     let pointer = step.pointer.as_deref().expect("validated pointer");
     let if_present = step.if_present.unwrap_or(false);
     let integer = if step.operation == Operation::JsonlWhereInt {
-        Some(step.integer_bounds()?)
+        Some(step.integer_bounds(|_| false)?)
     } else {
         None
     };
