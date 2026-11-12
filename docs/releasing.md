@@ -121,15 +121,16 @@ only for clean disposable runners. Python optimization is rejected before instal
 commands because verification assertions must stay enabled. No recursive user-directory
 cleanup or system package removal outside the known fresh test installation is used.
 
-Candidate and Release checks install the checksum-pinned official v0.33.0 package
-before the new build, verifying both executable identities and byte-for-byte legacy
-configuration preservation. Download preparation uses `gh` only on the disposable
+Candidate and Release checks install the checksum-pinned official v0.34.0 package
+before the new build. They verify both executable identities, byte-for-byte
+configuration preservation and offline diagnostics of the saved profile output
+budget. Download preparation uses `gh` only on the disposable
 test host. The [baseline manifest](../scripts/stable-upgrade-baseline.json) fixes
 the public installer size/digest and matching executable digest; updating it requires
 review of verified official assets, rather than following a mutable latest release.
 
-Candidate metadata currently still says 0.33.0, so reports explicitly distinguish
-published-code replacement from a different package version. The Release workflow
+Development candidates may use the same package version as the published baseline.
+Reports record whether the version changed. The Release workflow
 requires a version newer than the pinned baseline and upgrades all three native
 packages before publishing. Final verification checks the actual downloadable
 assets after publication.
