@@ -22,6 +22,7 @@ zi data --recipe recent.toml -i events.jsonl
 | `builtin:top-error-codes` (v0.34.0) | Keep exact `ERROR` levels, rank string `/error/code` counts, emit 20 groups as JSONL. |
 | `builtin:top-http-5xx-codes` (v0.34.0) | Rank string `/error/code` values from integer `/status` values 500–599. Skip absent paths explicitly. |
 | `builtin:recent-unique-events` | Keep first string `/id`, stably sort string `/time` descending, take first 20 records as JSONL. |
+| `builtin:log-context` (development) | Keep lines around a literal match supplied as `--var needle=VALUE`, then take the last 20 retained lines by default. |
 
 去重保留首条，不会自动选取同一 ID 的最新记录。时间只做字符串排序，不解析日期；应先统一
 格式与时区。原始计数分组按首次出现顺序输出；top-severity-counts 按整数频次倒序排列，同频仍按首次出现顺序。缺失、重复歧义或非字符串字段会使整次处理失败，
@@ -196,10 +197,30 @@ supports up to 16 distinct names. Repeat `--var` once per supplied name, with
 up to 4096 UTF-8 bytes per value. A name reused across steps must consistently
 bind text or consistently bind line counts. The CLI rejects unknown, duplicate
 and missing required values before it opens the input or prepares output.
-Version-1 files and the current embedded recipes use literal values.
+Version-1 recipes use literal values.
 
 参数替换只发生在标有 `bind` 的字段，写入的值按字面处理。导出的 `resolved.toml`
 是含本次参数值的版本 1 配方，适合复查或重跑；分享前应检查其中是否包含不宜公开的匹配词。
+
+Use the embedded `builtin:log-context` to run the example from any directory.
+It requires `needle` and accepts the same optional `nearby` and `limit` values
+as the file example.
+
+```sh
+zi data --list-parameters --recipe builtin:log-context
+cat app.log | zi data --recipe builtin:log-context --var needle=TIMEOUT --var nearby=2
+zi data --show-plan --recipe builtin:log-context --var needle=TIMEOUT -o resolved.toml
+```
+
+`--list-parameters` returns JSON for either a file or an embedded recipe.
+The report's `version` is 1 and `recipe_version` identifies the source format.
+Each name in `parameters` has a `type` of `text` or `line_count`, a
+`required` flag, and one-based `bindings` with the step number and field name.
+A name is required if any of its bindings has no fallback. The report omits
+literal values and shows an empty parameter object for a version-1 recipe.
+It reads only the definition and rejects `--input` and `--var`. Use
+`--show-plan` with the values you intend to supply to validate the resolved
+operations. You can save the parameter report with `-o`.
 
 ## Inspect and export a plan before processing data / 先看计划，再处理数据
 

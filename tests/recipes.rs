@@ -197,6 +197,95 @@ fn recipe_bindings_cannot_replace_operations_or_mix_text_and_counts() {
 }
 
 #[test]
+fn recipe_parameter_report_keeps_defaults_private_and_lists_every_binding() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    fs::write(
+        root.join("shared.toml"),
+        "version=2\n[[steps]]\noperation='lines-include'\ncontains='PRIVATE_DEFAULT'\nbind={contains='needle'}\n[[steps]]\noperation='lines-exclude'\nbind={contains='needle'}\n",
+    ).unwrap();
+    let result = invoke(
+        root,
+        &["data", "--list-parameters", "--recipe", "shared.toml"],
+        b"PRIVATE_INPUT",
+    );
+    assert!(
+        result.status.success() && result.stderr.is_empty(),
+        "{:?}",
+        result
+    );
+    let text = String::from_utf8(result.stdout).unwrap();
+    assert!(!text.contains("PRIVATE_"));
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&text).unwrap(),
+        serde_json::json!({
+            "version": 1,
+            "recipe_version": 2,
+            "parameters": {
+                "needle": {
+                    "type": "text", "required": true,
+                    "bindings": [{"step": 1, "field": "contains"}, {"step": 2, "field": "contains"}]
+                }
+            }
+        })
+    );
+    let literal = invoke(
+        root,
+        &["data", "--list-parameters", "--recipe", "builtin:cleanup"],
+        b"",
+    );
+    assert!(literal.status.success());
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&literal.stdout).unwrap(),
+        serde_json::json!({"version": 1, "recipe_version": 1, "parameters": {}})
+    );
+}
+
+#[test]
+fn embedded_log_context_reports_parameters_and_runs_without_companion_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let report = invoke(
+        root,
+        &[
+            "data",
+            "--list-parameters",
+            "--recipe",
+            "builtin:log-context",
+        ],
+        b"",
+    );
+    assert!(report.status.success() && report.stderr.is_empty());
+    let report: serde_json::Value = serde_json::from_slice(&report.stdout).unwrap();
+    assert_eq!(report["recipe_version"], 2);
+    assert_eq!(report["parameters"]["needle"]["required"], true);
+    for name in ["nearby", "limit"] {
+        assert_eq!(report["parameters"][name]["type"], "line_count");
+        assert_eq!(report["parameters"][name]["required"], false);
+    }
+    let result = invoke(
+        root,
+        &[
+            "data",
+            "--recipe",
+            "builtin:log-context",
+            "--var",
+            "needle=断线",
+            "--var",
+            "limit=2",
+        ],
+        "skip\nstart\n断线\nretry\nend\n".as_bytes(),
+    );
+    assert!(
+        result.status.success() && result.stderr.is_empty(),
+        "{:?}",
+        result
+    );
+    assert_eq!(result.stdout, "断线\nretry\n".as_bytes());
+    assert_eq!(fs::read_dir(root).unwrap().count(), 0);
+}
+
+#[test]
 fn json_selection_plan_roundtrips_nested_pointer_and_exact_records() {
     let root = tempfile::tempdir().unwrap();
     let input = r#"{"data":{"a/b":{"~items:reverse":[{"n":1.2300E+400,"n":-0},"\u4e2d",123456789012345678901234567890]}}}"#;
@@ -1518,6 +1607,37 @@ fn embedded_catalog_and_preview_finish_without_stdin_eof_or_model_configuration(
             vec!["data", "--show-plan", "--recipe", "builtin:severity-counts"],
             true,
         ),
+        (
+            vec![
+                "data",
+                "--list-parameters",
+                "--recipe",
+                "builtin:log-context",
+            ],
+            true,
+        ),
+        (
+            vec![
+                "data",
+                "--list-parameters",
+                "--recipe",
+                "builtin:log-context",
+                "-i",
+                "-",
+            ],
+            false,
+        ),
+        (
+            vec![
+                "data",
+                "--list-parameters",
+                "--recipe",
+                "builtin:log-context",
+                "--var",
+                "needle=TIMEOUT",
+            ],
+            false,
+        ),
         (vec!["data", "--list-recipes", "-i", "-"], false),
         (vec!["data", "--list-recipes", "-i", "missing-data"], false),
         (
@@ -1571,7 +1691,8 @@ fn embedded_catalog_and_preview_finish_without_stdin_eof_or_model_configuration(
                     "builtin:top-severity-counts",
                     "builtin:top-error-codes",
                     "builtin:top-http-5xx-codes",
-                    "builtin:recent-unique-events"
+                    "builtin:recent-unique-events",
+                    "builtin:log-context"
                 ]
             );
         }

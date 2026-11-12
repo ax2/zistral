@@ -265,3 +265,6 @@ step field. It keeps the operation, output path and file access fixed by the rec
 and invocation. The user supplies literal values with `--var` and can preview a
 resolved version-1 plan. This addresses reuse across runs without retaining prior
 input or output as model context.
+The parameter report exposes names, types and binding locations for scripts and
+recipe authors. An embedded log-context recipe puts the same workflow on the
+installed command line for everyday troubleshooting.

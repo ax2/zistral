@@ -9,7 +9,7 @@ const MAX_RECIPE: u64 = 64 * 1024;
 const MAX_PARAMETERS: usize = 16;
 
 // Embed reviewed source examples so installed binaries need no companion recipe files.
-const BUILTINS: [(&str, &str, &str); 7] = [
+const BUILTINS: [(&str, &str, &str); 8] = [
     (
         "cleanup",
         "Trim lines, keep unique lines, sort descending",
@@ -45,6 +45,11 @@ const BUILTINS: [(&str, &str, &str); 7] = [
         "Keep first string /id, sort /time descending, take 20 JSONL records",
         include_str!("../docs/examples/recent-unique-events.toml"),
     ),
+    (
+        "log-context",
+        "Keep nearby lines around a literal match, then take the last lines; requires --var needle=VALUE",
+        include_str!("../docs/examples/log-context.toml"),
+    ),
 ];
 
 pub fn list() -> String {
@@ -52,7 +57,7 @@ pub fn list() -> String {
     for (name, description, _) in BUILTINS {
         output.push_str(&format!("builtin:{name} — {description}\n"));
     }
-    output.push_str("\nInspect/export: zi data --show-plan --recipe builtin:NAME [-o recipe.toml]\nRun: zi data --recipe builtin:NAME -i INPUT [-o OUTPUT]\n");
+    output.push_str("\nParameters: zi data --list-parameters --recipe builtin:NAME\nInspect/export: zi data --show-plan --recipe builtin:NAME [-o recipe.toml]\nRun: zi data --recipe builtin:NAME -i INPUT [-o OUTPUT]\n");
     output
 }
 
@@ -74,6 +79,27 @@ struct TemplateStep {
     bind: BTreeMap<BoundField, String>,
     #[serde(flatten)]
     arguments: toml::Table,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum ParameterType {
+    Text,
+    LineCount,
+}
+
+#[derive(Serialize)]
+struct ParameterBinding {
+    step: usize,
+    field: &'static str,
+}
+
+#[derive(Serialize)]
+struct Parameter {
+    #[serde(rename = "type")]
+    value_type: ParameterType,
+    required: bool,
+    bindings: Vec<ParameterBinding>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
@@ -101,12 +127,15 @@ impl BoundField {
         }
     }
 
-    fn uses_count(self) -> bool {
-        matches!(self, Self::Context | Self::Lines)
+    fn value_type(self) -> ParameterType {
+        match self {
+            Self::Context | Self::Lines => ParameterType::LineCount,
+            _ => ParameterType::Text,
+        }
     }
 
     fn parse_value(self, name: &str, value: &str) -> Result<toml::Value> {
-        if !self.uses_count() {
+        if self.value_type() == ParameterType::Text {
             return Ok(toml::Value::String(value.to_owned()));
         }
         let count = value
@@ -124,39 +153,66 @@ fn parse_recipe<'a, T: Deserialize<'a>>(text: &'a str) -> Result<T> {
     toml::from_str(text).map_err(|error| crate::definition::toml_error(&error, text, "recipe"))
 }
 
-fn bind_recipe(steps: Vec<TemplateStep>, variables: &[String]) -> Result<Vec<Step>> {
-    use crate::definition::valid_variable;
-
-    if steps.is_empty() || steps.len() > transforms::MAX_STEPS {
+fn check_step_count(count: usize) -> Result<()> {
+    if !(1..=transforms::MAX_STEPS).contains(&count) {
         bail!("a data pipeline requires 1-16 steps");
     }
+    Ok(())
+}
+
+fn parameters(steps: &[TemplateStep]) -> Result<BTreeMap<&str, Parameter>> {
+    use crate::definition::valid_variable;
+
+    check_step_count(steps.len())?;
     let mut names = BTreeMap::new();
-    for step in &steps {
+    for (index, step) in steps.iter().enumerate() {
         for (&field, name) in &step.bind {
             if !valid_variable(name) {
                 bail!(
                     "invalid recipe parameter name in bind; use 1-32 ASCII identifier characters"
                 );
             }
-            let count = field.uses_count();
-            if names
-                .insert(name.clone(), count)
-                .is_some_and(|prior| prior != count)
-            {
+            let value_type = field.value_type();
+            let parameter = names.entry(name.as_str()).or_insert_with(|| Parameter {
+                value_type,
+                required: false,
+                bindings: Vec::new(),
+            });
+            if parameter.value_type != value_type {
                 bail!("recipe parameter {name} cannot bind both text and line counts");
             }
-            if step.arguments.get(field.name()).is_some_and(|fallback| {
-                if count {
-                    !fallback.is_integer()
-                } else {
-                    !fallback.is_str()
-                }
+            let fallback = step.arguments.get(field.name());
+            if fallback.is_some_and(|value| match value_type {
+                ParameterType::Text => !value.is_str(),
+                ParameterType::LineCount => !value.is_integer(),
             }) {
                 bail!("recipe parameter {name} has an incompatible fallback type");
             }
+            parameter.required |= fallback.is_none();
+            parameter.bindings.push(ParameterBinding {
+                step: index + 1,
+                field: field.name(),
+            });
         }
     }
-    if names.len() > MAX_PARAMETERS || variables.len() > MAX_PARAMETERS {
+    if names.len() > MAX_PARAMETERS {
+        bail!("a recipe supports at most {MAX_PARAMETERS} parameters");
+    }
+    Ok(names)
+}
+
+fn decode_step(arguments: toml::Table, index: usize) -> Result<Step> {
+    // Converted TOML may contain arbitrary literals. Keep deserialization diagnostics structural.
+    toml::Value::Table(arguments)
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("invalid recipe fields or types in step {}", index + 1))
+}
+
+fn bind_recipe(steps: Vec<TemplateStep>, variables: &[String]) -> Result<Vec<Step>> {
+    use crate::definition::valid_variable;
+
+    let names = parameters(&steps)?;
+    if variables.len() > MAX_PARAMETERS {
         bail!("a recipe supports at most {MAX_PARAMETERS} parameters");
     }
     let mut values = BTreeMap::new();
@@ -189,12 +245,69 @@ fn bind_recipe(steps: Vec<TemplateStep>, variables: &[String]) -> Result<Vec<Ste
                     bail!("missing recipe parameter {name}; use --var {name}=VALUE");
                 }
             }
-            // Converted TOML may contain arbitrary literals. Keep deserialization diagnostics structural.
-            toml::Value::Table(arguments).try_into().map_err(|_| {
-                anyhow::anyhow!("invalid recipe fields or types in step {}", index + 1)
-            })
+            decode_step(arguments, index)
         })
         .collect()
+}
+
+enum RecipeDefinition {
+    Literal(Vec<Step>),
+    Template(Vec<TemplateStep>),
+}
+
+fn read_recipe(path: &Path) -> Result<RecipeDefinition> {
+    let bytes = if let Some(name) = path.to_str().and_then(|text| text.strip_prefix("builtin:")) {
+        let (_, _, definition) = BUILTINS
+            .iter()
+            .find(|(candidate, _, _)| *candidate == name)
+            .context("unknown builtin recipe; use zi data --list-recipes for exact names")?;
+        definition.as_bytes().to_vec()
+    } else {
+        let mut bytes = Vec::new();
+        std::fs::File::open(path)
+            .with_context(|| format!("cannot open recipe {}", path.display()))?
+            .take(MAX_RECIPE + 1)
+            .read_to_end(&mut bytes)
+            .context("cannot read recipe")?;
+        bytes
+    };
+    if bytes.len() as u64 > MAX_RECIPE {
+        bail!("recipe exceeds 64 KiB");
+    }
+    let text = std::str::from_utf8(&bytes).context("recipe must be UTF-8")?;
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    match parse_recipe::<RecipeVersion>(text)?.version {
+        1 => Ok(RecipeDefinition::Literal(
+            parse_recipe::<Recipe>(text)?.steps,
+        )),
+        2 => Ok(RecipeDefinition::Template(
+            parse_recipe::<Recipe<TemplateStep>>(text)?.steps,
+        )),
+        _ => bail!("unsupported recipe version; expected version = 1 or 2"),
+    }
+}
+
+pub fn list_parameters(path: &Path) -> Result<String> {
+    let (recipe_version, parameters) = match read_recipe(path)? {
+        RecipeDefinition::Literal(steps) => {
+            check_step_count(steps.len())?;
+            (1, serde_json::json!({}))
+        }
+        RecipeDefinition::Template(steps) => {
+            let parameters = serde_json::to_value(parameters(&steps)?)?;
+            for (index, step) in steps.into_iter().enumerate() {
+                decode_step(step.arguments, index)?;
+            }
+            (2, parameters)
+        }
+    };
+    let mut output = serde_json::to_string_pretty(&serde_json::json!({
+        "version": 1,
+        "recipe_version": recipe_version,
+        "parameters": parameters,
+    }))?;
+    output.push('\n');
+    Ok(output)
 }
 
 pub struct Plan(Vec<Step>);
@@ -209,36 +322,12 @@ impl Plan {
         let plan = if let Some(step) = single {
             vec![step]
         } else if let Some(path) = recipe {
-            let bytes =
-                if let Some(name) = path.to_str().and_then(|text| text.strip_prefix("builtin:")) {
-                    let (_, _, definition) = BUILTINS
-                        .iter()
-                        .find(|(candidate, _, _)| *candidate == name)
-                        .ok_or_else(|| {
-                            anyhow::anyhow!(
-                                "unknown builtin recipe; use zi data --list-recipes for exact names"
-                            )
-                        })?;
-                    definition.as_bytes().to_vec()
-                } else {
-                    let mut bytes = Vec::new();
-                    std::fs::File::open(path)
-                        .with_context(|| format!("cannot open recipe {}", path.display()))?
-                        .take(MAX_RECIPE + 1)
-                        .read_to_end(&mut bytes)
-                        .context("cannot read recipe")?;
-                    bytes
-                };
-            if bytes.len() as u64 > MAX_RECIPE {
-                bail!("recipe exceeds 64 KiB");
-            }
-            let text = std::str::from_utf8(&bytes).context("recipe must be UTF-8")?;
-            let text = text.strip_prefix('\u{feff}').unwrap_or(text);
-            match parse_recipe::<RecipeVersion>(text)?.version {
-                1 if !variables.is_empty() => bail!("--var requires a version-2 data recipe"),
-                1 => parse_recipe::<Recipe>(text)?.steps,
-                2 => bind_recipe(parse_recipe::<Recipe<TemplateStep>>(text)?.steps, variables)?,
-                _ => bail!("unsupported recipe version; expected version = 1 or 2"),
+            match read_recipe(path)? {
+                RecipeDefinition::Literal(_) if !variables.is_empty() => {
+                    bail!("--var requires a version-2 data recipe")
+                }
+                RecipeDefinition::Literal(steps) => steps,
+                RecipeDefinition::Template(steps) => bind_recipe(steps, variables)?,
             }
         } else {
             if steps.len() > transforms::MAX_STEPS {
@@ -281,9 +370,7 @@ impl Plan {
     }
 
     fn from_steps(plan: Vec<Step>) -> Result<Self> {
-        if plan.is_empty() || plan.len() > transforms::MAX_STEPS {
-            bail!("a data pipeline requires 1-16 steps");
-        }
+        check_step_count(plan.len())?;
         for (index, step) in plan.iter().enumerate() {
             step.validate().with_context(|| {
                 format!(

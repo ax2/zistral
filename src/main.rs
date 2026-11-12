@@ -243,6 +243,9 @@ enum Commands {
         /// Validate and export a reusable TOML plan without reading data or running steps
         #[arg(long)]
         show_plan: bool,
+        /// List declared parameters as JSON without reading input or resolving a plan
+        #[arg(long, requires = "recipe", conflicts_with_all = ["list_recipes", "show_plan"])]
+        list_parameters: bool,
         /// List embedded native recipes offline, without reading stdin or model settings
         #[arg(long, conflicts_with_all = ["operation", "steps", "recipe", "show_plan", "reverse", "if_present", "pointer", "fields", "field_defaults", "contains", "context", "equals", "at_least", "at_most", "lines"])]
         list_recipes: bool,
@@ -449,6 +452,7 @@ fn run(mut cli: Cli) -> Result<()> {
         steps,
         recipe,
         show_plan,
+        list_parameters,
         list_recipes,
     }) = &cli.command
     {
@@ -470,38 +474,47 @@ fn run(mut cli: Cli) -> Result<()> {
         if *show_plan && cli.input.is_some() {
             bail!("--show-plan does not read data; omit --input to preview or export the plan");
         }
-        let single = operation
-            .map(|operation| -> Result<transforms::Step> {
-                Ok(transforms::Step {
-                    if_present: (*if_present).then_some(true),
-                    operation,
-                    reverse: *reverse,
-                    pointer: pointer.clone(),
-                    fields: projection::parse(fields, field_defaults)?,
-                    contains: contains.clone(),
-                    context: *context,
-                    equals: equals.clone(),
-                    at_least: at_least.clone(),
-                    at_most: at_most.clone(),
-                    lines: *lines,
-                })
-            })
-            .transpose()?;
-        let plan = if *list_recipes {
-            None
+        if *list_parameters && (cli.input.is_some() || !cli.vars.is_empty()) {
+            bail!("--list-parameters lists declarations; omit --input and --var");
+        }
+        let report = if *list_recipes {
+            Some(recipes::list())
+        } else if *list_parameters {
+            let recipe = recipe
+                .as_deref()
+                .context("--list-parameters requires --recipe")?;
+            Some(recipes::list_parameters(recipe)?)
         } else {
-            Some(recipes::Plan::prepare(
-                single,
-                steps,
-                recipe.as_deref(),
-                &cli.vars,
-            )?)
+            None
         };
-        let target = prepare_output(&cli)?;
-        let output = match plan {
-            Some(plan) if *show_plan => plan.render()?,
-            Some(plan) => plan.run(&read_input(&cli)?)?,
-            None => recipes::list(),
+        let (target, output) = if let Some(report) = report {
+            (prepare_output(&cli)?, report)
+        } else {
+            let single = operation
+                .map(|operation| -> Result<transforms::Step> {
+                    Ok(transforms::Step {
+                        if_present: (*if_present).then_some(true),
+                        operation,
+                        reverse: *reverse,
+                        pointer: pointer.clone(),
+                        fields: projection::parse(fields, field_defaults)?,
+                        contains: contains.clone(),
+                        context: *context,
+                        equals: equals.clone(),
+                        at_least: at_least.clone(),
+                        at_most: at_most.clone(),
+                        lines: *lines,
+                    })
+                })
+                .transpose()?;
+            let plan = recipes::Plan::prepare(single, steps, recipe.as_deref(), &cli.vars)?;
+            let target = prepare_output(&cli)?;
+            let output = if *show_plan {
+                plan.render()?
+            } else {
+                plan.run(&read_input(&cli)?)?
+            };
+            (target, output)
         };
         if let Some(target) = target {
             return save_output(
