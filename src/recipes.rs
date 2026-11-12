@@ -32,12 +32,12 @@ const BUILTINS: [(&str, &str, &str); 8] = [
     ),
     (
         "top-error-codes",
-        "Rank the top 20 string /error/code values from ERROR records as JSONL",
+        "Rank string error codes from ERROR records as JSONL (20 groups by default)",
         include_str!("../docs/examples/top-error-codes.toml"),
     ),
     (
         "top-http-5xx-codes",
-        "Rank the top 20 error codes from HTTP 5xx records as JSONL",
+        "Rank error codes from HTTP 5xx records as JSONL (20 groups by default)",
         include_str!("../docs/examples/top-http-5xx-codes.toml"),
     ),
     (

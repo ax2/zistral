@@ -55,6 +55,14 @@ zi data --recipe error-report.toml -i events.jsonl
 前 20 组，同频保留首次出现的顺序。所有记录都需要有 `/level`，存在但不是字符串的级别不匹配。
 只有命中记录需要字符串 `/error/code`。无效的 Unicode 字符串即使出现在未匹配的记录中也会报错。
 没有匹配时输出为空。导出后可更改级别、字段路径或条数，再运行自己的配方。
+
+开发中的版本支持给该配方传入可选的 `level_pointer`、`code_pointer` 和
+`limit`。例如，级别存在 `/event/severity`、错误码存在 `/fault/id` 时：
+
+```sh
+zi data --recipe builtin:top-error-codes --var level_pointer=/event/severity --var code_pointer=/fault/id --var limit=5 -i events.jsonl
+```
+
 日志结构混杂时，可以在导出的第一个 `jsonl-where` 步骤显式加上
 `if_present = true`，只跳过级别路径缺失的有效记录。如果旧日志有级别却缺错误码，
 也可以给第二个 `jsonl-count-by` 步骤单独启用该选项。存在但不是字符串的错误码仍会报错。
@@ -89,6 +97,14 @@ zi data --recipe service-errors.toml -i requests.jsonl
 整次运行失败。报告按频次降序，最多 20 组，同频按首次出现顺序。导出的四个步骤可以
 分别调整路径、缺字段规则、阈值和条数。配方源文件见
 [top-http-5xx-codes.toml](examples/top-http-5xx-codes.toml)。
+
+开发中的版本支持用 `status_pointer`、`code_pointer` 和 `limit` 适配字段路径与
+条数。用 `--list-parameters` 查询名称。HTTP 范围固定为 500 到 599。
+
+```sh
+zi data --list-parameters --recipe builtin:top-http-5xx-codes
+zi data --recipe builtin:top-http-5xx-codes --var status_pointer=/response/status --var code_pointer=/fault/id --var limit=5 -i requests.jsonl
+```
 
 如果应用的文本日志也记录了 `TIMEOUT`，可以用字面匹配保留附近的堆栈：
 
