@@ -234,9 +234,13 @@ Each name in `parameters` has a `type` of `text` or `line_count`, a
 `required` flag, and one-based `bindings` with the step number and field name.
 A name is required if any of its bindings has no fallback. The report omits
 literal values and shows an empty parameter object for a version-1 recipe.
-It reads only the definition and rejects `--input` and `--var`. Use
-`--show-plan` with the values you intend to supply to validate the resolved
-operations. You can save the parameter report with `-o`.
+It reads only the definition and rejects `--input` and `--var`. The parameter
+report and source export check whether each operation accepts its bound
+fields and whether required fields are present or bound. They also reject
+structural conflicts, such as binding equality and specifying an integer range
+in one step. Use `--show-plan` with the values you intend to supply to validate
+the resolved operations, including whichever fallback values are used.
+You can save the parameter report with `-o`.
 
 ## Copy a definition for your team / 复制并编辑配方
 

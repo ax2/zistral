@@ -1,5 +1,5 @@
 //! Explicit local definitions, never implicit project discovery or executable scripts.
-use crate::transforms::{self, Operation, Step};
+use crate::transforms::{self, BoundField, Operation, Step};
 use anyhow::{Context, Result, bail};
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
@@ -100,18 +100,6 @@ struct Parameter {
     value_type: ParameterType,
     required: bool,
     bindings: Vec<ParameterBinding>,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum BoundField {
-    Pointer,
-    Contains,
-    Equals,
-    AtLeast,
-    AtMost,
-    Context,
-    Lines,
 }
 
 impl BoundField {
@@ -294,12 +282,18 @@ fn declarations(definition: RecipeDefinition) -> Result<(u32, BTreeMap<String, P
     match definition {
         RecipeDefinition::Literal(steps) => {
             check_step_count(steps.len())?;
+            for (index, step) in steps.iter().enumerate() {
+                step.validate()
+                    .with_context(|| format!("invalid recipe step {}", index + 1))?;
+            }
             Ok((1, BTreeMap::new()))
         }
         RecipeDefinition::Template(steps) => {
             let parameters = parameters(&steps)?;
             for (index, step) in steps.into_iter().enumerate() {
-                decode_step(step.arguments, index)?;
+                decode_step(step.arguments, index)?
+                    .validate_with_bindings(|field| step.bind.contains_key(&field))
+                    .with_context(|| format!("invalid recipe step {}", index + 1))?;
             }
             Ok((2, parameters))
         }
