@@ -1,4 +1,5 @@
 use std::{
+    fs,
     io::Write,
     path::Path,
     process::{Command, Output, Stdio},
@@ -35,6 +36,164 @@ fn invoke(root: &Path, args: &[&str], input: &[u8]) -> Output {
         .unwrap();
     let _ = child.stdin.take().unwrap().write_all(input);
     child.wait_with_output().unwrap()
+}
+
+#[test]
+fn recipe_parameters_reuse_one_definition_and_export_a_resolved_plan() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    fs::write(
+        root.join("logs.toml"),
+        include_str!("../docs/examples/log-context.toml"),
+    )
+    .unwrap();
+    let literal = r#"needle=x={{var}} "[steps]""#;
+    let input = b"unrelated\nfirst\nx={{var}} \"[steps]\"\nsecond\nfinished\n";
+    let output = invoke(
+        root,
+        &["data", "--recipe", "logs.toml", "--var", literal],
+        input,
+    );
+    assert!(output.status.success(), "{:?}", output);
+    assert_eq!(output.stdout, b"first\nx={{var}} \"[steps]\"\nsecond\n");
+
+    let output = invoke(
+        root,
+        &[
+            "data",
+            "--show-plan",
+            "--recipe",
+            "logs.toml",
+            "--var",
+            literal,
+            "--var",
+            "nearby=0",
+            "--var",
+            "limit=1",
+            "-o",
+            "resolved.toml",
+        ],
+        b"",
+    );
+    assert!(output.status.success(), "{:?}", output);
+    let resolved = fs::read_to_string(root.join("resolved.toml")).unwrap();
+    let plan: toml::Value = toml::from_str(&resolved).unwrap();
+    assert_eq!(plan["version"].as_integer(), Some(1));
+    let steps = plan["steps"].as_array().unwrap();
+    assert_eq!(
+        steps[0]["contains"].as_str(),
+        Some(literal.split_once('=').unwrap().1)
+    );
+    assert_eq!(steps[0]["context"].as_integer(), Some(0));
+    assert_eq!(steps[1]["lines"].as_integer(), Some(1));
+    assert!(steps.iter().all(|step| step.get("bind").is_none()));
+    let replay = invoke(root, &["data", "--recipe", "resolved.toml"], input);
+    assert!(replay.status.success(), "{:?}", replay);
+    assert_eq!(replay.stdout, b"x={{var}} \"[steps]\"\n");
+}
+
+#[test]
+fn invalid_recipe_parameters_fail_before_input_and_preserve_output() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    fs::write(
+        root.join("logs.toml"),
+        include_str!("../docs/examples/log-context.toml"),
+    )
+    .unwrap();
+    fs::write(root.join("existing.txt"), "keep\n").unwrap();
+    let invalid = [
+        (vec![], "missing recipe parameter needle"),
+        (
+            vec!["needle=ERROR", "extra=PRIVATE_VALUE"],
+            "unknown recipe parameter extra",
+        ),
+        (
+            vec!["needle=ERROR", "needle=PRIVATE_VALUE"],
+            "duplicate recipe parameter needle",
+        ),
+        (
+            vec!["needle=ERROR", "nearby=PRIVATE_VALUE"],
+            "unsigned decimal line count",
+        ),
+        (vec!["needle=ERROR", "limit=0"], "invalid (lines-tail)"),
+    ];
+    for (variables, message) in invalid {
+        let mut args = vec![
+            "data",
+            "--recipe",
+            "logs.toml",
+            "-i",
+            "missing.log",
+            "-o",
+            "existing.txt",
+            "--force",
+        ];
+        for variable in variables {
+            args.extend(["--var", variable]);
+        }
+        let result = invoke(root, &args, b"");
+        assert!(
+            !result.status.success() && result.stdout.is_empty(),
+            "{:?}",
+            result
+        );
+        let error = String::from_utf8(result.stderr).unwrap();
+        assert!(error.contains(message), "{error}");
+        assert!(
+            !error.contains("missing.log") && !error.contains("PRIVATE_VALUE"),
+            "{error}"
+        );
+        assert_eq!(
+            fs::read_to_string(root.join("existing.txt")).unwrap(),
+            "keep\n"
+        );
+    }
+}
+
+#[test]
+fn recipe_bindings_cannot_replace_operations_or_mix_text_and_counts() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    for (definition, message) in [
+        (
+            "version=1\n[[steps]]\noperation='trim'\nbind={contains='word'}\n",
+            "invalid recipe TOML",
+        ),
+        (
+            "version=2\n[[steps]]\noperation='trim'\nbind={operation='PRIVATE_VALUE'}\n",
+            "invalid recipe TOML",
+        ),
+        (
+            "version=2\n[[steps]]\noperation='lines-include'\nbind={contains='v',context='v'}\n",
+            "cannot bind both text and line counts",
+        ),
+    ] {
+        fs::write(root.join("invalid.toml"), definition).unwrap();
+        let result = invoke(
+            root,
+            &[
+                "data",
+                "--show-plan",
+                "--recipe",
+                "invalid.toml",
+                "-o",
+                "result.toml",
+            ],
+            b"",
+        );
+        assert!(
+            !result.status.success() && result.stdout.is_empty(),
+            "{:?}",
+            result
+        );
+        let error = String::from_utf8(result.stderr).unwrap();
+        assert!(
+            error.contains(message) && !error.contains("PRIVATE_VALUE"),
+            "{error}"
+        );
+        assert!(!root.join("result.toml").exists());
+    }
 }
 
 #[test]
@@ -756,7 +915,7 @@ fn complete_recipe_and_option_validation_happens_before_reading_data() {
     let root = tempfile::tempdir().unwrap();
     let root = root.path();
     let recipes = [
-        "version=2\n[[steps]]\noperation='trim'\n",
+        "version=3\n[[steps]]\noperation='trim'\n",
         "version=1\nsteps=[]\n",
         "version=1\n[[steps]]\noperation='shell'\n",
         "version=1\n[[steps]]\noperation='trim'\nreverse=true\n",
@@ -996,7 +1155,7 @@ fn preview_rejects_invalid_plans_before_preparing_output_and_hides_definition_va
     let root = root.path();
     std::fs::write(root.join("keep.toml"), b"original plan\r\n").unwrap();
     for spec in [
-        "version=2\n[[steps]]\noperation='trim'\n".to_owned(),
+        "version=3\n[[steps]]\noperation='trim'\n".to_owned(),
         "version=1\nsteps=[]\n".into(),
         "version=1\n[[steps]]\noperation='trim'\n[[steps]]\noperation='dedupe'\nreverse=true\n"
             .into(),

@@ -3,9 +3,10 @@ use crate::transforms::{self, Operation, Step};
 use anyhow::{Context, Result, bail};
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
-use std::{io::Read, path::Path};
+use std::{collections::BTreeMap, io::Read, path::Path};
 
 const MAX_RECIPE: u64 = 64 * 1024;
+const MAX_PARAMETERS: usize = 16;
 
 // Embed reviewed source examples so installed binaries need no companion recipe files.
 const BUILTINS: [(&str, &str, &str); 7] = [
@@ -57,15 +58,154 @@ pub fn list() -> String {
 
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-struct Recipe {
+struct Recipe<T = Step> {
     version: u32,
-    steps: Vec<Step>,
+    steps: Vec<T>,
+}
+
+#[derive(Deserialize)]
+struct RecipeVersion {
+    version: u32,
+}
+
+#[derive(Deserialize)]
+struct TemplateStep {
+    #[serde(default)]
+    bind: BTreeMap<BoundField, String>,
+    #[serde(flatten)]
+    arguments: toml::Table,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum BoundField {
+    Pointer,
+    Contains,
+    Equals,
+    AtLeast,
+    AtMost,
+    Context,
+    Lines,
+}
+
+impl BoundField {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Pointer => "pointer",
+            Self::Contains => "contains",
+            Self::Equals => "equals",
+            Self::AtLeast => "at_least",
+            Self::AtMost => "at_most",
+            Self::Context => "context",
+            Self::Lines => "lines",
+        }
+    }
+
+    fn uses_count(self) -> bool {
+        matches!(self, Self::Context | Self::Lines)
+    }
+
+    fn parse_value(self, name: &str, value: &str) -> Result<toml::Value> {
+        if !self.uses_count() {
+            return Ok(toml::Value::String(value.to_owned()));
+        }
+        let count = value
+            .parse::<u32>()
+            .ok()
+            .filter(|_| value.bytes().all(|b| b.is_ascii_digit()))
+            .with_context(|| {
+                format!("recipe parameter {name} must be an unsigned decimal line count")
+            })?;
+        Ok(toml::Value::Integer(i64::from(count)))
+    }
+}
+
+fn parse_recipe<'a, T: Deserialize<'a>>(text: &'a str) -> Result<T> {
+    toml::from_str(text).map_err(|error| crate::definition::toml_error(&error, text, "recipe"))
+}
+
+fn bind_recipe(steps: Vec<TemplateStep>, variables: &[String]) -> Result<Vec<Step>> {
+    use crate::definition::valid_variable;
+
+    if steps.is_empty() || steps.len() > transforms::MAX_STEPS {
+        bail!("a data pipeline requires 1-16 steps");
+    }
+    let mut names = BTreeMap::new();
+    for step in &steps {
+        for (&field, name) in &step.bind {
+            if !valid_variable(name) {
+                bail!(
+                    "invalid recipe parameter name in bind; use 1-32 ASCII identifier characters"
+                );
+            }
+            let count = field.uses_count();
+            if names
+                .insert(name.clone(), count)
+                .is_some_and(|prior| prior != count)
+            {
+                bail!("recipe parameter {name} cannot bind both text and line counts");
+            }
+            if step.arguments.get(field.name()).is_some_and(|fallback| {
+                if count {
+                    !fallback.is_integer()
+                } else {
+                    !fallback.is_str()
+                }
+            }) {
+                bail!("recipe parameter {name} has an incompatible fallback type");
+            }
+        }
+    }
+    if names.len() > MAX_PARAMETERS || variables.len() > MAX_PARAMETERS {
+        bail!("a recipe supports at most {MAX_PARAMETERS} parameters");
+    }
+    let mut values = BTreeMap::new();
+    for argument in variables {
+        let (name, value) = argument
+            .split_once('=')
+            .context("--var requires NAME=VALUE")?;
+        if !valid_variable(name) {
+            bail!("invalid --var name; use 1-32 ASCII identifier characters");
+        }
+        if !names.contains_key(name) {
+            bail!("unknown recipe parameter {name}");
+        }
+        if value.len() > 4096 {
+            bail!("recipe parameter {name} exceeds 4096 UTF-8 bytes");
+        }
+        if values.insert(name, value).is_some() {
+            bail!("duplicate recipe parameter {name}");
+        }
+    }
+    steps
+        .into_iter()
+        .enumerate()
+        .map(|(index, step)| {
+            let mut arguments = step.arguments;
+            for (field, name) in step.bind {
+                if let Some(&value) = values.get(name.as_str()) {
+                    arguments.insert(field.name().to_owned(), field.parse_value(&name, value)?);
+                } else if !arguments.contains_key(field.name()) {
+                    bail!("missing recipe parameter {name}; use --var {name}=VALUE");
+                }
+            }
+            // Converted TOML may contain arbitrary literals. Keep deserialization diagnostics structural.
+            toml::Value::Table(arguments).try_into().map_err(|_| {
+                anyhow::anyhow!("invalid recipe fields or types in step {}", index + 1)
+            })
+        })
+        .collect()
 }
 
 pub struct Plan(Vec<Step>);
 
 impl Plan {
-    pub fn prepare(single: Option<Step>, steps: &[String], recipe: Option<&Path>) -> Result<Self> {
+    pub fn prepare(
+        single: Option<Step>,
+        steps: &[String],
+        recipe: Option<&Path>,
+        variables: &[String],
+    ) -> Result<Self> {
         let plan = if let Some(step) = single {
             vec![step]
         } else if let Some(path) = recipe {
@@ -94,12 +234,12 @@ impl Plan {
             }
             let text = std::str::from_utf8(&bytes).context("recipe must be UTF-8")?;
             let text = text.strip_prefix('\u{feff}').unwrap_or(text);
-            let file: Recipe = toml::from_str(text)
-                .map_err(|error| crate::definition::toml_error(&error, text, "recipe"))?;
-            if file.version != 1 {
-                bail!("unsupported recipe version; expected version = 1");
+            match parse_recipe::<RecipeVersion>(text)?.version {
+                1 if !variables.is_empty() => bail!("--var requires a version-2 data recipe"),
+                1 => parse_recipe::<Recipe>(text)?.steps,
+                2 => bind_recipe(parse_recipe::<Recipe<TemplateStep>>(text)?.steps, variables)?,
+                _ => bail!("unsupported recipe version; expected version = 1 or 2"),
             }
-            file.steps
         } else {
             if steps.len() > transforms::MAX_STEPS {
                 bail!("a data pipeline requires 1-16 steps");

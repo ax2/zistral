@@ -68,7 +68,7 @@ pub struct Cli {
         help_heading = "Task presets"
     )]
     presets: Option<PathBuf>,
-    /// Set a literal preset variable; repeat for multiple NAME=VALUE pairs
+    /// Set a literal preset variable or version-2 data recipe parameter; repeat NAME=VALUE
     #[arg(long = "var", global = true, help_heading = "Task presets")]
     vars: Vec<String>,
     /// Model identifier, overrides configuration
@@ -237,7 +237,7 @@ enum Commands {
         /// Chain a native operation; repeat in execution order (lines-head:N, lines-tail:N, sort:reverse, json-redact:/path, jsonl-redact:/path, json-select:/path, jsonl-select:/path, jsonl-dedupe:/path, jsonl-sort:/path, jsonl-sort-int:/path, jsonl-count-by:/path and line filters are supported)
         #[arg(long = "step", conflicts_with = "recipe")]
         steps: Vec<String>,
-        /// Read a versioned TOML recipe file or a qualified builtin:NAME reference
+        /// Read a TOML recipe file or builtin:NAME; version 2 accepts --var NAME=VALUE
         #[arg(long)]
         recipe: Option<PathBuf>,
         /// Validate and export a reusable TOML plan without reading data or running steps
@@ -453,7 +453,7 @@ fn run(mut cli: Cli) -> Result<()> {
     }) = &cli.command
     {
         if cli.preset.is_some()
-            || !cli.vars.is_empty()
+            || (!cli.vars.is_empty() && recipe.is_none())
             || cli.count
             || cli.select.is_some()
             || cli.json
@@ -490,7 +490,12 @@ fn run(mut cli: Cli) -> Result<()> {
         let plan = if *list_recipes {
             None
         } else {
-            Some(recipes::Plan::prepare(single, steps, recipe.as_deref())?)
+            Some(recipes::Plan::prepare(
+                single,
+                steps,
+                recipe.as_deref(),
+                &cli.vars,
+            )?)
         };
         let target = prepare_output(&cli)?;
         let output = match plan {
@@ -555,7 +560,9 @@ fn run(mut cli: Cli) -> Result<()> {
         return write_output(&output);
     }
     if cli.command.is_some() && !cli.vars.is_empty() {
-        bail!("--var is only supported for preset tasks and zi presets render");
+        bail!(
+            "--var is supported for preset tasks, presets render/export and version-2 data recipes"
+        );
     }
     if let Some(command) = &cli.command {
         if !matches!(command, Commands::Config { .. }) {

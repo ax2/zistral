@@ -1,4 +1,4 @@
-use crate::{Cli, config, definition, output, ui};
+use crate::{Cli, config, definition, definition::valid_variable, output, ui};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -51,16 +51,6 @@ fn builtins() -> BTreeMap<String, Preset> {
         description: description.into(), prompt: prompt.into(), json,
         defaults: default.into_iter().map(|(k,v)| (k.into(),v.into())).collect(),
     })).collect()
-}
-
-fn valid_variable(name: &str) -> bool {
-    let mut bytes = name.bytes();
-    name.len() <= 32
-        && bytes
-            .next()
-            .is_some_and(|b| b.is_ascii_alphabetic() || b == b'_')
-        && bytes.all(|b| b.is_ascii_alphanumeric() || b == b'_')
-        && name != "input"
 }
 
 enum Part<'a> {

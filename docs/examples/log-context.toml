@@ -1,0 +1,11 @@
+version = 2
+
+[[steps]]
+operation = "lines-include"
+context = 1
+bind = { contains = "needle", context = "nearby" }
+
+[[steps]]
+operation = "lines-tail"
+lines = 20
+bind = { lines = "limit" }

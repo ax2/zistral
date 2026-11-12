@@ -137,7 +137,7 @@ and `--recipe`; pipeline direction belongs to its individual step, not a global 
 The entire recipe and all step options are checked before opening the data input or
 preparing its output. Unknown fields and unsupported versions/operations fail. A recipe
 does not name input/output paths; use `-i` and `-o` explicitly. No recursive includes,
-variables, shell commands, expressions, implicit project discovery or model requests.
+shell commands, expressions, implicit project discovery or model requests.
 Definitions are not sent to models and do not add model tools or project permissions.
 
 Only the final result reaches stdout or `-o`. A later JSON/type/size failure exits nonzero,
@@ -156,6 +156,50 @@ is zero bytes. JSON formatting preserves numeric/string tokens, key order and re
 
 配方文件是用户维护的步骤定义，不是会话、记忆或脚本引擎。团队可以将它纳入版本控制、审阅和
 复用；没有读取过往任务、推测偏好或保存输入数据的行为。
+
+## Pass parameters to a recipe / 每次运行传入参数（开发中）
+
+When the steps stay the same and only a match value or a line count changes,
+save a version-2 recipe and use `--var NAME=VALUE`. The
+[log-context example](examples/log-context.toml) keeps lines near the specified
+substring, then selects the last part of that filtered output.
+
+```toml
+version = 2
+
+[[steps]]
+operation = "lines-include"
+context = 1
+bind = { contains = "needle", context = "nearby" }
+
+[[steps]]
+operation = "lines-tail"
+lines = 20
+bind = { lines = "limit" }
+```
+
+```sh
+cat app.log | zi data --recipe log-context.toml --var needle=TIMEOUT
+zi data --recipe log-context.toml --var needle=DENIED --var nearby=2 --var limit=10 -i app.log
+zi data --show-plan --recipe log-context.toml --var needle=TIMEOUT -o resolved.toml
+```
+
+`bind` maps a step field to a parameter name. A literal value in the same step
+is the fallback for that field. In this example `needle` is required, while
+`nearby` and `limit` default to 1 and 20. Bindings accept `pointer`, `contains`,
+`equals`, `at_least` and `at_most` as text, and `context` and `lines` as
+unsigned decimal counts. The resolved value still has to satisfy the operation's
+normal rules, including exact signed integer comparisons for JSONL filters.
+
+Names use 1–32 ASCII identifier characters and cannot be `input`. A recipe
+supports up to 16 distinct names. Repeat `--var` once per supplied name, with
+up to 4096 UTF-8 bytes per value. A name reused across steps must consistently
+bind text or consistently bind line counts. The CLI rejects unknown, duplicate
+and missing required values before it opens the input or prepares output.
+Version-1 files and the current embedded recipes use literal values.
+
+参数替换只发生在标有 `bind` 的字段，写入的值按字面处理。导出的 `resolved.toml`
+是含本次参数值的版本 1 配方，适合复查或重跑；分享前应检查其中是否包含不宜公开的匹配词。
 
 ## Inspect and export a plan before processing data / 先看计划，再处理数据
 
