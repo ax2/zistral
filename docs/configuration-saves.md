@@ -1,4 +1,4 @@
-# Configuration save conflicts (unreleased main)
+# Configuration save conflicts (v0.34.0)
 
 Opening `zi config` captures the configuration as it existed at startup. If a
 second terminal saves a change before that wizard finishes, the old wizard exits

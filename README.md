@@ -13,10 +13,9 @@ git diff | zi "Write a concise commit message"
 cat notes.txt | zi "Summarize in three sentences" > summary.txt
 ```
 
-**Unreleased main:** the [grouped service-setup candidate](docs/releases/service-setup-candidate.md)
-collects eight related configuration, diagnosis, request-control and credential
-improvements with exact CI/native evidence. Stable v0.33.0 downloads do not contain
-that batch; ordinary development commits do not publish a new version.
+**v0.34.0** adds model configuration and diagnostics, saved request limits,
+and offline pipelines for investigating application and HTTP logs.
+See the [changelog](CHANGELOG.md#0340--2026-11-12) for the changes and downgrade steps.
 A [Chinese walkthrough](docs/service-setup.zh-CN.md) covers setup, offline checks,
 preview, pipes/files and maintenance, including a PowerShell report consumer.
 
@@ -27,10 +26,10 @@ Download a native installer from [Releases](https://github.com/ax2/zistral/relea
 | Platform | Package | Installation |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | Per-user installer; adds PATH and a Start menu launcher; no administrator required |
-| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.33.0-linux-amd64.deb` |
+| Debian/Ubuntu x64 | `linux-amd64.deb` | `sudo apt install ./zistral-v0.34.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | Open the package; installs `/usr/local/bin/zi` |
 
-Then type `zi`. On first launch, choose an existing Codex, WorkBuddy or dsh configuration,
+Then type `zi`. On first launch, choose an existing Codex, WorkBuddy, dsh or Claude Code API configuration,
 or enter your service and API key. No Rust, Python, Node.js or VC++ redistributable is needed.
 Windows builds target Windows 10+ / Windows Server 2016+ (x64).
 Windows setup can launch zi immediately; reopen existing terminals to refresh PATH.
@@ -64,7 +63,7 @@ Portable archives contain one executable plus documentation. Extract zi (zi.exe 
 Build from source with Rust 1.85+ (a current stable toolchain is recommended):
 
 ```sh
-cargo install --git https://github.com/ax2/zistral --tag v0.33.0 --locked
+cargo install --git https://github.com/ax2/zistral --tag v0.34.0 --locked
 ```
 
 The package is named `zistral`; the installed command is `zi`. It is not yet
@@ -113,7 +112,7 @@ terminal and does not consume piped data.
 **Unreleased main:** invalid saved/CLI service, protocol or model defaults are
 hidden before prompting and require an explicit valid replacement. Control-bearing
 defaults/metadata are escaped for display; valid raw values are retained by Enter.
-See [setup display](docs/terminal-output.md#setup-defaults-and-metadata-labels-unreleased).
+See [setup display](docs/terminal-output.md#setup-defaults-and-metadata-labels-v0340).
 
 To use the single word `config` as a
 model instruction instead of the setup command, use `zi -- config`.
@@ -145,7 +144,7 @@ future adapter update.
 Supported protocols are `chat`, `responses`, and `anthropic` (Anthropic Messages,
 including dsh's `anthropic-messages` providers). Anthropic roots without `/v1`
 use `/v1/messages`; roots already ending in `/v1` use `/messages`.
-Anthropic requests default to a 4096-token output limit. On unreleased `main`,
+Anthropic requests default to a 4096-token output limit. Since v0.34.0,
 `--max-output-tokens` also supports explicit Chat/Responses limits; see
 [output budgets](docs/output-budgets.md) for modern/legacy Chat selection and per-turn semantics.
 WorkBuddy custom-protocol URLs are preserved as an exact `endpoint` in the saved config;
@@ -233,10 +232,6 @@ Legacy settings remain available as `default`; `zi use default` restores them.
 Names contain 1–64 ASCII letters/digits/underscores/hyphens; at most 128 named profiles.
 Selection precedence: `--profile` > `ZI_PROFILE` > saved active profile. Existing model/service/API/key
 overrides still apply. Interactive shortcuts: `/models`, `/use NAME`, `/doctor`.
-
-**Development note (unreleased):** the refined source report and minimal bounded probe below
-are on `main`; the published v0.33.0 retains its original diagnostics. They will ship together
-with the next reviewed batch, rather than as separate releases.
 
 Doctor reports the config path, selected profile, model, protocol, service host and key presence.
 `API Key source` identifies the actual winning environment-variable name, saved profile, or no
@@ -419,7 +414,7 @@ and exports the top 20 groups as CSV. Category/ID/time keys remain strings. Time
 normalize formats/timezones first. Names are exact and case-sensitive. `--list-recipes`
 does not read stdin; explicit `--input` and processing options are rejected.
 
-The development build also includes `builtin:top-error-codes` for application logs
+v0.34.0 adds `builtin:top-error-codes` for application logs
 and `builtin:top-http-5xx-codes` for HTTP request logs. Both emit ranked JSONL.
 See the [log fixtures and export examples](docs/data-recipes.md).
 
@@ -431,7 +426,7 @@ zi data --show-plan --recipe docs/examples/cleanup.toml
 zi data --show-plan --step trim --step dedupe --step sort:reverse -o cleanup.toml
 ```
 
-Use one operation, repeated `--step` in execution order, or an explicit `--recipe` file (or qualified builtin reference in development builds).
+Use one operation, repeated `--step` in execution order, or an explicit `--recipe` file (or a qualified builtin reference).
 Recipes have `version = 1` and `[[steps]]` entries with `operation` and optional `reverse`
 (sort, jsonl-sort or jsonl-sort-int only). All definitions are checked before reading input. Only the complete final
 result is emitted; a failed later step emits no intermediate stdout and does not replace
@@ -611,8 +606,7 @@ tools. The model chooses the tool/arguments and formats the final answer;
 * Only the final result goes to stdout; a missing final newline is appended.
   An explicit `--output FILE` saves it instead and leaves stdout empty.
 * Errors and `--verbose` tool progress go to stderr. No spinner or banner.
-  In the development build, closing a task status pipe preserves the task exit
-  code and any completed file output.
+  Closing a task status pipe preserves the task exit code and any completed file output.
 * Exit `0`: success (including a downstream closed pipe). Exit `1`: runtime
   failure. Exit `2`: invalid command-line syntax.
 * `--json` validates the entire answer before emitting compact JSON; invalid

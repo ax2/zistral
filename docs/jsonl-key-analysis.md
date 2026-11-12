@@ -105,7 +105,7 @@ offline operations/preview do not. No arbitrary model-supplied scripts are execu
   you explicitly deduplicate first. There is no sum, numeric sort or multidimensional
   grouping hidden behind the command.
 
-The development build supports `jsonl-count-by --pointer /error/code --if-present`
+v0.34.0 supports `jsonl-count-by --pointer /error/code --if-present`
 to skip valid records with an absent key. A recipe can set `if_present = true` on
 the count step. A present null or any other nonstring value still fails.
 Sorting and deduplication require a key in every record.

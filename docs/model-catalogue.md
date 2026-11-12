@@ -1,7 +1,6 @@
-# Service model catalogue (unreleased)
+# Service model catalogue (v0.34.0)
 
-This feature is on unreleased `main` for the next grouped release. Installed
-v0.33.0 still supports the offline saved-profile list only.
+The remote catalogue is available in v0.34.0. v0.33.0 supports the offline saved-profile list.
 
 ```sh
 zi models                        # Saved profiles, offline; unchanged

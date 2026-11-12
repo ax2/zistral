@@ -67,7 +67,7 @@ observed destination changes before replacement. Invalid definitions, collisions
 combined-limit failures and detected edits preserve the old library. Destination
 links/devices/directories are rejected. New Unix files use mode `0600`; existing Unix
 permission bits are preserved. Windows follows the destination directory's inherited
-permissions. The unreleased lock serializes cooperating zi imports on the same
+permissions. The import lock added in v0.34.0 serializes cooperating zi imports on the same
 local path; it cannot serialize an editor/older zi that ignores it or guarantee a
 transaction across arbitrary final-window external changes or different aliases.
 

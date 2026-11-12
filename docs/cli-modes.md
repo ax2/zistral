@@ -61,7 +61,7 @@ resolution. Incompatible preset tasks fail before input/output or model requests
 interactive rejected task clears any retained result. The output is a version-1 TOML
 recipe; no data transformation runs. Existing exact-mode conflicts remain.
 
-## Finding options in help (unreleased)
+## Finding options in help (v0.34.0)
 
 `zi --help` groups existing options by input/output, task presets, models/service,
 result/preview behavior, request controls, display, project tools and offline

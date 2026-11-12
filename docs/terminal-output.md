@@ -65,9 +65,9 @@ Since v0.29.1, internal Chat/Anthropic string accumulation avoids repeated prefi
 clones. Display/cleaning, Responses, callbacks and output/error contracts stay unchanged;
 controlled decoder measurements are [documented separately](stream-performance.md).
 
-## Credential-reference messages (unreleased)
+## Credential-reference messages (v0.34.0)
 
-The next grouped release uses quoted JSON-style names in configuration credential
+v0.34.0 uses quoted JSON-style names in configuration credential
 notices, the final environment-override warning and missing-key errors, sharing
 doctor's control escaping. Legacy/imported environment names containing newlines,
 ESC, DEL or C1 remain identifiable without sending those controls to a terminal.
@@ -77,7 +77,7 @@ The saved reference, lookup precedence, actual request authentication and task
 pipe/file data are unchanged. New CLI variable names remain portable; this display
 rule does not enable new source formats or automatically migrate existing profiles.
 
-## Setup defaults and metadata labels (unreleased)
+## Setup defaults and metadata labels (v0.34.0)
 
 Configuration prompt defaults, config-file paths, saved-model summaries, human
 doctor fields and rich model/directory labels keep their ordinary appearance for
@@ -103,7 +103,7 @@ JSON values, file bytes, credential precedence and tool permissions are unchange
 It does not infer private URL path values, validate a model's service capability,
 add a source format, save task history or introduce a runtime dependency.
 
-## CLI help environment metadata (unreleased)
+## CLI help environment metadata (v0.34.0)
 
 Generated `-h`, `--help` and `help COMMAND` output keeps the supported environment
 variable names while hiding their current values. This covers model, service URL,

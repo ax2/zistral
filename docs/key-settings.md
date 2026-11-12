@@ -1,7 +1,6 @@
-# Maintain API-key settings offline (unreleased)
+# Maintain API-key settings offline (v0.34.0)
 
-These commands are on unreleased `main` for the next grouped release. Stable
-v0.33.0 does not include them. They edit an existing zi configuration/profile;
+These commands edit an existing zi configuration/profile;
 they do not create a profile, start a wizard or contact a model.
 
 ```sh

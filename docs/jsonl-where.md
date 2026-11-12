@@ -34,7 +34,7 @@ selects a whole JSONL value and can match root string records.
 
 ## Failure is complete, including discarded records
 
-By default, a missing pointer fails the entire operation. The development build
+By default, a missing pointer fails the entire operation. v0.34.0
 supports explicit `--if-present` or recipe `if_present = true` to skip valid
 records with an absent path. A missing field, non-container ancestor or
 out-of-range canonical array index counts as absent. A present null still fails

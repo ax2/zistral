@@ -1,7 +1,6 @@
-# Maintain saved model profiles (unreleased)
+# Maintain saved model profiles (v0.34.0)
 
-These commands are on unreleased `main`, accumulating for the next grouped
-release. Installed v0.33.0 does not include them. They maintain zi's own saved
+These commands maintain zi's own saved
 named profiles offline; they do not contact providers or imported source agents.
 
 ```sh

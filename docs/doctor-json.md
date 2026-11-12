@@ -1,6 +1,6 @@
-# Structured diagnostics (unreleased)
+# Structured diagnostics (v0.34.0)
 
-`zi doctor --json` is on unreleased `main` for the next grouped release. It emits
+`zi doctor --json` emits
 one compact, newline-terminated JSON object for scripts and pipes; normal
 `zi doctor` and interactive `/doctor` keep their human-readable output.
 

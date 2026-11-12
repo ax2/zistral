@@ -44,7 +44,7 @@ Include `ERROR`, exclude `healthcheck`, then dedupe yields `ERROR start` once. W
 the dedupe step, the repeated line stays. This makes the order and meaning of each step
 explicit rather than silently combining selection, sorting and cleanup.
 
-In the development build, `lines-include --context N` also keeps up to N lines before
+Since v0.34.0, `lines-include --context N` also keeps up to N lines before
 and after each match. Overlapping windows keep each source line once. Blank
 neighbors and indentation are preserved. The output contains no separators.
 Use 0 for matching lines only, or any integer up to 100000. The same option is

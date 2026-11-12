@@ -21,7 +21,7 @@ key order and unrelated duplicate keys; output order stays unchanged, with LF
 endings. `0` and `-0` match each other without rewriting either source spelling.
 There is no machine-integer precision bound, floating-point conversion or coercion.
 
-The development build also accepts inclusive bounds. Either bound may be used alone.
+Since v0.34.0, the integer filter also accepts inclusive bounds. Either bound may be used alone.
 With both bounds, the lower bound must be less than or equal to the upper bound.
 Use bounds separately from `--equals`.
 
@@ -35,8 +35,7 @@ quoted JSON integer literal text, just like `equals`.
 
 Every selected value must be an integer literal. A string `"2"`, `2.0`, `2e0`,
 boolean, null or container is an error rather than a nonmatching record. Missing or
-ambiguous paths and invalid array indexes also fail by default. In the development
-build, `--if-present` or recipe `if_present = true` skips only absent paths.
+ambiguous paths and invalid array indexes also fail by default. Since v0.34.0, `--if-present` or recipe `if_present = true` skips only absent paths.
 A present noninteger, ambiguous path or invalid array index still fails.
 The original JSON and Unicode
 strings are checked even in discarded records. A malformed later record discards

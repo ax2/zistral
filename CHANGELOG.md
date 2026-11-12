@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.34.0 — 2026-11-12
+
+Set up model access, verify it from scripts, and investigate logs with native offline pipelines.
+
+### Model setup and diagnostics
+
+- Import personal Claude Code API settings alongside Codex, WorkBuddy/CodeBuddy and dsh. Imports preserve usable environment-variable references so rotated keys take effect on the next run.
+- Rename or remove named profiles, change their credential references, and clear saved keys from the command line.
+- Use `doctor --json` for a versioned, offline report with typed configuration errors and the effective credential source. Use `doctor --probe` for an explicit bounded request with no tools, or `models --remote --json` to list models advertised by the configured service. Connection errors omit private gateway paths.
+- Set a per-request output cap for OpenAI Chat, OpenAI Responses and Anthropic Messages. Save the cap per profile, override or ignore it for one invocation, or clear it. Chat can explicitly select the legacy limit field.
+- Detect concurrent configuration and preset edits. Reads through symbolic links remain supported, and saves require the real file path. A closed diagnostics pipe preserves the exit code of a completed save or failed task.
+
+### Offline log pipelines
+
+- Rank application error codes or HTTP 5xx error codes with the new `builtin:top-error-codes` and `builtin:top-http-5xx-codes` recipes. Export and edit either recipe for your own log format.
+- Use inclusive integer bounds for JSONL filters. Explicitly skip missing paths in string and integer filters and string frequency counts. String filtering validates Unicode across every record, including discarded records, in both strict and optional modes.
+- Keep surrounding lines with `data lines-include --context N` when extracting literal matches from text logs.
+
+Before downgrading to v0.33.0, use this build to clear saved output budgets in each affected profile, including `default` and inactive profiles. Run `zi config --name NAME --clear-output-budget` for each one.
+
 ## 0.33.0 — 2026-11-04
 
 - Exchange explicitly quoted tab-separated tables with `tsv-to-jsonl` and

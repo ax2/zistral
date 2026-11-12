@@ -1,8 +1,7 @@
-# Service setup: a complete workflow (unreleased)
+# Service setup: development verification for v0.34.0
 
 The service diagnostics, saved request budgets, credential references and remote catalogue described here
-are on unreleased `main`. They are accumulating for a grouped release; v0.33.0
-does not include them. A development commit or passing check is not publication.
+were verified before the v0.34.0 release. This note records pre-release tests.
 For step-by-step usage, see the [Chinese walkthrough](service-setup.zh-CN.md),
 including explicit-network boundaries and a PowerShell diagnostic consumer.
 

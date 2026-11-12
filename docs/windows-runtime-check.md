@@ -1,8 +1,8 @@
-# Windows standalone payload check (unreleased)
+# Windows standalone payload check (v0.34.0)
 
 The Windows x64 build already enables `+crt-static` in
 [Cargo configuration](../.cargo/config.toml). The published v0.33.0 executable and
-the current candidate were independently inspected: both import only the eight
+a release candidate were independently inspected: both import only the eight
 reviewed Windows modules below. No missing Visual C++ redistributable was found;
 this change adds a packaging regression gate, not a runtime or installer payload.
 

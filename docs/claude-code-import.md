@@ -1,6 +1,6 @@
-# Import Claude Code API settings (unreleased)
+# Import Claude Code API settings (v0.34.0)
 
-The development build of zi can import personal Claude Code settings for services
+zi can import personal Claude Code settings for services
 that accept Anthropic Messages requests with an `x-api-key`. Use the same wizard
 as for the other model sources.
 

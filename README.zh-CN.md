@@ -10,10 +10,8 @@ cat notes.txt | zi "总结为三句话" > summary.txt
 git diff | zi "生成一句简洁的提交说明"
 ```
 
-**开发中，尚未发版：** `main` 已合并 8 项相关改进，涵盖配置校验、请求上限与按模型保存、
-结构化诊断、远端模型目录、凭据维护与引用导入，以及多终端保存冲突保护。
-[整批评审说明](docs/releases/service-setup-candidate.md)列出完整场景、兼容性和三平台验证。
-稳定下载仍为 v0.33.0，不包含这批改进；日常提交不会触发发版。
+**v0.34.0** 更新了模型配置、诊断和请求上限，也增加了应用日志与 HTTP 日志的离线分析配方。
+具体变更和降级步骤见[本版说明](CHANGELOG.md#0340--2026-11-12)。
 [中文操作指南](docs/service-setup.zh-CN.md)串起配置、离线诊断、请求预览、管道调用和后续维护，
 包含可检查退出码的 PowerShell 示例。
 
@@ -24,7 +22,7 @@ git diff | zi "生成一句简洁的提交说明"
 | 平台 | 安装包 | 安装方法 |
 | --- | --- | --- |
 | Windows x64 | `windows-x64-setup.exe` | 双击安装，无需管理员权限，自动添加用户 PATH 和开始菜单入口 |
-| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.33.0-linux-amd64.deb` |
+| Linux x64 / Debian、Ubuntu | `linux-amd64.deb` | `sudo apt install ./zistral-v0.34.0-linux-amd64.deb` |
 | macOS Apple Silicon | `macos-arm64.pkg` | 双击安装，命令放到 `/usr/local/bin/zi` |
 
 Windows 构建面向 Windows 10+ / Windows Server 2016+（x64）。
@@ -60,7 +58,7 @@ zi config --manual   # 跳过检测，手动配置或修改现有设置
 - WorkBuddy：`~/.workbuddy/models.json`，兼容 `~/.codebuddy/models.json`。完整请求地址和自定义路径会正确处理。
 - dsh：`~/.dsh/profiles/*/cordis.yml` 与 `cordis.patch.yml`，合并模型 provider 配置，解析对应环境变量或 `.dsh/.credentials.yaml` 中的 API Key 引用。
 
-尚未发布的 `main` 还支持导入 [Claude Code 个人 API 配置](docs/claude-code-import.md)，适用于 Anthropic Messages 服务。
+v0.34.0 还支持导入 [Claude Code 个人 API 配置](docs/claude-code-import.md)，适用于 Anthropic Messages 服务。
 
 Codex 的 ChatGPT 账号登录与订阅凭据不会被当作 API Key 导入；没有普通 API Key 时需要补填。
 也不会导入 dsh 的浏览器会话或账号访问令牌，不执行任何来源的认证命令或插件。
@@ -273,7 +271,7 @@ zi data --recipe recent.toml -i events.jsonl
 未知的 `builtin:` 名称不会回退到本地文件。目录与预览不读取 stdin，不加载模型配置；
 目录模式拒绝显式 `--input` 和处理步骤。导出后可审阅、修改，再用显式文件路径执行。
 
-开发版本还内置 `builtin:top-error-codes` 和 `builtin:top-http-5xx-codes`，分别汇总
+v0.34.0 还内置 `builtin:top-error-codes` 和 `builtin:top-http-5xx-codes`，分别汇总
 应用错误日志和 HTTP 5xx 请求日志，按频次输出 JSONL。见[日志样例与配方导出](docs/data-recipes.md)。
 
 

@@ -1,6 +1,6 @@
-# Explicit model-output budgets (unreleased)
+# Explicit model-output budgets (v0.34.0)
 
-This capability is on `main` for the next grouped release. Published v0.33.0 only
+v0.33.0 only
 supports the older Anthropic-specific `--max-output-tokens` option. There is no new
 runtime, tokenizer, dependency or model-tool permission.
 

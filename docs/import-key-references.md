@@ -1,6 +1,6 @@
-# Imported API-key references (unreleased)
+# Imported API-key references (v0.34.0)
 
-This change is on unreleased `main` for the next grouped release. v0.33.0 imports
+v0.33.0 imports
 a resolved source key as a saved literal. New imports now preserve the selected
 environment-variable reference when it supplies the key, avoiding a plaintext
 snapshot in zi's configuration and allowing rotation between invocations.
