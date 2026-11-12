@@ -125,6 +125,35 @@ operation="jsonl-to-tsv"
                           http_logs + b'{"status":501,"error":{"code":null}}\n', success=False)
             assert not invalid.stdout and report_path.read_bytes() == expected_http
             checks.append('plan export: table replay, line context and integrated HTTP 5xx ranking')
+
+            log_context = 'builtin:log-context'
+            declared = run(['data', '--list-parameters', '--recipe', log_context])
+            assert not declared.stderr
+            parameters = json.loads(declared.stdout)
+            assert parameters['recipe_version'] == 2
+            assert parameters['parameters']['needle']['required'] is True
+            assert parameters['parameters']['nearby']['required'] is False
+            team_recipe = root/'team 日志.toml'
+            copied = run(['data', '--export-recipe', '--recipe', log_context, '-o', team_recipe])
+            assert not copied.stdout and not copied.stderr
+            original_template = team_recipe.read_bytes()
+            assert b'version = 2' in original_template and b'bind = ' in original_template
+            customized = original_template.replace(b'context = 1', b'context = 0', 1)
+            assert customized != original_template
+            team_recipe.write_bytes(customized)
+            log_input = 'before\r\n请求超时\r\nretry\r\n'.encode()
+            expected_log = '请求超时\n'.encode()
+            variable = ['--var', 'needle=超时']
+            direct = run(['data', '--recipe', team_recipe, *variable], log_input)
+            assert direct.stdout == expected_log and not direct.stderr
+            plan = run(['data', '--show-plan', '--recipe', team_recipe, *variable])
+            assert not plan.stderr and plan.stdout.startswith(b'version = 1\n')
+            replay = root/'reviewed 日志.toml'
+            replay.write_bytes(plan.stdout)
+            replayed = run(['data', '--recipe', replay], log_input)
+            assert replayed.stdout == expected_log and not replayed.stderr
+            checks.append('installed recipe reuse: discover, copy, customize and replay offline')
+
             projected = run(['data', 'jsonl-project', '--field', 'tag=/tag',
                              '--field-default', 'tag=""'], b'{"tag":null}\n{}\n')
             assert projected.stdout == b'{"tag":null}\n{"tag":""}\n' and not projected.stderr

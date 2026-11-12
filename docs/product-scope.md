@@ -267,4 +267,5 @@ resolved version-1 plan. This addresses reuse across runs without retaining prio
 input or output as model context.
 The parameter report exposes names, types and binding locations for scripts and
 recipe authors. An embedded log-context recipe puts the same workflow on the
-installed command line for everyday troubleshooting.
+installed command line for everyday troubleshooting. Definition export lets a
+team copy that recipe and edit its defaults while keeping the parameter bindings.

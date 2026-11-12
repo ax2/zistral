@@ -57,7 +57,7 @@ pub fn list() -> String {
     for (name, description, _) in BUILTINS {
         output.push_str(&format!("builtin:{name} — {description}\n"));
     }
-    output.push_str("\nParameters: zi data --list-parameters --recipe builtin:NAME\nInspect/export: zi data --show-plan --recipe builtin:NAME [-o recipe.toml]\nRun: zi data --recipe builtin:NAME -i INPUT [-o OUTPUT]\n");
+    output.push_str("\nParameters: zi data --list-parameters --recipe builtin:NAME\nCopy definition: zi data --export-recipe --recipe builtin:NAME [-o recipe.toml]\nPreview a run: zi data --show-plan --recipe builtin:NAME [--var NAME=VALUE]\nRun: zi data --recipe builtin:NAME -i INPUT [-o OUTPUT]\n");
     output
 }
 
@@ -160,7 +160,7 @@ fn check_step_count(count: usize) -> Result<()> {
     Ok(())
 }
 
-fn parameters(steps: &[TemplateStep]) -> Result<BTreeMap<&str, Parameter>> {
+fn parameters(steps: &[TemplateStep]) -> Result<BTreeMap<String, Parameter>> {
     use crate::definition::valid_variable;
 
     check_step_count(steps.len())?;
@@ -173,7 +173,7 @@ fn parameters(steps: &[TemplateStep]) -> Result<BTreeMap<&str, Parameter>> {
                 );
             }
             let value_type = field.value_type();
-            let parameter = names.entry(name.as_str()).or_insert_with(|| Parameter {
+            let parameter = names.entry(name.clone()).or_insert_with(|| Parameter {
                 value_type,
                 required: false,
                 bindings: Vec::new(),
@@ -255,7 +255,7 @@ enum RecipeDefinition {
     Template(Vec<TemplateStep>),
 }
 
-fn read_recipe(path: &Path) -> Result<RecipeDefinition> {
+fn read_recipe_source(path: &Path) -> Result<String> {
     let bytes = if let Some(name) = path.to_str().and_then(|text| text.strip_prefix("builtin:")) {
         let (_, _, definition) = BUILTINS
             .iter()
@@ -274,7 +274,10 @@ fn read_recipe(path: &Path) -> Result<RecipeDefinition> {
     if bytes.len() as u64 > MAX_RECIPE {
         bail!("recipe exceeds 64 KiB");
     }
-    let text = std::str::from_utf8(&bytes).context("recipe must be UTF-8")?;
+    String::from_utf8(bytes).context("recipe must be UTF-8")
+}
+
+fn parse_definition(text: &str) -> Result<RecipeDefinition> {
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     match parse_recipe::<RecipeVersion>(text)?.version {
         1 => Ok(RecipeDefinition::Literal(
@@ -287,20 +290,30 @@ fn read_recipe(path: &Path) -> Result<RecipeDefinition> {
     }
 }
 
-pub fn list_parameters(path: &Path) -> Result<String> {
-    let (recipe_version, parameters) = match read_recipe(path)? {
+fn declarations(definition: RecipeDefinition) -> Result<(u32, BTreeMap<String, Parameter>)> {
+    match definition {
         RecipeDefinition::Literal(steps) => {
             check_step_count(steps.len())?;
-            (1, serde_json::json!({}))
+            Ok((1, BTreeMap::new()))
         }
         RecipeDefinition::Template(steps) => {
-            let parameters = serde_json::to_value(parameters(&steps)?)?;
+            let parameters = parameters(&steps)?;
             for (index, step) in steps.into_iter().enumerate() {
                 decode_step(step.arguments, index)?;
             }
-            (2, parameters)
+            Ok((2, parameters))
         }
-    };
+    }
+}
+
+pub fn export_recipe(path: &Path) -> Result<String> {
+    let source = read_recipe_source(path)?;
+    declarations(parse_definition(&source)?)?;
+    Ok(source)
+}
+
+pub fn list_parameters(path: &Path) -> Result<String> {
+    let (recipe_version, parameters) = declarations(parse_definition(&read_recipe_source(path)?)?)?;
     let mut output = serde_json::to_string_pretty(&serde_json::json!({
         "version": 1,
         "recipe_version": recipe_version,
@@ -322,7 +335,7 @@ impl Plan {
         let plan = if let Some(step) = single {
             vec![step]
         } else if let Some(path) = recipe {
-            match read_recipe(path)? {
+            match parse_definition(&read_recipe_source(path)?)? {
                 RecipeDefinition::Literal(_) if !variables.is_empty() => {
                     bail!("--var requires a version-2 data recipe")
                 }

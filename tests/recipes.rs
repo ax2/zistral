@@ -286,6 +286,85 @@ fn embedded_log_context_reports_parameters_and_runs_without_companion_files() {
 }
 
 #[test]
+fn exported_builtin_retains_bindings_and_can_be_customized() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let exported = invoke(
+        root,
+        &[
+            "data",
+            "--export-recipe",
+            "--recipe",
+            "builtin:log-context",
+            "-o",
+            "team.toml",
+        ],
+        b"ignored input",
+    );
+    assert!(exported.status.success() && exported.stdout.is_empty() && exported.stderr.is_empty());
+    let original = fs::read(root.join("team.toml")).unwrap();
+    assert_eq!(
+        original,
+        include_bytes!("../docs/examples/log-context.toml")
+    );
+    let customized = String::from_utf8(original)
+        .unwrap()
+        .replace("context = 1", "context = 0");
+    fs::write(root.join("team.toml"), customized).unwrap();
+    let executed = invoke(
+        root,
+        &["data", "--recipe", "team.toml", "--var", "needle=TIMEOUT"],
+        b"before\nTIMEOUT\nafter\n",
+    );
+    assert!(executed.status.success(), "{:?}", executed);
+    assert_eq!(executed.stdout, b"TIMEOUT\n");
+}
+
+#[test]
+fn export_preserves_source_bytes_and_rejects_malformed_definitions_before_output() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    // At the recipe limit, adding a final newline would make the export unreadable.
+    let body =
+        "version = 2\r\n[[steps]]\r\noperation = 'lines-include'\r\nbind = {contains = 'needle'}";
+    let source = format!(
+        "\u{feff}#{}\r\n{body}",
+        " ".repeat(64 * 1024 - body.len() - 6)
+    );
+    assert_eq!(source.len(), 64 * 1024);
+    fs::write(root.join("source.toml"), &source).unwrap();
+    let args = ["data", "--export-recipe", "--recipe", "source.toml"];
+    let exported = invoke(root, &args, b"");
+    assert!(exported.status.success() && exported.stderr.is_empty());
+    assert_eq!(exported.stdout, source.as_bytes());
+    let mut file_args = args.to_vec();
+    file_args.extend(["-o", "saved.toml"]);
+    assert!(invoke(root, &file_args, b"").status.success());
+    assert_eq!(
+        fs::read(root.join("saved.toml")).unwrap(),
+        source.as_bytes()
+    );
+
+    fs::write(
+        root.join("source.toml"),
+        "version=2\n[[steps]]\noperation='trim'\nunsupported='PRIVATE_VALUE'\n",
+    )
+    .unwrap();
+    file_args.push("--force");
+    let invalid = invoke(root, &file_args, b"");
+    assert!(!invalid.status.success() && invalid.stdout.is_empty());
+    let error = String::from_utf8(invalid.stderr).unwrap();
+    assert!(
+        error.contains("invalid recipe fields") && !error.contains("PRIVATE_VALUE"),
+        "{error}"
+    );
+    assert_eq!(
+        fs::read(root.join("saved.toml")).unwrap(),
+        source.as_bytes()
+    );
+}
+
+#[test]
 fn json_selection_plan_roundtrips_nested_pointer_and_exact_records() {
     let root = tempfile::tempdir().unwrap();
     let input = r#"{"data":{"a/b":{"~items:reverse":[{"n":1.2300E+400,"n":-0},"\u4e2d",123456789012345678901234567890]}}}"#;
@@ -1603,6 +1682,42 @@ fn embedded_catalog_and_preview_finish_without_stdin_eof_or_model_configuration(
     std::fs::write(root.join("invalid-model-config.toml"), "not valid TOML").unwrap();
     for (args, success) in [
         (vec!["data", "--list-recipes"], true),
+        (
+            vec!["data", "--export-recipe", "--recipe", "builtin:log-context"],
+            true,
+        ),
+        (
+            vec![
+                "data",
+                "--export-recipe",
+                "--recipe",
+                "builtin:log-context",
+                "-i",
+                "-",
+            ],
+            false,
+        ),
+        (
+            vec![
+                "data",
+                "--export-recipe",
+                "--recipe",
+                "builtin:log-context",
+                "--var",
+                "needle=TIMEOUT",
+            ],
+            false,
+        ),
+        (
+            vec![
+                "data",
+                "--export-recipe",
+                "--show-plan",
+                "--recipe",
+                "builtin:log-context",
+            ],
+            false,
+        ),
         (
             vec!["data", "--show-plan", "--recipe", "builtin:severity-counts"],
             true,

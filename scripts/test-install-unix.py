@@ -103,7 +103,7 @@ def delivery(binary, scripts):
     smoke = subprocess.run([str(binary), '--count'], input=b'hello world\n',
                            capture_output=True, check=True, timeout=20)
     assert json.loads(smoke.stdout)['words'] == 2 and not smoke.stderr, 'installed pipe count failed'
-    expected = [('test_pre_sharing_delivery.py', 8), ('test_table_preparation_delivery.py', 7),
+    expected = [('test_pre_sharing_delivery.py', 8), ('test_table_preparation_delivery.py', 8),
                 ('test_service_setup_delivery.py', 40)]
     result = []
     for script, count in expected:

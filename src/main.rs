@@ -246,6 +246,9 @@ enum Commands {
         /// List declared parameters as JSON without reading input or resolving a plan
         #[arg(long, requires = "recipe", conflicts_with_all = ["list_recipes", "show_plan"])]
         list_parameters: bool,
+        /// Export the TOML definition with its original parameter bindings and defaults
+        #[arg(long, requires = "recipe", conflicts_with_all = ["list_recipes", "list_parameters", "show_plan"])]
+        export_recipe: bool,
         /// List embedded native recipes offline, without reading stdin or model settings
         #[arg(long, conflicts_with_all = ["operation", "steps", "recipe", "show_plan", "reverse", "if_present", "pointer", "fields", "field_defaults", "contains", "context", "equals", "at_least", "at_most", "lines"])]
         list_recipes: bool,
@@ -453,6 +456,7 @@ fn run(mut cli: Cli) -> Result<()> {
         recipe,
         show_plan,
         list_parameters,
+        export_recipe,
         list_recipes,
     }) = &cli.command
     {
@@ -477,6 +481,9 @@ fn run(mut cli: Cli) -> Result<()> {
         if *list_parameters && (cli.input.is_some() || !cli.vars.is_empty()) {
             bail!("--list-parameters lists declarations; omit --input and --var");
         }
+        if *export_recipe && (cli.input.is_some() || !cli.vars.is_empty()) {
+            bail!("--export-recipe copies the definition. Omit --input and --var");
+        }
         let report = if *list_recipes {
             Some(recipes::list())
         } else if *list_parameters {
@@ -484,6 +491,11 @@ fn run(mut cli: Cli) -> Result<()> {
                 .as_deref()
                 .context("--list-parameters requires --recipe")?;
             Some(recipes::list_parameters(recipe)?)
+        } else if *export_recipe {
+            let recipe = recipe
+                .as_deref()
+                .context("--export-recipe requires --recipe")?;
+            Some(recipes::export_recipe(recipe)?)
         } else {
             None
         };
@@ -521,13 +533,13 @@ fn run(mut cli: Cli) -> Result<()> {
                 &output,
                 target,
                 &cli,
-                !output.is_empty() && !output.ends_with('\n'),
+                !*export_recipe && !output.is_empty() && !output.ends_with('\n'),
             );
         }
         return if output.is_empty() {
             Ok(())
         } else {
-            write_output(&output)
+            write_stdout(&output, !*export_recipe)
         };
     }
     if project::enabled(&cli) && !cli.preview {
@@ -977,9 +989,13 @@ fn session(cli: &mut Cli) -> Result<()> {
 }
 
 fn write_output(output: &str) -> Result<()> {
+    write_stdout(output, true)
+}
+
+fn write_stdout(output: &str, append_missing_newline: bool) -> Result<()> {
     let mut stdout = io::stdout().lock();
     stdout.write_all(output.as_bytes())?;
-    if !output.ends_with('\n') {
+    if append_missing_newline && !output.ends_with('\n') {
         stdout.write_all(b"\n")?;
     }
     stdout.flush()?;

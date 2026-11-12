@@ -222,6 +222,24 @@ It reads only the definition and rejects `--input` and `--var`. Use
 `--show-plan` with the values you intend to supply to validate the resolved
 operations. You can save the parameter report with `-o`.
 
+## Copy a definition for your team / 复制并编辑配方
+
+```sh
+zi data --export-recipe --recipe builtin:log-context -o team-log.toml
+# Edit context or lines in team-log.toml to set your team's defaults.
+cat app.log | zi data --recipe team-log.toml --var needle=TIMEOUT
+```
+
+`--export-recipe` copies the selected TOML definition, including its version,
+bindings, defaults and comments. It accepts a file or a `builtin:` reference,
+checks the syntax and declarations, and preserves the source bytes. Export
+requires no parameter values. It rejects `--input` and `--var` and writes
+to stdout or the path selected with `-o`. The output file uses the usual
+no-overwrite rule unless you pass `--force`.
+
+用 `--export-recipe` 保存可继续传参的配方。用 `--show-plan` 和实际参数保存这一次
+执行所用的版本 1 计划。
+
 ## Inspect and export a plan before processing data / 先看计划，再处理数据
 
 `--show-plan` accepts the same single operation, ordered `--step` list or explicit
