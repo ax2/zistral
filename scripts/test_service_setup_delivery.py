@@ -441,8 +441,93 @@ api_key_env='DELIVERY_MODEL_KEY'
             'real_provider_requests': 0}
 
 
+def verify_legacy_budget_cleanup(candidate, baseline):
+    """Exercise v0.33.0 configuration compatibility with both actual binaries."""
+    assert subprocess.check_output([str(baseline), '--version'], timeout=10).strip() == b'zi 0.33.0'
+    with tempfile.TemporaryDirectory(prefix='zi rollback-测试 ') as temporary, \
+            service('responses', 'work-fixture', '/private/v1') as (server, url):
+        root = Path(temporary)
+        config = root / 'model 配置.toml'
+        original = f"""# Stable configuration fixture
+model='root-fixture'
+base_url='{url}'
+api='chat'
+api_key='ROLLBACK_ROOT_FIXTURE'
+active_profile='work'
+[profiles.work]
+model='work-fixture'
+base_url='{url}'
+api='responses'
+endpoint='{url}/responses'
+api_key_env='ROLLBACK_MODEL_KEY'
+api_key='ROLLBACK_DECOY_FIXTURE'
+[profiles.archive]
+model='archive-fixture'
+base_url='{url}'
+api='chat'
+[profiles.unconfigured]
+api='obsolete'
+"""
+        config.write_bytes(original.encode())
+        environment = {key: value for key, value in os.environ.items()
+                       if not key.upper().startswith(('ZI_', 'CLAUDE_', 'ANTHROPIC_'))
+                       and key.upper() not in {'OPENAI_API_KEY', 'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY'}}
+        environment.update(HOME=temporary, USERPROFILE=temporary, APPDATA=temporary,
+                           XDG_CONFIG_HOME=temporary, NO_PROXY='*', ROLLBACK_MODEL_KEY=KEY)
+
+        def run(binary, *args, success=True):
+            result = subprocess.run([str(binary), '--config', str(config), '--timeout', '3', *args],
+                                    input=b'', capture_output=True, env=environment, cwd=root, timeout=10)
+            assert result.returncode == (0 if success else 1), (args, result.returncode)
+            for secret in (KEY, 'ROLLBACK_ROOT_FIXTURE', 'ROLLBACK_DECOY_FIXTURE'):
+                assert secret.encode() not in result.stdout + result.stderr
+            return result.stdout
+
+        def restored_task(body):
+            assert not (BUDGET_FIELDS & body.keys())
+            return json_reply(answer('responses', 'OK'))
+
+        server.plan.extend([('POST', restored_task), ('POST', restored_task)])
+        models = run(baseline, 'models')
+        assert all(name in models for name in (b'root-fixture', b'work-fixture', b'archive-fixture', b'unconfigured'))
+        task = ['--no-tools', '--no-stream', 'fixture task']
+        assert run(baseline, *task) == b'OK\n'
+        assert config.read_bytes() == original.encode() and len(server.requests) == 1
+
+        config.write_bytes(config.read_bytes() + b'max_output_tokens=0\nchat_token_limit_field="invalid"\n')
+        run(candidate, 'config', '--name', 'default', '--max-output-tokens', '96',
+            '--chat-token-limit-field', 'max_tokens')
+        run(candidate, 'config', '--name', 'work', '--max-output-tokens', '128')
+        run(candidate, 'config', '--name', 'archive', '--max-output-tokens', '64')
+        saved = tomllib.loads(config.read_text(encoding='utf-8'))
+        assert saved['max_output_tokens'] == 96 and saved['chat_token_limit_field'] == 'max_tokens'
+        assert saved['profiles']['work']['max_output_tokens'] == 128
+        assert saved['profiles']['archive']['max_output_tokens'] == 64
+        assert saved['profiles']['unconfigured']['max_output_tokens'] == 0
+
+        profiles = ['work', 'default', 'archive', 'unconfigured']
+        for name in profiles:
+            before = config.read_bytes()
+            assert run(baseline, 'models', success=False) == b''
+            assert config.read_bytes() == before
+            run(candidate, 'config', '--name', name, '--clear-output-budget')
+
+        assert tomllib.loads(config.read_text(encoding='utf-8')) == tomllib.loads(original)
+        after = config.read_bytes()
+        assert run(baseline, 'models') == models
+        assert run(baseline, *task) == b'OK\n'
+        assert config.read_bytes() == after and len(server.requests) == 2
+        return {'baseline_version': '0.33.0', 'profiles_cleared': profiles,
+                'model_selection_and_key_reference_restored': True, 'other_config_fields_preserved': True,
+                'synthetic_loopback_requests': 2, 'real_provider_requests': 0}
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', type=Path, required=True)
+    parser.add_argument('--baseline-binary', type=Path, help='Run only the v0.33.0 output-budget cleanup check')
     arguments = parser.parse_args()
-    print(json.dumps(verify(arguments.binary.resolve(strict=True)), ensure_ascii=True))
+    binary = arguments.binary.resolve(strict=True)
+    report = (verify_legacy_budget_cleanup(binary, arguments.baseline_binary.resolve(strict=True))
+              if arguments.baseline_binary else verify(binary))
+    print(json.dumps(report, ensure_ascii=True))

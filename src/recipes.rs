@@ -8,7 +8,7 @@ use std::{io::Read, path::Path};
 const MAX_RECIPE: u64 = 64 * 1024;
 
 // Embed reviewed source examples so installed binaries need no companion recipe files.
-const BUILTINS: [(&str, &str, &str); 5] = [
+const BUILTINS: [(&str, &str, &str); 7] = [
     (
         "cleanup",
         "Trim lines, keep unique lines, sort descending",
@@ -28,6 +28,16 @@ const BUILTINS: [(&str, &str, &str); 5] = [
         "top-severity-counts",
         "Count string /level, rank counts descending, take 20 groups, emit CSV",
         include_str!("../docs/examples/top-severity-counts.toml"),
+    ),
+    (
+        "top-error-codes",
+        "Rank the top 20 string /error/code values from ERROR records as JSONL",
+        include_str!("../docs/examples/top-error-codes.toml"),
+    ),
+    (
+        "top-http-5xx-codes",
+        "Rank the top 20 error codes from HTTP 5xx records as JSONL",
+        include_str!("../docs/examples/top-http-5xx-codes.toml"),
     ),
     (
         "recent-unique-events",
@@ -98,17 +108,17 @@ impl Plan {
                 for (prefix, operation) in [("lines-head:", Operation::LinesHead), ("lines-tail:", Operation::LinesTail)] {
                     if let Some(count) = text.strip_prefix(prefix) {
                         let lines = count.parse::<usize>().map_err(|_| anyhow::anyhow!("line window count must be an integer from 1 to 100000"))?;
-                        return Ok(Step { if_present: None, equals: None, operation, reverse: false, pointer: None, fields: None, contains: None, lines: Some(lines) });
+                        return Ok(Step { context: None, at_least: None, at_most: None, if_present: None, equals: None, operation, reverse: false, pointer: None, fields: None, contains: None, lines: Some(lines) });
                     }
                 }
                 for (prefix, operation) in [("json-redact:", Operation::JsonRedact), ("jsonl-redact:", Operation::JsonlRedact), ("json-select:", Operation::JsonSelect), ("jsonl-select:", Operation::JsonlSelect), ("jsonl-dedupe:", Operation::JsonlDedupe), ("jsonl-sort:", Operation::JsonlSort), ("jsonl-sort-int:", Operation::JsonlSortInt), ("jsonl-count-by:", Operation::JsonlCountBy)] {
                     if let Some(pointer) = text.strip_prefix(prefix) {
-                        return Ok(Step { if_present: None, equals: None, operation, reverse: false, pointer: Some(pointer.to_owned()), fields: None, contains: None, lines: None });
+                        return Ok(Step { context: None, at_least: None, at_most: None, if_present: None, equals: None, operation, reverse: false, pointer: Some(pointer.to_owned()), fields: None, contains: None, lines: None });
                     }
                 }
                 for (prefix, operation) in [("lines-include:", Operation::LinesInclude), ("lines-exclude:", Operation::LinesExclude)] {
                     if let Some(contains) = text.strip_prefix(prefix) {
-                        return Ok(Step { if_present: None, equals: None, operation, reverse: false, pointer: None, fields: None, contains: Some(contains.to_owned()), lines: None });
+                        return Ok(Step { context: None, at_least: None, at_most: None, if_present: None, equals: None, operation, reverse: false, pointer: None, fields: None, contains: Some(contains.to_owned()), lines: None });
                     }
                 }
                 let (name, reverse) = text.strip_suffix(":reverse")
@@ -116,7 +126,7 @@ impl Plan {
                 let operation = Operation::from_str(name, false).map_err(|_| {
                     anyhow::anyhow!("unsupported --step; see zi data --help for native operations (sort:reverse is also supported)")
                 })?;
-                Ok(Step { if_present: None, equals: None, operation, reverse, pointer: None, fields: None, contains: None, lines: None })
+                Ok(Step { context: None, at_least: None, at_most: None, if_present: None, equals: None, operation, reverse, pointer: None, fields: None, contains: None, lines: None })
             }).collect::<Result<Vec<_>>>()?
         };
         Self::from_steps(plan)

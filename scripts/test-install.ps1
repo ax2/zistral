@@ -76,6 +76,10 @@ try{
         if((Get-FileHash -LiteralPath "$Destination\zi.exe").Hash.ToLowerInvariant() -ne $baseline.binary_sha256){throw 'Published executable differs from pinned release'}
         if((& "$Destination\zi.exe" --version) -ne "zi $($baseline.version)"){throw 'Published command version differs'}
         Check-LegacyConfiguration
+        if($baseline.version -eq '0.33.0'){
+            & python (Join-Path $root 'scripts/test_service_setup_delivery.py') --binary $BinaryPath --baseline-binary "$Destination\zi.exe"
+            if($LASTEXITCODE -ne 0){throw 'Published executable could not resume a cleaned configuration'}
+        }
     }
     Install-Candidate
     Install-Candidate

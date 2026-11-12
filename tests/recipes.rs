@@ -1161,6 +1161,93 @@ fn preview_validates_definition_without_claiming_data_execution_will_succeed() {
 }
 
 #[test]
+fn line_context_keeps_neighboring_lines_and_roundtrips_as_a_recipe() {
+    let root = tempfile::tempdir().unwrap();
+    let dir = root.path();
+    let source = b"discard\r\n before\r\nERROR 1\r\n\r\nERROR 2\r\n at A\r\ndiscard\r\n before again\r\nERROR 3";
+    let expected = b" before\nERROR 1\n\nERROR 2\n at A\n before again\nERROR 3\n";
+    let args = [
+        "data",
+        "lines-include",
+        "--contains",
+        "ERROR",
+        "--context",
+        "1",
+    ];
+    let out = invoke(dir, &args, source);
+    assert!(out.status.success() && out.stderr.is_empty());
+    assert_eq!(out.stdout, expected);
+
+    let plan = invoke(
+        dir,
+        &[&args[..], &["--show-plan"]].concat(),
+        b"not log input",
+    );
+    assert!(plan.status.success() && plan.stderr.is_empty());
+    assert!(
+        std::str::from_utf8(&plan.stdout)
+            .unwrap()
+            .contains("context = 1")
+    );
+    std::fs::write(dir.join("replay.toml"), &plan.stdout).unwrap();
+    let replay = invoke(dir, &["data", "--recipe", "replay.toml"], source);
+    assert!(replay.status.success() && replay.stderr.is_empty());
+    assert_eq!(replay.stdout, expected);
+
+    let plain = invoke(
+        dir,
+        &["data", "lines-include", "--contains", "ERROR"],
+        source,
+    );
+    let zero = invoke(
+        dir,
+        &[
+            "data",
+            "lines-include",
+            "--contains",
+            "ERROR",
+            "--context",
+            "0",
+        ],
+        source,
+    );
+    assert!(plain.status.success() && zero.status.success());
+    assert_eq!(plain.stdout, zero.stdout);
+    let missing = invoke(dir, &args, b"never matches\n");
+    assert!(missing.status.success() && missing.stdout.is_empty());
+
+    std::fs::write(dir.join("keep.txt"), b"prior").unwrap();
+    for args in [
+        [
+            "data",
+            "lines-include",
+            "--contains",
+            "ERROR",
+            "--context",
+            "100001",
+        ],
+        [
+            "data",
+            "lines-exclude",
+            "--contains",
+            "ERROR",
+            "--context",
+            "0",
+        ],
+    ] {
+        let args = [
+            &args[..],
+            &["-i", "DO_NOT_READ", "-o", "keep.txt", "--force"],
+        ]
+        .concat();
+        let out = invoke(dir, &args, b"");
+        assert!(!out.status.success() && out.stdout.is_empty());
+        assert!(!String::from_utf8_lossy(&out.stderr).contains("DO_NOT_READ"));
+        assert_eq!(std::fs::read(dir.join("keep.txt")).unwrap(), b"prior");
+    }
+}
+
+#[test]
 fn line_window_plans_roundtrip_counts_and_preserve_pipeline_order() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
@@ -1323,6 +1410,8 @@ fn embedded_catalog_and_preview_finish_without_stdin_eof_or_model_configuration(
                     "builtin:severity-counts",
                     "builtin:unique-severity-counts",
                     "builtin:top-severity-counts",
+                    "builtin:top-error-codes",
+                    "builtin:top-http-5xx-codes",
                     "builtin:recent-unique-events"
                 ]
             );
@@ -1697,6 +1786,308 @@ fn builtin_top_counts_rank_integers_stably_and_export_an_editable_offline_plan()
     );
     assert!(out.status.success());
     assert_eq!(out.stdout, original.as_bytes());
+}
+
+#[test]
+fn integer_ranges_compose_with_optional_paths_and_preserve_prior_output() {
+    let root = tempfile::tempdir().unwrap();
+    let dir = root.path();
+    let input = b"{\"status\":499}\n{\"status\":500}\n{}\n{\"status\":599}\n{\"status\":600}\n";
+    let expected = b"{\"status\":500}\n{\"status\":599}\n";
+    let args = [
+        "data",
+        "jsonl-where-int",
+        "--pointer",
+        "/status",
+        "--at-least",
+        "500",
+        "--at-most",
+        "599",
+        "--if-present",
+    ];
+    let out = invoke(dir, &args, input);
+    assert!(out.status.success() && out.stderr.is_empty());
+    assert_eq!(out.stdout, expected);
+
+    let plan = invoke(dir, &[&args[..], &["--show-plan"]].concat(), b"not JSON");
+    assert!(plan.status.success() && plan.stderr.is_empty());
+    let recipe: toml::Value = toml::from_str(std::str::from_utf8(&plan.stdout).unwrap()).unwrap();
+    assert_eq!(recipe["steps"][0]["at_least"].as_str(), Some("500"));
+    assert_eq!(recipe["steps"][0]["at_most"].as_str(), Some("599"));
+    std::fs::write(dir.join("range.toml"), &plan.stdout).unwrap();
+    let replay = invoke(dir, &["data", "--recipe", "range.toml"], input);
+    assert!(replay.status.success() && replay.stderr.is_empty());
+    assert_eq!(replay.stdout, expected);
+
+    for (bound, value, selected) in [
+        (
+            "--at-least",
+            "9007199254740993",
+            b"9007199254740993\n".as_slice(),
+        ),
+        (
+            "--at-most",
+            "9007199254740992",
+            b"9007199254740992\n".as_slice(),
+        ),
+    ] {
+        let out = invoke(
+            dir,
+            &["data", "jsonl-where-int", "--pointer", "", bound, value],
+            b"9007199254740992\n9007199254740993\n",
+        );
+        assert!(out.status.success() && out.stderr.is_empty());
+        assert_eq!(out.stdout, selected);
+    }
+    std::fs::write(dir.join("prior.jsonl"), b"prior").unwrap();
+    let invalid = invoke(
+        dir,
+        &[
+            "data",
+            "jsonl-where-int",
+            "--pointer",
+            "/status",
+            "--at-least",
+            "600",
+            "--at-most",
+            "599",
+            "-i",
+            "DO_NOT_READ",
+            "-o",
+            "prior.jsonl",
+            "--force",
+        ],
+        b"",
+    );
+    assert!(!invalid.status.success() && invalid.stdout.is_empty());
+    assert!(!String::from_utf8_lossy(&invalid.stderr).contains("DO_NOT_READ"));
+    let mut malformed = input.to_vec();
+    malformed.extend_from_slice(b"{\"status\":\"PRIVATE_NUMBER\"}\n");
+    let out = invoke(
+        dir,
+        &[&args[..], &["-o", "prior.jsonl", "--force"]].concat(),
+        &malformed,
+    );
+    assert!(!out.status.success() && out.stdout.is_empty());
+    assert!(!String::from_utf8_lossy(&out.stderr).contains("PRIVATE_NUMBER"));
+    assert_eq!(std::fs::read(dir.join("prior.jsonl")).unwrap(), b"prior");
+}
+
+#[test]
+fn optional_counting_skips_only_absent_keys_and_preserves_source_positions() {
+    let root = tempfile::tempdir().unwrap();
+    let dir = root.path();
+    let args = ["data", "jsonl-count-by", "--pointer", "/error/code"];
+    let mut optional = args.to_vec();
+    optional.push("--if-present");
+    let input = br#"{"error":{"code":"B"}}
+{}
+{"error":1e9999}
+{"error":{"code":"A"}}
+{"error":{"code":"\u0042"}}
+"#;
+    let expected = b"{\"value\":\"B\",\"count\":2}\n{\"value\":\"A\",\"count\":1}\n";
+    let strict = invoke(dir, &args, input);
+    assert!(!strict.status.success() && strict.stdout.is_empty());
+    let out = invoke(dir, &optional, input);
+    assert!(out.status.success() && out.stderr.is_empty());
+    assert_eq!(out.stdout, expected);
+
+    let plan = invoke(
+        dir,
+        &[&optional[..], &["--show-plan"]].concat(),
+        b"not JSONL",
+    );
+    assert!(plan.status.success() && plan.stderr.is_empty());
+    assert!(
+        std::str::from_utf8(&plan.stdout)
+            .unwrap()
+            .contains("if_present = true")
+    );
+    std::fs::write(dir.join("count.toml"), &plan.stdout).unwrap();
+    let out = invoke(dir, &["data", "--recipe", "count.toml"], input);
+    assert!(out.status.success() && out.stderr.is_empty());
+    assert_eq!(out.stdout, expected);
+
+    std::fs::write(dir.join("keep.jsonl"), b"prior").unwrap();
+    optional.extend(["-o", "keep.jsonl", "--force"]);
+    for invalid in [
+        r#"{"error":{"code":null}}"#,
+        r#"{"error":{"code":"A","code":"PRIVATE_DUP"}}"#,
+        r#"{"elsewhere":"\ud800"}"#,
+        r#"{"elsewhere":PRIVATE_BAD_JSON}"#,
+    ] {
+        let mut records = input.to_vec();
+        records.extend_from_slice(invalid.as_bytes());
+        let out = invoke(dir, &optional, &records);
+        assert!(!out.status.success() && out.stdout.is_empty());
+        let error = String::from_utf8_lossy(&out.stderr);
+        assert!(error.contains("record 6") && !error.contains("PRIVATE"));
+        assert_eq!(std::fs::read(dir.join("keep.jsonl")).unwrap(), b"prior");
+    }
+}
+
+#[test]
+fn equality_filters_skip_only_absent_paths_when_requested() {
+    let root = tempfile::tempdir().unwrap();
+    let dir = root.path();
+    for (op, expected, input, kept, invalid_selected) in [
+        (
+            "jsonl-where",
+            "ERROR",
+            br#"{"log":{"value":"\u0045RROR"},"n":1e9999}
+{"log":null}
+{}
+{"log":{"value":null}}
+"#
+            .as_slice(),
+            br#"{"log":{"value":"\u0045RROR"},"n":1e9999}
+"#
+            .as_slice(),
+            r#"{"log":{"value":"\ud800"}}"#,
+        ),
+        (
+            "jsonl-where-int",
+            "0",
+            b"{\"log\":{\"value\":-0}}\n{\"log\":1e9999}\n{}\n{\"log\":{\"value\":1}}\n",
+            b"{\"log\":{\"value\":-0}}\n",
+            r#"{"log":{"value":null}}"#,
+        ),
+    ] {
+        let strict = ["data", op, "--pointer", "/log/value", "--equals", expected];
+        let mut optional = strict.to_vec();
+        optional.push("--if-present");
+        let out = invoke(dir, &strict, input);
+        assert!(!out.status.success() && out.stdout.is_empty());
+        let out = invoke(dir, &optional, input);
+        assert!(out.status.success() && out.stderr.is_empty());
+        assert_eq!(out.stdout, kept);
+
+        let mut plan = optional.clone();
+        plan.push("--show-plan");
+        let out = invoke(dir, &plan, b"invalid input ignored");
+        assert!(out.status.success() && out.stderr.is_empty());
+        let recipe: toml::Value =
+            toml::from_str(std::str::from_utf8(&out.stdout).unwrap()).unwrap();
+        assert_eq!(recipe["steps"][0]["if_present"].as_bool(), Some(true));
+        std::fs::write(dir.join("replay.toml"), &out.stdout).unwrap();
+        let out = invoke(dir, &["data", "--recipe", "replay.toml"], input);
+        assert!(out.status.success() && out.stderr.is_empty());
+        assert_eq!(out.stdout, kept);
+
+        std::fs::write(dir.join("keep.jsonl"), b"original").unwrap();
+        optional.extend(["-o", "keep.jsonl", "--force"]);
+        for invalid in [
+            invalid_selected,
+            r#"{"log":{"value":1,"value":2}}"#,
+            r#"{"other":"\ud800"}"#,
+            r#"{"other":PRIVATE_BAD_SYNTAX}"#,
+        ] {
+            let mut combined = input.to_vec();
+            combined.extend_from_slice(invalid.as_bytes());
+            let out = invoke(dir, &optional, &combined);
+            assert!(!out.status.success() && out.stdout.is_empty());
+            assert!(!String::from_utf8_lossy(&out.stderr).contains("PRIVATE_BAD_SYNTAX"));
+            assert_eq!(std::fs::read(dir.join("keep.jsonl")).unwrap(), b"original");
+        }
+    }
+    for (pointer, success) in [("/a/9", true), ("/a/01", false)] {
+        let out = invoke(
+            dir,
+            &[
+                "data",
+                "jsonl-where",
+                "--pointer",
+                pointer,
+                "--equals",
+                "x",
+                "--if-present",
+            ],
+            br#"{"a":["x"]}"#,
+        );
+        assert_eq!(out.status.success(), success);
+        assert!(out.stdout.is_empty());
+    }
+}
+
+#[test]
+fn builtin_top_error_codes_filters_ranks_and_exports_an_editable_plan() {
+    let root = tempfile::tempdir().unwrap();
+    let dir = root.path();
+    let builtin = ["data", "--recipe", "builtin:top-error-codes"];
+    let error = |code: &str| format!("{{\"level\":\"ERROR\",\"error\":{{\"code\":\"{code}\"}}}}\n");
+    let mut logs = String::from(
+        "{\"level\":\"INFO\"}\n{\"level\":null}\n{\"level\":\"error\",\"error\":{\"code\":\"lowercase\"}}\n",
+    );
+    logs.push_str(&error("FIRST"));
+    logs.push_str(&error("SECOND"));
+    logs.push_str(&error("TOP").repeat(12));
+    for n in 0..22 {
+        logs.push_str(&error(&format!("CODE{n:02}")));
+    }
+    logs.push_str(&error("FIRST"));
+    logs.push_str(&error("SECOND"));
+    let out = invoke(dir, &builtin, logs.as_bytes());
+    assert!(out.status.success() && out.stderr.is_empty());
+    let rows: Vec<serde_json::Value> = std::str::from_utf8(&out.stdout)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(rows.len(), 20);
+    assert_eq!(rows[0], serde_json::json!({"value":"TOP","count":12}));
+    assert_eq!(rows[1], serde_json::json!({"value":"FIRST","count":2}));
+    assert_eq!(rows[2], serde_json::json!({"value":"SECOND","count":2}));
+    assert_eq!(rows[19], serde_json::json!({"value":"CODE16","count":1}));
+
+    let empty = invoke(dir, &builtin, br#"{"level":"WARN"}"#);
+    assert!(empty.status.success() && empty.stdout.is_empty() && empty.stderr.is_empty());
+    let plan = invoke(
+        dir,
+        &["data", "--show-plan", "--recipe", "builtin:top-error-codes"],
+        b"not log data",
+    );
+    assert!(plan.status.success() && plan.stderr.is_empty());
+    let plan = String::from_utf8(plan.stdout).unwrap();
+    assert!(plan.contains("pointer = \"/error/code\""));
+    assert!(plan.contains("lines = 20"));
+    let replay = dir.join("replay.toml");
+    std::fs::write(&replay, &plan).unwrap();
+    let same = invoke(dir, &["data", "--recipe", "replay.toml"], logs.as_bytes());
+    assert!(same.status.success() && same.stderr.is_empty());
+    assert_eq!(same.stdout, out.stdout);
+    std::fs::write(&replay, plan.replace("lines = 20", "lines = 1")).unwrap();
+    let edited = invoke(dir, &["data", "--recipe", "replay.toml"], logs.as_bytes());
+    assert!(edited.status.success() && edited.stderr.is_empty());
+    assert_eq!(edited.stdout, b"{\"value\":\"TOP\",\"count\":12}\n");
+
+    std::fs::write(dir.join("result.jsonl"), b"original\n").unwrap();
+    for invalid in [
+        r#"{"level":"ERROR","error":{"code":2}}"#,
+        r#"{"level":"ERROR"}"#,
+        r#"{"level":"WARN","message":PRIVATE_BROKEN_JSON}"#,
+        r#"{"level":"WARN","message":"\uD800"}"#,
+    ] {
+        let input = format!("{logs}{invalid}\n");
+        let out = invoke(
+            dir,
+            &[
+                "data",
+                "--recipe",
+                "builtin:top-error-codes",
+                "-o",
+                "result.jsonl",
+                "--force",
+            ],
+            input.as_bytes(),
+        );
+        assert!(!out.status.success() && out.stdout.is_empty());
+        assert!(!String::from_utf8_lossy(&out.stderr).contains("PRIVATE_BROKEN_JSON"));
+        assert_eq!(
+            std::fs::read(dir.join("result.jsonl")).unwrap(),
+            b"original\n"
+        );
+    }
 }
 
 #[test]

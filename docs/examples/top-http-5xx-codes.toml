@@ -1,0 +1,23 @@
+# Rank error codes from HTTP 500 through 599. Skip absent fields explicitly.
+version = 1
+
+[[steps]]
+operation = "jsonl-where-int"
+pointer = "/status"
+at_least = "500"
+at_most = "599"
+if_present = true
+
+[[steps]]
+operation = "jsonl-count-by"
+pointer = "/error/code"
+if_present = true
+
+[[steps]]
+operation = "jsonl-sort-int"
+pointer = "/count"
+reverse = true
+
+[[steps]]
+operation = "lines-head"
+lines = 20

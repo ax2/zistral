@@ -196,7 +196,7 @@ pub struct Cli {
 enum Commands {
     /// Transform explicit input locally, without a model or configuration
     #[command(
-        after_help = "Examples:\n  zi data jsonl-redact --pointer /token --if-present -i mixed.jsonl\n  zi data --show-plan jsonl-redact --pointer /token --if-present -o mask.toml\n  zi data jsonl-profile -i events.jsonl\n  zi data --step json-select:/events --step array-to-jsonl --step jsonl-profile -i response.json\n  zi data jsonl-redact --pointer /credentials/token -i events.jsonl\n  zi data --step jsonl-redact:/credentials/token --step jsonl-redact:/user/email -i events.jsonl\n  zi data --list-recipes\n  zi data --recipe builtin:top-severity-counts -i events.jsonl\n  zi data jsonl-sort-int --pointer /count --reverse -i counts.jsonl\n  zi data --recipe builtin:severity-counts -i events.jsonl\n  zi data --show-plan --recipe builtin:recent-unique-events -o recent.toml\n  zi data jsonl-count-by --pointer /level -i events.jsonl\n  zi data jsonl-dedupe --pointer /id -i events.jsonl\n  zi data jsonl-sort --pointer /time --reverse -i events.jsonl\n  zi data jsonl-where --pointer /level --equals ERROR -i events.jsonl\n  zi data lines-tail --lines 50 -i app.log\n  zi data --step lines-include:ERROR --step lines-tail:20 -i app.log\n  zi data lines-include --contains ERROR -i app.log\n  zi data --step lines-include:ERROR --step lines-exclude:healthcheck -i app.log\n  zi data trim -i notes.txt\n  zi data --step trim --step dedupe --step sort:reverse -i notes.txt\n  zi data --recipe cleanup.toml -i notes.txt -o clean.txt\n  zi data --step json-select:/data/items --step array-to-jsonl -i response.json\n  zi data json-select --pointer /data/items -i response.json\n  zi data jsonl-select --pointer /payload/id -i events.jsonl\n  zi data --step csv-to-jsonl --step jsonl-select:/id --step dedupe --step jsonl-to-array -i table.csv\n  zi data jsonl-project --field id=/payload/id --field n=/payload/n -i events.jsonl\n  zi data jsonl-to-csv -i records.jsonl -o table.csv\n  zi data --step jsonl-select:/payload/id --step dedupe --step jsonl-to-array\n  zi data --show-plan --recipe cleanup.toml\n  zi data --show-plan --step trim --step dedupe -o cleanup.toml\n\nRecipe example (UTF-8 TOML):\n  version = 1\n  [[steps]]\n  operation = \"trim\"\n  [[steps]]\n  operation = \"sort\"\n  reverse = true\n\nUse one operation, repeated --step, or --recipe (FILE or builtin:NAME).\n--list-recipes lists embedded recipes offline without reading stdin; --input is rejected.\nBuiltin names are exact, case-sensitive references; unknown names never fall back to files.\n--show-plan validates and exports\nthe resolved version-1 TOML without reading stdin or executing data operations;\n--input is rejected and -o saves the plan. Data-dependent failures still require a run.\nRecipes allow only native data operations: no shell, file paths or model requests.\nLimits: 16 steps, 64 KiB recipe, 8 MiB initial input, 16 MiB intermediate/final result."
+        after_help = "Examples:\n  zi data jsonl-redact --pointer /token --if-present -i mixed.jsonl\n  zi data --show-plan jsonl-redact --pointer /token --if-present -o mask.toml\n  zi data jsonl-profile -i events.jsonl\n  zi data --step json-select:/events --step array-to-jsonl --step jsonl-profile -i response.json\n  zi data jsonl-redact --pointer /credentials/token -i events.jsonl\n  zi data --step jsonl-redact:/credentials/token --step jsonl-redact:/user/email -i events.jsonl\n  zi data --list-recipes\n  zi data --recipe builtin:top-severity-counts -i events.jsonl\n  zi data --recipe builtin:top-http-5xx-codes -i requests.jsonl\n  zi data jsonl-sort-int --pointer /count --reverse -i counts.jsonl\n  zi data --recipe builtin:severity-counts -i events.jsonl\n  zi data --show-plan --recipe builtin:recent-unique-events -o recent.toml\n  zi data jsonl-count-by --pointer /level -i events.jsonl\n  zi data jsonl-dedupe --pointer /id -i events.jsonl\n  zi data jsonl-sort --pointer /time --reverse -i events.jsonl\n  zi data jsonl-where --pointer /level --equals ERROR -i events.jsonl\n  zi data jsonl-where-int --pointer /status --at-least 500 --at-most 599 --if-present -i requests.jsonl\n  zi data lines-tail --lines 50 -i app.log\n  zi data --step lines-include:ERROR --step lines-tail:20 -i app.log\n  zi data lines-include --contains ERROR --context 3 -i app.log\n  zi data --step lines-include:ERROR --step lines-exclude:healthcheck -i app.log\n  zi data trim -i notes.txt\n  zi data --step trim --step dedupe --step sort:reverse -i notes.txt\n  zi data --recipe cleanup.toml -i notes.txt -o clean.txt\n  zi data --step json-select:/data/items --step array-to-jsonl -i response.json\n  zi data json-select --pointer /data/items -i response.json\n  zi data jsonl-select --pointer /payload/id -i events.jsonl\n  zi data --step csv-to-jsonl --step jsonl-select:/id --step dedupe --step jsonl-to-array -i table.csv\n  zi data jsonl-project --field id=/payload/id --field n=/payload/n -i events.jsonl\n  zi data jsonl-to-csv -i records.jsonl -o table.csv\n  zi data --step jsonl-select:/payload/id --step dedupe --step jsonl-to-array\n  zi data --show-plan --recipe cleanup.toml\n  zi data --show-plan --step trim --step dedupe -o cleanup.toml\n\nRecipe example (UTF-8 TOML):\n  version = 1\n  [[steps]]\n  operation = \"trim\"\n  [[steps]]\n  operation = \"sort\"\n  reverse = true\n\nUse one operation, repeated --step, or --recipe (FILE or builtin:NAME).\n--list-recipes lists embedded recipes offline without reading stdin; --input is rejected.\nBuiltin names are exact, case-sensitive references; unknown names never fall back to files.\n--show-plan validates and exports\nthe resolved version-1 TOML without reading stdin or executing data operations;\n--input is rejected and -o saves the plan. Data-dependent failures still require a run.\nRecipes allow only native data operations: no shell, file paths or model requests.\nLimits: 16 steps, 64 KiB recipe, 8 MiB initial input, 16 MiB intermediate/final result."
     )]
     Data {
         #[arg(value_enum, required_unless_present_any = ["steps", "recipe", "list_recipes"], conflicts_with_all = ["steps", "recipe", "list_recipes"])]
@@ -204,7 +204,7 @@ enum Commands {
         /// Reverse key order; valid with sort, jsonl-sort and jsonl-sort-int (JSONL ties stay stable)
         #[arg(long, requires = "operation", conflicts_with_all = ["steps", "recipe"])]
         reverse: bool,
-        /// For redaction only: keep valid records whose explicit pointer is absent; default is strict
+        /// When a pointer is absent, preserve the record during redaction or skip it during JSONL filtering/counting
         #[arg(long, requires = "operation", conflicts_with_all = ["steps", "recipe"])]
         if_present: bool,
         /// RFC 6901 pointer for JSON selection/redaction/filtering/key operations; empty selects root
@@ -219,9 +219,18 @@ enum Commands {
         /// Case-sensitive literal substring for lines-include/lines-exclude; no CR/LF
         #[arg(long, requires = "operation", conflicts_with_all = ["steps", "recipe"])]
         contains: Option<String>,
+        /// Lines to retain before and after each lines-include match (0-100000)
+        #[arg(long, requires = "operation", conflicts_with_all = ["steps", "recipe"])]
+        context: Option<usize>,
         /// Exact string for jsonl-where, or JSON integer literal for jsonl-where-int (max4096 bytes)
         #[arg(long, requires = "operation", conflicts_with_all = ["steps", "recipe"])]
         equals: Option<String>,
+        /// Inclusive JSON integer lower bound for jsonl-where-int
+        #[arg(long, requires = "operation", conflicts_with_all = ["steps", "recipe", "equals"])]
+        at_least: Option<String>,
+        /// Inclusive JSON integer upper bound for jsonl-where-int
+        #[arg(long, requires = "operation", conflicts_with_all = ["steps", "recipe", "equals"])]
+        at_most: Option<String>,
         /// Number of first/last lines; required for lines-head/lines-tail (1-100000)
         #[arg(short = 'n', long, requires = "operation", conflicts_with_all = ["steps", "recipe"])]
         lines: Option<usize>,
@@ -235,7 +244,7 @@ enum Commands {
         #[arg(long)]
         show_plan: bool,
         /// List embedded native recipes offline, without reading stdin or model settings
-        #[arg(long, conflicts_with_all = ["operation", "steps", "recipe", "show_plan", "reverse", "if_present", "pointer", "fields", "field_defaults", "contains", "equals", "lines"])]
+        #[arg(long, conflicts_with_all = ["operation", "steps", "recipe", "show_plan", "reverse", "if_present", "pointer", "fields", "field_defaults", "contains", "context", "equals", "at_least", "at_most", "lines"])]
         list_recipes: bool,
     },
     /// List, inspect, render, export, import or initialize reusable task presets (offline)
@@ -432,7 +441,10 @@ fn run(mut cli: Cli) -> Result<()> {
         fields,
         field_defaults,
         contains,
+        context,
         equals,
+        at_least,
+        at_most,
         lines,
         steps,
         recipe,
@@ -467,7 +479,10 @@ fn run(mut cli: Cli) -> Result<()> {
                     pointer: pointer.clone(),
                     fields: projection::parse(fields, field_defaults)?,
                     contains: contains.clone(),
+                    context: *context,
                     equals: equals.clone(),
+                    at_least: at_least.clone(),
+                    at_most: at_most.clone(),
                     lines: *lines,
                 })
             })

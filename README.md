@@ -400,7 +400,7 @@ Use `--recipe builtin:top-severity-counts` for a ready-to-run top20 frequency re
 [Semantics, limits and reusable examples](docs/integer-ranking.md).
 
 
-Since v0.31.0: installed binaries embed five reviewed recipes. Discover,
+Since v0.31.0: installed binaries embed reviewed recipes. Discover,
 inspect and run them without a source checkout or model configuration:
 
 ```sh
@@ -418,6 +418,10 @@ and takes 20 records. `builtin:top-severity-counts` ranks exact integer counts d
 and exports the top 20 groups as CSV. Category/ID/time keys remain strings. Timestamp order is lexical;
 normalize formats/timezones first. Names are exact and case-sensitive. `--list-recipes`
 does not read stdin; explicit `--input` and processing options are rejected.
+
+The development build also includes `builtin:top-error-codes` for application logs
+and `builtin:top-http-5xx-codes` for HTTP request logs. Both emit ranked JSONL.
+See the [log fixtures and export examples](docs/data-recipes.md).
 
 
 ```sh
