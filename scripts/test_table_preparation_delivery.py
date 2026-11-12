@@ -124,7 +124,81 @@ operation="jsonl-to-tsv"
             invalid = run(['data', '--recipe', report_recipe, '-o', report_path, '--force'],
                           http_logs + b'{"status":501,"error":{"code":null}}\n', success=False)
             assert not invalid.stdout and report_path.read_bytes() == expected_http
-            checks.append('plan export: table replay, line context and integrated HTTP 5xx ranking')
+
+            http_name = 'builtin:top-http-5xx-codes'
+            custom_http_args = ['data', '--recipe', http_name, '--var', 'status_pointer=/response/status',
+                                '--var', 'code_pointer=/fault/id']
+            custom_http = (
+                b'{"response":{"status":499},"fault":{"id":"OUTSIDE"}}\n'
+                b'{"response":{"status":500},"fault":{"id":"TIMEOUT"}}\n'
+                b'{"response":{"status":599},"fault":{"id":"TIMEOUT"}}\n'
+                b'{"response":{"status":502},"fault":{"id":"BAD_GATEWAY"}}\n'
+                b'{"response":{"status":600},"fault":{"id":"OUTSIDE"}}\n'
+            )
+            all_http = run(custom_http_args, custom_http)
+            assert all_http.stdout == expected_http and not all_http.stderr
+            limited_http = [*custom_http_args, '--var', 'limit=1']
+            expected_custom_http = b'{"value":"TIMEOUT","count":2}\n'
+            ranked = run(limited_http, custom_http)
+            assert ranked.stdout == expected_custom_http and not ranked.stderr
+            resolved_http = run([*limited_http, '--show-plan'])
+            assert not resolved_http.stderr and resolved_http.stdout.startswith(b'version = 1\n')
+            custom_http_plan = root/'custom HTTP report-测试.toml'
+            custom_http_plan.write_bytes(resolved_http.stdout)
+            assert run(['data', '--recipe', custom_http_plan], custom_http).stdout == expected_custom_http
+
+            app_name = 'builtin:top-error-codes'
+            custom_app_args = ['data', '--recipe', app_name, '--var', 'level_pointer=/event/severity',
+                               '--var', 'code_pointer=/fault/id']
+            custom_app = (
+                b'{"event":{"severity":"WARN"},"fault":{"id":"IGNORED"}}\n'
+                b'{"event":{"severity":"error"},"fault":{"id":"IGNORED"}}\n'
+                b'{"event":{"severity":"ERROR"},"fault":{"id":"DISK"}}\n'
+                b'{"event":{"severity":"ERROR"},"fault":{"id":"NETWORK"}}\n'
+                b'{"event":{"severity":"ERROR"},"fault":{"id":"DISK"}}\n'
+            )
+            all_app = run(custom_app_args, custom_app)
+            assert all_app.stdout == b'{"value":"DISK","count":2}\n{"value":"NETWORK","count":1}\n'
+            assert not all_app.stderr
+            ranked = run([*custom_app_args, '--var', 'limit=1'], custom_app)
+            assert ranked.stdout == b'{"value":"DISK","count":2}\n' and not ranked.stderr
+            for name, selector in [(http_name, 'status_pointer'), (app_name, 'level_pointer')]:
+                declared = run(['data', '--list-parameters', '--recipe', name])
+                parameters = json.loads(declared.stdout)['parameters']
+                assert not declared.stderr and set(parameters) == {selector, 'code_pointer', 'limit'}
+                assert parameters[selector]['type'] == parameters['code_pointer']['type'] == 'text'
+                assert parameters['limit']['type'] == 'line_count'
+                assert all(parameter['required'] is False for parameter in parameters.values())
+            checks.append('plan export: table replay, line context and default/custom log rankings')
+
+            log_context = 'builtin:log-context'
+            declared = run(['data', '--list-parameters', '--recipe', log_context])
+            assert not declared.stderr
+            parameters = json.loads(declared.stdout)
+            assert parameters['recipe_version'] == 2
+            assert parameters['parameters']['needle']['required'] is True
+            assert parameters['parameters']['nearby']['required'] is False
+            team_recipe = root/'team 日志.toml'
+            copied = run(['data', '--export-recipe', '--recipe', log_context, '-o', team_recipe])
+            assert not copied.stdout and not copied.stderr
+            original_template = team_recipe.read_bytes()
+            assert b'version = 2' in original_template and b'bind = ' in original_template
+            customized = original_template.replace(b'context = 1', b'context = 0', 1)
+            assert customized != original_template
+            team_recipe.write_bytes(customized)
+            log_input = 'before\r\n请求超时\r\nretry\r\n'.encode()
+            expected_log = '请求超时\n'.encode()
+            variable = ['--var', 'needle=超时']
+            direct = run(['data', '--recipe', team_recipe, *variable], log_input)
+            assert direct.stdout == expected_log and not direct.stderr
+            plan = run(['data', '--show-plan', '--recipe', team_recipe, *variable])
+            assert not plan.stderr and plan.stdout.startswith(b'version = 1\n')
+            replay = root/'reviewed 日志.toml'
+            replay.write_bytes(plan.stdout)
+            replayed = run(['data', '--recipe', replay], log_input)
+            assert replayed.stdout == expected_log and not replayed.stderr
+            checks.append('installed recipe reuse: discover, copy, customize and replay offline')
+
             projected = run(['data', 'jsonl-project', '--field', 'tag=/tag',
                              '--field-default', 'tag=""'], b'{"tag":null}\n{}\n')
             assert projected.stdout == b'{"tag":null}\n{"tag":""}\n' and not projected.stderr

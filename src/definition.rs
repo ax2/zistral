@@ -1,6 +1,16 @@
 //! Definition diagnostics deliberately omit parser messages, source excerpts and values.
 use anyhow::anyhow;
 
+pub fn valid_variable(name: &str) -> bool {
+    let mut bytes = name.bytes();
+    name.len() <= 32
+        && bytes
+            .next()
+            .is_some_and(|b| b.is_ascii_alphabetic() || b == b'_')
+        && bytes.all(|b| b.is_ascii_alphanumeric() || b == b'_')
+        && name != "input"
+}
+
 pub fn toml_error(error: &toml::de::Error, text: &str, kind: &str) -> anyhow::Error {
     let location = error
         .span()

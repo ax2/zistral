@@ -1,4 +1,5 @@
 use std::{
+    fs,
     io::Write,
     path::Path,
     process::{Command, Output, Stdio},
@@ -35,6 +36,332 @@ fn invoke(root: &Path, args: &[&str], input: &[u8]) -> Output {
         .unwrap();
     let _ = child.stdin.take().unwrap().write_all(input);
     child.wait_with_output().unwrap()
+}
+
+#[test]
+fn recipe_parameters_reuse_one_definition_and_export_a_resolved_plan() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    fs::write(
+        root.join("logs.toml"),
+        include_str!("../docs/examples/log-context.toml"),
+    )
+    .unwrap();
+    let literal = r#"needle=x={{var}} "[steps]""#;
+    let input = b"unrelated\nfirst\nx={{var}} \"[steps]\"\nsecond\nfinished\n";
+    let output = invoke(
+        root,
+        &["data", "--recipe", "logs.toml", "--var", literal],
+        input,
+    );
+    assert!(output.status.success(), "{:?}", output);
+    assert_eq!(output.stdout, b"first\nx={{var}} \"[steps]\"\nsecond\n");
+
+    let output = invoke(
+        root,
+        &[
+            "data",
+            "--show-plan",
+            "--recipe",
+            "logs.toml",
+            "--var",
+            literal,
+            "--var",
+            "nearby=0",
+            "--var",
+            "limit=1",
+            "-o",
+            "resolved.toml",
+        ],
+        b"",
+    );
+    assert!(output.status.success(), "{:?}", output);
+    let resolved = fs::read_to_string(root.join("resolved.toml")).unwrap();
+    let plan: toml::Value = toml::from_str(&resolved).unwrap();
+    assert_eq!(plan["version"].as_integer(), Some(1));
+    let steps = plan["steps"].as_array().unwrap();
+    assert_eq!(
+        steps[0]["contains"].as_str(),
+        Some(literal.split_once('=').unwrap().1)
+    );
+    assert_eq!(steps[0]["context"].as_integer(), Some(0));
+    assert_eq!(steps[1]["lines"].as_integer(), Some(1));
+    assert!(steps.iter().all(|step| step.get("bind").is_none()));
+    let replay = invoke(root, &["data", "--recipe", "resolved.toml"], input);
+    assert!(replay.status.success(), "{:?}", replay);
+    assert_eq!(replay.stdout, b"x={{var}} \"[steps]\"\n");
+}
+
+#[test]
+fn invalid_recipe_parameters_fail_before_input_and_preserve_output() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    fs::write(
+        root.join("logs.toml"),
+        include_str!("../docs/examples/log-context.toml"),
+    )
+    .unwrap();
+    fs::write(root.join("existing.txt"), "keep\n").unwrap();
+    let invalid = [
+        (vec![], "missing recipe parameter needle"),
+        (
+            vec!["needle=ERROR", "extra=PRIVATE_VALUE"],
+            "unknown recipe parameter extra",
+        ),
+        (
+            vec!["needle=ERROR", "needle=PRIVATE_VALUE"],
+            "duplicate recipe parameter needle",
+        ),
+        (
+            vec!["needle=ERROR", "nearby=PRIVATE_VALUE"],
+            "unsigned decimal line count",
+        ),
+        (vec!["needle=ERROR", "limit=0"], "invalid (lines-tail)"),
+    ];
+    for (variables, message) in invalid {
+        let mut args = vec![
+            "data",
+            "--recipe",
+            "logs.toml",
+            "-i",
+            "missing.log",
+            "-o",
+            "existing.txt",
+            "--force",
+        ];
+        for variable in variables {
+            args.extend(["--var", variable]);
+        }
+        let result = invoke(root, &args, b"");
+        assert!(
+            !result.status.success() && result.stdout.is_empty(),
+            "{:?}",
+            result
+        );
+        let error = String::from_utf8(result.stderr).unwrap();
+        assert!(error.contains(message), "{error}");
+        assert!(
+            !error.contains("missing.log") && !error.contains("PRIVATE_VALUE"),
+            "{error}"
+        );
+        assert_eq!(
+            fs::read_to_string(root.join("existing.txt")).unwrap(),
+            "keep\n"
+        );
+    }
+}
+
+#[test]
+fn recipe_bindings_cannot_replace_operations_or_mix_text_and_counts() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    for (definition, message) in [
+        (
+            "version=1\n[[steps]]\noperation='trim'\nbind={contains='word'}\n",
+            "invalid recipe TOML",
+        ),
+        (
+            "version=2\n[[steps]]\noperation='trim'\nbind={operation='PRIVATE_VALUE'}\n",
+            "invalid recipe TOML",
+        ),
+        (
+            "version=2\n[[steps]]\noperation='lines-include'\nbind={contains='v',context='v'}\n",
+            "cannot bind both text and line counts",
+        ),
+    ] {
+        fs::write(root.join("invalid.toml"), definition).unwrap();
+        let result = invoke(
+            root,
+            &[
+                "data",
+                "--show-plan",
+                "--recipe",
+                "invalid.toml",
+                "-o",
+                "result.toml",
+            ],
+            b"",
+        );
+        assert!(
+            !result.status.success() && result.stdout.is_empty(),
+            "{:?}",
+            result
+        );
+        let error = String::from_utf8(result.stderr).unwrap();
+        assert!(
+            error.contains(message) && !error.contains("PRIVATE_VALUE"),
+            "{error}"
+        );
+        assert!(!root.join("result.toml").exists());
+    }
+}
+
+#[test]
+fn recipe_parameter_report_keeps_defaults_private_and_lists_every_binding() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    fs::write(
+        root.join("shared.toml"),
+        "version=2\n[[steps]]\noperation='lines-include'\ncontains='PRIVATE_DEFAULT'\nbind={contains='needle'}\n[[steps]]\noperation='lines-exclude'\nbind={contains='needle'}\n",
+    ).unwrap();
+    let result = invoke(
+        root,
+        &["data", "--list-parameters", "--recipe", "shared.toml"],
+        b"PRIVATE_INPUT",
+    );
+    assert!(
+        result.status.success() && result.stderr.is_empty(),
+        "{:?}",
+        result
+    );
+    let text = String::from_utf8(result.stdout).unwrap();
+    assert!(!text.contains("PRIVATE_"));
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&text).unwrap(),
+        serde_json::json!({
+            "version": 1,
+            "recipe_version": 2,
+            "parameters": {
+                "needle": {
+                    "type": "text", "required": true,
+                    "bindings": [{"step": 1, "field": "contains"}, {"step": 2, "field": "contains"}]
+                }
+            }
+        })
+    );
+    let literal = invoke(
+        root,
+        &["data", "--list-parameters", "--recipe", "builtin:cleanup"],
+        b"",
+    );
+    assert!(literal.status.success());
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&literal.stdout).unwrap(),
+        serde_json::json!({"version": 1, "recipe_version": 1, "parameters": {}})
+    );
+}
+
+#[test]
+fn embedded_log_context_reports_parameters_and_runs_without_companion_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let report = invoke(
+        root,
+        &[
+            "data",
+            "--list-parameters",
+            "--recipe",
+            "builtin:log-context",
+        ],
+        b"",
+    );
+    assert!(report.status.success() && report.stderr.is_empty());
+    let report: serde_json::Value = serde_json::from_slice(&report.stdout).unwrap();
+    assert_eq!(report["recipe_version"], 2);
+    assert_eq!(report["parameters"]["needle"]["required"], true);
+    for name in ["nearby", "limit"] {
+        assert_eq!(report["parameters"][name]["type"], "line_count");
+        assert_eq!(report["parameters"][name]["required"], false);
+    }
+    let result = invoke(
+        root,
+        &[
+            "data",
+            "--recipe",
+            "builtin:log-context",
+            "--var",
+            "needle=断线",
+            "--var",
+            "limit=2",
+        ],
+        "skip\nstart\n断线\nretry\nend\n".as_bytes(),
+    );
+    assert!(
+        result.status.success() && result.stderr.is_empty(),
+        "{:?}",
+        result
+    );
+    assert_eq!(result.stdout, "断线\nretry\n".as_bytes());
+    assert_eq!(fs::read_dir(root).unwrap().count(), 0);
+}
+
+#[test]
+fn exported_builtin_retains_bindings_and_can_be_customized() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let exported = invoke(
+        root,
+        &[
+            "data",
+            "--export-recipe",
+            "--recipe",
+            "builtin:log-context",
+            "-o",
+            "team.toml",
+        ],
+        b"ignored input",
+    );
+    assert!(exported.status.success() && exported.stdout.is_empty() && exported.stderr.is_empty());
+    let original = fs::read(root.join("team.toml")).unwrap();
+    assert_eq!(
+        original,
+        include_bytes!("../docs/examples/log-context.toml")
+    );
+    let customized = String::from_utf8(original)
+        .unwrap()
+        .replace("context = 1", "context = 0");
+    fs::write(root.join("team.toml"), customized).unwrap();
+    let executed = invoke(
+        root,
+        &["data", "--recipe", "team.toml", "--var", "needle=TIMEOUT"],
+        b"before\nTIMEOUT\nafter\n",
+    );
+    assert!(executed.status.success(), "{:?}", executed);
+    assert_eq!(executed.stdout, b"TIMEOUT\n");
+}
+
+#[test]
+fn export_preserves_source_bytes_and_rejects_malformed_definitions_before_output() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    // At the recipe limit, adding a final newline would make the export unreadable.
+    let body =
+        "version = 2\r\n[[steps]]\r\noperation = 'lines-include'\r\nbind = {contains = 'needle'}";
+    let source = format!(
+        "\u{feff}#{}\r\n{body}",
+        " ".repeat(64 * 1024 - body.len() - 6)
+    );
+    assert_eq!(source.len(), 64 * 1024);
+    fs::write(root.join("source.toml"), &source).unwrap();
+    let args = ["data", "--export-recipe", "--recipe", "source.toml"];
+    let exported = invoke(root, &args, b"");
+    assert!(exported.status.success() && exported.stderr.is_empty());
+    assert_eq!(exported.stdout, source.as_bytes());
+    let mut file_args = args.to_vec();
+    file_args.extend(["-o", "saved.toml"]);
+    assert!(invoke(root, &file_args, b"").status.success());
+    assert_eq!(
+        fs::read(root.join("saved.toml")).unwrap(),
+        source.as_bytes()
+    );
+
+    fs::write(
+        root.join("source.toml"),
+        "version=2\n[[steps]]\noperation='trim'\nunsupported='PRIVATE_VALUE'\n",
+    )
+    .unwrap();
+    file_args.push("--force");
+    let invalid = invoke(root, &file_args, b"");
+    assert!(!invalid.status.success() && invalid.stdout.is_empty());
+    let error = String::from_utf8(invalid.stderr).unwrap();
+    assert!(
+        error.contains("invalid recipe fields") && !error.contains("PRIVATE_VALUE"),
+        "{error}"
+    );
+    assert_eq!(
+        fs::read(root.join("saved.toml")).unwrap(),
+        source.as_bytes()
+    );
 }
 
 #[test]
@@ -756,7 +1083,7 @@ fn complete_recipe_and_option_validation_happens_before_reading_data() {
     let root = tempfile::tempdir().unwrap();
     let root = root.path();
     let recipes = [
-        "version=2\n[[steps]]\noperation='trim'\n",
+        "version=3\n[[steps]]\noperation='trim'\n",
         "version=1\nsteps=[]\n",
         "version=1\n[[steps]]\noperation='shell'\n",
         "version=1\n[[steps]]\noperation='trim'\nreverse=true\n",
@@ -996,7 +1323,7 @@ fn preview_rejects_invalid_plans_before_preparing_output_and_hides_definition_va
     let root = root.path();
     std::fs::write(root.join("keep.toml"), b"original plan\r\n").unwrap();
     for spec in [
-        "version=2\n[[steps]]\noperation='trim'\n".to_owned(),
+        "version=3\n[[steps]]\noperation='trim'\n".to_owned(),
         "version=1\nsteps=[]\n".into(),
         "version=1\n[[steps]]\noperation='trim'\n[[steps]]\noperation='dedupe'\nreverse=true\n"
             .into(),
@@ -1356,8 +1683,75 @@ fn embedded_catalog_and_preview_finish_without_stdin_eof_or_model_configuration(
     for (args, success) in [
         (vec!["data", "--list-recipes"], true),
         (
+            vec!["data", "--export-recipe", "--recipe", "builtin:log-context"],
+            true,
+        ),
+        (
+            vec![
+                "data",
+                "--export-recipe",
+                "--recipe",
+                "builtin:log-context",
+                "-i",
+                "-",
+            ],
+            false,
+        ),
+        (
+            vec![
+                "data",
+                "--export-recipe",
+                "--recipe",
+                "builtin:log-context",
+                "--var",
+                "needle=TIMEOUT",
+            ],
+            false,
+        ),
+        (
+            vec![
+                "data",
+                "--export-recipe",
+                "--show-plan",
+                "--recipe",
+                "builtin:log-context",
+            ],
+            false,
+        ),
+        (
             vec!["data", "--show-plan", "--recipe", "builtin:severity-counts"],
             true,
+        ),
+        (
+            vec![
+                "data",
+                "--list-parameters",
+                "--recipe",
+                "builtin:log-context",
+            ],
+            true,
+        ),
+        (
+            vec![
+                "data",
+                "--list-parameters",
+                "--recipe",
+                "builtin:log-context",
+                "-i",
+                "-",
+            ],
+            false,
+        ),
+        (
+            vec![
+                "data",
+                "--list-parameters",
+                "--recipe",
+                "builtin:log-context",
+                "--var",
+                "needle=TIMEOUT",
+            ],
+            false,
         ),
         (vec!["data", "--list-recipes", "-i", "-"], false),
         (vec!["data", "--list-recipes", "-i", "missing-data"], false),
@@ -1412,7 +1806,8 @@ fn embedded_catalog_and_preview_finish_without_stdin_eof_or_model_configuration(
                     "builtin:top-severity-counts",
                     "builtin:top-error-codes",
                     "builtin:top-http-5xx-codes",
-                    "builtin:recent-unique-events"
+                    "builtin:recent-unique-events",
+                    "builtin:log-context"
                 ]
             );
         }

@@ -251,10 +251,23 @@ protocol coverage and CI maintenance do not count as extra features. See
 [integer filtering](integer-filtering.md) and [projection](jsonl-projection.md).
 
 
-Unreleased `main` supports explicit per-profile request-budget preferences. They
+Since v0.34.0, zi supports explicit per-profile request-budget preferences. They
 save only a numeric output cap and one reviewed Chat parameter name, with CLI
 overrides, per-invocation ignore and atomic clearing. They neither retain past
 inputs/results nor grant tools, projects or background execution. Keep manual
 editing/import/profile-switch semantics and pre-IO validation explicit; see
 [saved budgets](output-budgets.md#save-preferences-once-per-model). This is one
 configuration-once improvement, not separate features for every protocol or guard.
+
+The next recipe batch targets scripts that repeat a reviewed offline workflow with
+different input values. A version-2 recipe can bind a named parameter to a native
+step field. It keeps the operation, output path and file access fixed by the recipe
+and invocation. The user supplies literal values with `--var` and can preview a
+resolved version-1 plan. This addresses reuse across runs without retaining prior
+input or output as model context.
+The parameter report exposes names, types and binding locations for scripts and
+recipe authors. An embedded log-context recipe puts the same workflow on the
+installed command line for everyday troubleshooting. Definition export lets a
+team copy that recipe and edit its defaults while keeping the parameter bindings.
+The existing application error and HTTP 5xx recipes accept optional field paths
+and a group limit, which lets teams use the built-ins across log schemas.

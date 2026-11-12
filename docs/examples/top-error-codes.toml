@@ -1,14 +1,16 @@
 # Rank exact ERROR records by string /error/code. Equal counts retain first-seen order.
-version = 1
+version = 2
 
 [[steps]]
 operation = "jsonl-where"
 pointer = "/level"
 equals = "ERROR"
+bind = { pointer = "level_pointer" }
 
 [[steps]]
 operation = "jsonl-count-by"
 pointer = "/error/code"
+bind = { pointer = "code_pointer" }
 
 [[steps]]
 operation = "jsonl-sort-int"
@@ -18,3 +20,4 @@ reverse = true
 [[steps]]
 operation = "lines-head"
 lines = 20
+bind = { lines = "limit" }

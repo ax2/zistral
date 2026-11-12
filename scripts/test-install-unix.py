@@ -103,7 +103,7 @@ def delivery(binary, scripts):
     smoke = subprocess.run([str(binary), '--count'], input=b'hello world\n',
                            capture_output=True, check=True, timeout=20)
     assert json.loads(smoke.stdout)['words'] == 2 and not smoke.stderr, 'installed pipe count failed'
-    expected = [('test_pre_sharing_delivery.py', 8), ('test_table_preparation_delivery.py', 7),
+    expected = [('test_pre_sharing_delivery.py', 8), ('test_table_preparation_delivery.py', 8),
                 ('test_service_setup_delivery.py', 40)]
     result = []
     for script, count in expected:
@@ -149,7 +149,7 @@ def verify(binary, dist, target, baseline_assets=None):
             assert invoke([portable, '--version']).stdout.decode().strip() == version_text
             portable_reports = delivery(portable, scripts)
             link_reports.append(configuration_links(portable))
-            checks.append('portable archive: exact members, executable bytes/mode, Unicode path and all8+7+40 workflow checks')
+            checks.append('portable archive: exact members, executable bytes/mode, Unicode path and workflow checks')
         if baseline:
             attempted = True
             if platform == 'linux':
@@ -177,7 +177,7 @@ def verify(binary, dist, target, baseline_assets=None):
             native_reports.append(delivery(installed, scripts))
             link_reports.append(configuration_links(installed))
             assert config.read_bytes() == sentinel and config.stat().st_mode & 0o777 == 0o600, 'model configuration changed during install/upgrade'
-        checks.append('native install/reinstall: exact build bytes and all8+7+40 workflows twice')
+        checks.append('native install/reinstall: exact build bytes and workflow checks on both installs')
         if baseline:
             checks.append('pinned published release to candidate: exact old/new executable digests and unchanged complete legacy configuration')
     finally:

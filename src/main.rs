@@ -68,7 +68,7 @@ pub struct Cli {
         help_heading = "Task presets"
     )]
     presets: Option<PathBuf>,
-    /// Set a literal preset variable; repeat for multiple NAME=VALUE pairs
+    /// Set a literal preset variable or version-2 data recipe parameter; repeat NAME=VALUE
     #[arg(long = "var", global = true, help_heading = "Task presets")]
     vars: Vec<String>,
     /// Model identifier, overrides configuration
@@ -237,12 +237,18 @@ enum Commands {
         /// Chain a native operation; repeat in execution order (lines-head:N, lines-tail:N, sort:reverse, json-redact:/path, jsonl-redact:/path, json-select:/path, jsonl-select:/path, jsonl-dedupe:/path, jsonl-sort:/path, jsonl-sort-int:/path, jsonl-count-by:/path and line filters are supported)
         #[arg(long = "step", conflicts_with = "recipe")]
         steps: Vec<String>,
-        /// Read a versioned TOML recipe file or a qualified builtin:NAME reference
+        /// Read a TOML recipe file or builtin:NAME; version 2 accepts --var NAME=VALUE
         #[arg(long)]
         recipe: Option<PathBuf>,
         /// Validate and export a reusable TOML plan without reading data or running steps
         #[arg(long)]
         show_plan: bool,
+        /// List declared parameters as JSON without reading input or resolving a plan
+        #[arg(long, requires = "recipe", conflicts_with_all = ["list_recipes", "show_plan"])]
+        list_parameters: bool,
+        /// Export the TOML definition with its original parameter bindings and defaults
+        #[arg(long, requires = "recipe", conflicts_with_all = ["list_recipes", "list_parameters", "show_plan"])]
+        export_recipe: bool,
         /// List embedded native recipes offline, without reading stdin or model settings
         #[arg(long, conflicts_with_all = ["operation", "steps", "recipe", "show_plan", "reverse", "if_present", "pointer", "fields", "field_defaults", "contains", "context", "equals", "at_least", "at_most", "lines"])]
         list_recipes: bool,
@@ -449,11 +455,13 @@ fn run(mut cli: Cli) -> Result<()> {
         steps,
         recipe,
         show_plan,
+        list_parameters,
+        export_recipe,
         list_recipes,
     }) = &cli.command
     {
         if cli.preset.is_some()
-            || !cli.vars.is_empty()
+            || (!cli.vars.is_empty() && recipe.is_none())
             || cli.count
             || cli.select.is_some()
             || cli.json
@@ -470,46 +478,68 @@ fn run(mut cli: Cli) -> Result<()> {
         if *show_plan && cli.input.is_some() {
             bail!("--show-plan does not read data; omit --input to preview or export the plan");
         }
-        let single = operation
-            .map(|operation| -> Result<transforms::Step> {
-                Ok(transforms::Step {
-                    if_present: (*if_present).then_some(true),
-                    operation,
-                    reverse: *reverse,
-                    pointer: pointer.clone(),
-                    fields: projection::parse(fields, field_defaults)?,
-                    contains: contains.clone(),
-                    context: *context,
-                    equals: equals.clone(),
-                    at_least: at_least.clone(),
-                    at_most: at_most.clone(),
-                    lines: *lines,
-                })
-            })
-            .transpose()?;
-        let plan = if *list_recipes {
-            None
+        if *list_parameters && (cli.input.is_some() || !cli.vars.is_empty()) {
+            bail!("--list-parameters lists declarations; omit --input and --var");
+        }
+        if *export_recipe && (cli.input.is_some() || !cli.vars.is_empty()) {
+            bail!("--export-recipe copies the definition. Omit --input and --var");
+        }
+        let report = if *list_recipes {
+            Some(recipes::list())
+        } else if *list_parameters {
+            let recipe = recipe
+                .as_deref()
+                .context("--list-parameters requires --recipe")?;
+            Some(recipes::list_parameters(recipe)?)
+        } else if *export_recipe {
+            let recipe = recipe
+                .as_deref()
+                .context("--export-recipe requires --recipe")?;
+            Some(recipes::export_recipe(recipe)?)
         } else {
-            Some(recipes::Plan::prepare(single, steps, recipe.as_deref())?)
+            None
         };
-        let target = prepare_output(&cli)?;
-        let output = match plan {
-            Some(plan) if *show_plan => plan.render()?,
-            Some(plan) => plan.run(&read_input(&cli)?)?,
-            None => recipes::list(),
+        let (target, output) = if let Some(report) = report {
+            (prepare_output(&cli)?, report)
+        } else {
+            let single = operation
+                .map(|operation| -> Result<transforms::Step> {
+                    Ok(transforms::Step {
+                        if_present: (*if_present).then_some(true),
+                        operation,
+                        reverse: *reverse,
+                        pointer: pointer.clone(),
+                        fields: projection::parse(fields, field_defaults)?,
+                        contains: contains.clone(),
+                        context: *context,
+                        equals: equals.clone(),
+                        at_least: at_least.clone(),
+                        at_most: at_most.clone(),
+                        lines: *lines,
+                    })
+                })
+                .transpose()?;
+            let plan = recipes::Plan::prepare(single, steps, recipe.as_deref(), &cli.vars)?;
+            let target = prepare_output(&cli)?;
+            let output = if *show_plan {
+                plan.render()?
+            } else {
+                plan.run(&read_input(&cli)?)?
+            };
+            (target, output)
         };
         if let Some(target) = target {
             return save_output(
                 &output,
                 target,
                 &cli,
-                !output.is_empty() && !output.ends_with('\n'),
+                !*export_recipe && !output.is_empty() && !output.ends_with('\n'),
             );
         }
         return if output.is_empty() {
             Ok(())
         } else {
-            write_output(&output)
+            write_stdout(&output, !*export_recipe)
         };
     }
     if project::enabled(&cli) && !cli.preview {
@@ -555,7 +585,9 @@ fn run(mut cli: Cli) -> Result<()> {
         return write_output(&output);
     }
     if cli.command.is_some() && !cli.vars.is_empty() {
-        bail!("--var is only supported for preset tasks and zi presets render");
+        bail!(
+            "--var is supported for preset tasks, presets render/export and version-2 data recipes"
+        );
     }
     if let Some(command) = &cli.command {
         if !matches!(command, Commands::Config { .. }) {
@@ -957,9 +989,13 @@ fn session(cli: &mut Cli) -> Result<()> {
 }
 
 fn write_output(output: &str) -> Result<()> {
+    write_stdout(output, true)
+}
+
+fn write_stdout(output: &str, append_missing_newline: bool) -> Result<()> {
     let mut stdout = io::stdout().lock();
     stdout.write_all(output.as_bytes())?;
-    if !output.ends_with('\n') {
+    if append_missing_newline && !output.ends_with('\n') {
         stdout.write_all(b"\n")?;
     }
     stdout.flush()?;

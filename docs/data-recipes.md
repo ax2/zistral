@@ -22,6 +22,7 @@ zi data --recipe recent.toml -i events.jsonl
 | `builtin:top-error-codes` (v0.34.0) | Keep exact `ERROR` levels, rank string `/error/code` counts, emit 20 groups as JSONL. |
 | `builtin:top-http-5xx-codes` (v0.34.0) | Rank string `/error/code` values from integer `/status` values 500–599. Skip absent paths explicitly. |
 | `builtin:recent-unique-events` | Keep first string `/id`, stably sort string `/time` descending, take first 20 records as JSONL. |
+| `builtin:log-context` (development) | Keep lines around a literal match supplied as `--var needle=VALUE`, then take the last 20 retained lines by default. |
 
 去重保留首条，不会自动选取同一 ID 的最新记录。时间只做字符串排序，不解析日期；应先统一
 格式与时区。原始计数分组按首次出现顺序输出；top-severity-counts 按整数频次倒序排列，同频仍按首次出现顺序。缺失、重复歧义或非字符串字段会使整次处理失败，
@@ -54,6 +55,14 @@ zi data --recipe error-report.toml -i events.jsonl
 前 20 组，同频保留首次出现的顺序。所有记录都需要有 `/level`，存在但不是字符串的级别不匹配。
 只有命中记录需要字符串 `/error/code`。无效的 Unicode 字符串即使出现在未匹配的记录中也会报错。
 没有匹配时输出为空。导出后可更改级别、字段路径或条数，再运行自己的配方。
+
+开发中的版本支持给该配方传入可选的 `level_pointer`、`code_pointer` 和
+`limit`。例如，级别存在 `/event/severity`、错误码存在 `/fault/id` 时：
+
+```sh
+zi data --recipe builtin:top-error-codes --var level_pointer=/event/severity --var code_pointer=/fault/id --var limit=5 -i events.jsonl
+```
+
 日志结构混杂时，可以在导出的第一个 `jsonl-where` 步骤显式加上
 `if_present = true`，只跳过级别路径缺失的有效记录。如果旧日志有级别却缺错误码，
 也可以给第二个 `jsonl-count-by` 步骤单独启用该选项。存在但不是字符串的错误码仍会报错。
@@ -88,6 +97,14 @@ zi data --recipe service-errors.toml -i requests.jsonl
 整次运行失败。报告按频次降序，最多 20 组，同频按首次出现顺序。导出的四个步骤可以
 分别调整路径、缺字段规则、阈值和条数。配方源文件见
 [top-http-5xx-codes.toml](examples/top-http-5xx-codes.toml)。
+
+开发中的版本支持用 `status_pointer`、`code_pointer` 和 `limit` 适配字段路径与
+条数。用 `--list-parameters` 查询名称。HTTP 范围固定为 500 到 599。
+
+```sh
+zi data --list-parameters --recipe builtin:top-http-5xx-codes
+zi data --recipe builtin:top-http-5xx-codes --var status_pointer=/response/status --var code_pointer=/fault/id --var limit=5 -i requests.jsonl
+```
 
 如果应用的文本日志也记录了 `TIMEOUT`，可以用字面匹配保留附近的堆栈：
 
@@ -137,7 +154,7 @@ and `--recipe`; pipeline direction belongs to its individual step, not a global 
 The entire recipe and all step options are checked before opening the data input or
 preparing its output. Unknown fields and unsupported versions/operations fail. A recipe
 does not name input/output paths; use `-i` and `-o` explicitly. No recursive includes,
-variables, shell commands, expressions, implicit project discovery or model requests.
+shell commands, expressions, implicit project discovery or model requests.
 Definitions are not sent to models and do not add model tools or project permissions.
 
 Only the final result reaches stdout or `-o`. A later JSON/type/size failure exits nonzero,
@@ -156,6 +173,88 @@ is zero bytes. JSON formatting preserves numeric/string tokens, key order and re
 
 配方文件是用户维护的步骤定义，不是会话、记忆或脚本引擎。团队可以将它纳入版本控制、审阅和
 复用；没有读取过往任务、推测偏好或保存输入数据的行为。
+
+## Pass parameters to a recipe / 每次运行传入参数（开发中）
+
+When the steps stay the same and only a match value or a line count changes,
+save a version-2 recipe and use `--var NAME=VALUE`. The
+[log-context example](examples/log-context.toml) keeps lines near the specified
+substring, then selects the last part of that filtered output.
+
+```toml
+version = 2
+
+[[steps]]
+operation = "lines-include"
+context = 1
+bind = { contains = "needle", context = "nearby" }
+
+[[steps]]
+operation = "lines-tail"
+lines = 20
+bind = { lines = "limit" }
+```
+
+```sh
+cat app.log | zi data --recipe log-context.toml --var needle=TIMEOUT
+zi data --recipe log-context.toml --var needle=DENIED --var nearby=2 --var limit=10 -i app.log
+zi data --show-plan --recipe log-context.toml --var needle=TIMEOUT -o resolved.toml
+```
+
+`bind` maps a step field to a parameter name. A literal value in the same step
+is the fallback for that field. In this example `needle` is required, while
+`nearby` and `limit` default to 1 and 20. Bindings accept `pointer`, `contains`,
+`equals`, `at_least` and `at_most` as text, and `context` and `lines` as
+unsigned decimal counts. The resolved value still has to satisfy the operation's
+normal rules, including exact signed integer comparisons for JSONL filters.
+
+Names use 1–32 ASCII identifier characters and cannot be `input`. A recipe
+supports up to 16 distinct names. Repeat `--var` once per supplied name, with
+up to 4096 UTF-8 bytes per value. A name reused across steps must consistently
+bind text or consistently bind line counts. The CLI rejects unknown, duplicate
+and missing required values before it opens the input or prepares output.
+Version-1 recipes use literal values.
+
+参数替换只发生在标有 `bind` 的字段，写入的值按字面处理。导出的 `resolved.toml`
+是含本次参数值的版本 1 配方，适合复查或重跑；分享前应检查其中是否包含不宜公开的匹配词。
+
+Use the embedded `builtin:log-context` to run the example from any directory.
+It requires `needle` and accepts the same optional `nearby` and `limit` values
+as the file example.
+
+```sh
+zi data --list-parameters --recipe builtin:log-context
+cat app.log | zi data --recipe builtin:log-context --var needle=TIMEOUT --var nearby=2
+zi data --show-plan --recipe builtin:log-context --var needle=TIMEOUT -o resolved.toml
+```
+
+`--list-parameters` returns JSON for either a file or an embedded recipe.
+The report's `version` is 1 and `recipe_version` identifies the source format.
+Each name in `parameters` has a `type` of `text` or `line_count`, a
+`required` flag, and one-based `bindings` with the step number and field name.
+A name is required if any of its bindings has no fallback. The report omits
+literal values and shows an empty parameter object for a version-1 recipe.
+It reads only the definition and rejects `--input` and `--var`. Use
+`--show-plan` with the values you intend to supply to validate the resolved
+operations. You can save the parameter report with `-o`.
+
+## Copy a definition for your team / 复制并编辑配方
+
+```sh
+zi data --export-recipe --recipe builtin:log-context -o team-log.toml
+# Edit context or lines in team-log.toml to set your team's defaults.
+cat app.log | zi data --recipe team-log.toml --var needle=TIMEOUT
+```
+
+`--export-recipe` copies the selected TOML definition, including its version,
+bindings, defaults and comments. It accepts a file or a `builtin:` reference,
+checks the syntax and declarations, and preserves the source bytes. Export
+requires no parameter values. It rejects `--input` and `--var` and writes
+to stdout or the path selected with `-o`. The output file uses the usual
+no-overwrite rule unless you pass `--force`.
+
+用 `--export-recipe` 保存可继续传参的配方。用 `--show-plan` 和实际参数保存这一次
+执行所用的版本 1 计划。
 
 ## Inspect and export a plan before processing data / 先看计划，再处理数据
 
